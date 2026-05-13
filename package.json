@@ -39,7 +39,7 @@
     "@embroider/router": "3.0.6",
     "@glimmer/component": "2.1.1",
     "decorator-transforms": "2.3.2",
-    "ember-source": "6.10.1",
+    "ember-source": "7.0.0",
     "ember-strict-application-resolver": "0.1.1"
   },
   "devDependencies": {
@@ -56,7 +56,7 @@
     "@glint/template": "1.7.7",
     "@glint/tsserver-plugin": "2.4.0",
     "@nullvoxpopuli/eslint-configs": "5.5.0",
-    "@rollup/plugin-babel": "6.1.0",
+    "@rollup/plugin-babel": "7.0.0",
     "@types/qunit": "2.19.14",
     "babel-plugin-ember-template-compilation": "4.0.0",
     "concurrently": "9.2.1",
@@ -65,11 +65,11 @@
     "prettier": "3.8.3",
     "prettier-plugin-ember-template-tag": "2.1.6",
     "qunit": "2.25.0",
-    "qunit-dom": "3.5.0",
+    "qunit-dom": "3.5.1",
     "qunit-theme-ember": "1.0.0",
-    "testem": "3.17.0",
-    "typescript": "5.9.3",
-    "vite": "7.3.3"
+    "testem": "3.20.0",
+    "typescript": "6.0.3",
+    "vite": "8.0.12"
   },
   "engines": {
     "node": ">= 24"
