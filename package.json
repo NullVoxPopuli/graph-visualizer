@@ -4,7 +4,7 @@
   "private": true,
   "description": "Your Ember App's description here",
   "repository": "",
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "author": "",
   "type": "module",
   "imports": {
