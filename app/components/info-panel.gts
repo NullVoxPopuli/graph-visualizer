@@ -161,6 +161,26 @@ export default class InfoPanel extends Component {
     return out;
   }
 
+  /**
+   * Default to open when the section is short enough to scan at a glance;
+   * collapse otherwise so a node with hundreds of incoming edges doesn't
+   * push the rest of the panel off-screen. The user can click to toggle
+   * either way; we only set the initial state.
+   */
+  static readonly AUTO_OPEN_THRESHOLD = 20;
+
+  get inOpen(): boolean {
+    return this.inNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+  }
+
+  get outOpen(): boolean {
+    return this.outNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+  }
+
+  get cycleOpen(): boolean {
+    return this.cycleNodes.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+  }
+
   @action
   close(): void {
     this.viewState.selectedId = null;
@@ -200,74 +220,80 @@ export default class InfoPanel extends Component {
           </dl>
         {{/if}}
 
-        <h3 class="panel__subhead">in ({{this.inNeighbors.length}})</h3>
-        {{#if this.inNeighbors.length}}
-          <ul class="panel__neighbors">
-            {{#each this.inNeighbors as |entry|}}
-              <li>
-                <button
-                  type="button"
-                  class="panel__neighbor"
-                  title={{entry.id}}
-                  {{on "click" (fn this.selectNeighbor entry.id)}}
-                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                  {{on "mouseleave" this.unhoverNeighbor}}
-                >
-                  <span class="panel__neighbor-label">{{entry.label}}</span>
-                  <code class="panel__neighbor-id">{{entry.id}}</code>
-                </button>
-              </li>
-            {{/each}}
-          </ul>
-        {{else}}
-          <p class="panel__empty">No incoming edges.</p>
-        {{/if}}
+        <details class="panel__section" open={{this.inOpen}}>
+          <summary class="panel__subhead">in ({{this.inNeighbors.length}})</summary>
+          {{#if this.inNeighbors.length}}
+            <ul class="panel__neighbors">
+              {{#each this.inNeighbors as |entry|}}
+                <li>
+                  <button
+                    type="button"
+                    class="panel__neighbor"
+                    title={{entry.id}}
+                    {{on "click" (fn this.selectNeighbor entry.id)}}
+                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                    {{on "mouseleave" this.unhoverNeighbor}}
+                  >
+                    <span class="panel__neighbor-label">{{entry.label}}</span>
+                    <code class="panel__neighbor-id">{{entry.id}}</code>
+                  </button>
+                </li>
+              {{/each}}
+            </ul>
+          {{else}}
+            <p class="panel__empty">No incoming edges.</p>
+          {{/if}}
+        </details>
 
-        <h3 class="panel__subhead">out ({{this.outNeighbors.length}})</h3>
-        {{#if this.outNeighbors.length}}
-          <ul class="panel__neighbors">
-            {{#each this.outNeighbors as |entry|}}
-              <li>
-                <button
-                  type="button"
-                  class="panel__neighbor"
-                  title={{entry.id}}
-                  {{on "click" (fn this.selectNeighbor entry.id)}}
-                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                  {{on "mouseleave" this.unhoverNeighbor}}
-                >
-                  <span class="panel__neighbor-label">{{entry.label}}</span>
-                  <code class="panel__neighbor-id">{{entry.id}}</code>
-                </button>
-              </li>
-            {{/each}}
-          </ul>
-        {{else}}
-          <p class="panel__empty">No outgoing edges.</p>
-        {{/if}}
+        <details class="panel__section" open={{this.outOpen}}>
+          <summary class="panel__subhead">out ({{this.outNeighbors.length}})</summary>
+          {{#if this.outNeighbors.length}}
+            <ul class="panel__neighbors">
+              {{#each this.outNeighbors as |entry|}}
+                <li>
+                  <button
+                    type="button"
+                    class="panel__neighbor"
+                    title={{entry.id}}
+                    {{on "click" (fn this.selectNeighbor entry.id)}}
+                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                    {{on "mouseleave" this.unhoverNeighbor}}
+                  >
+                    <span class="panel__neighbor-label">{{entry.label}}</span>
+                    <code class="panel__neighbor-id">{{entry.id}}</code>
+                  </button>
+                </li>
+              {{/each}}
+            </ul>
+          {{else}}
+            <p class="panel__empty">No outgoing edges.</p>
+          {{/if}}
+        </details>
 
-        <h3 class="panel__subhead">cycle ({{this.cycleNodes.length}})</h3>
-        {{#if this.cycleNodes.length}}
-          <ol class="panel__neighbors panel__neighbors--ordered">
-            {{#each this.cycleNodes as |entry|}}
-              <li>
-                <button
-                  type="button"
-                  class="panel__neighbor"
-                  title={{entry.id}}
-                  {{on "click" (fn this.selectNeighbor entry.id)}}
-                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                  {{on "mouseleave" this.unhoverNeighbor}}
-                >
-                  <span class="panel__neighbor-label">{{entry.label}}</span>
-                  <code class="panel__neighbor-id">{{entry.id}}</code>
-                </button>
-              </li>
-            {{/each}}
-          </ol>
-        {{else}}
-          <p class="panel__empty">Not part of a cycle.</p>
-        {{/if}}
+        <details class="panel__section" open={{this.cycleOpen}}>
+          <summary class="panel__subhead">cycle ({{this.cycleNodes.length}})</summary>
+          {{#if this.cycleNodes.length}}
+            <ol class="panel__neighbors panel__neighbors--ordered">
+              {{#each this.cycleNodes as |entry|}}
+                <li>
+                  <button
+                    type="button"
+                    class="panel__neighbor"
+                    title={{entry.id}}
+                    {{on "click" (fn this.selectNeighbor entry.id)}}
+                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                    {{on "mouseleave" this.unhoverNeighbor}}
+                  >
+                    <span class="panel__neighbor-label">{{entry.label}}</span>
+                    <code class="panel__neighbor-id">{{entry.id}}</code>
+                  </button>
+                </li>
+              {{/each}}
+            </ol>
+          {{else}}
+            <p class="panel__empty">Not part of a cycle.</p>
+          {{/if}}
+        </details>
 
         {{#if this.metaEntries.length}}
           <h3 class="panel__subhead">meta</h3>

@@ -132,7 +132,7 @@ export default class VisualizerService extends Service {
     this.#lastNodeDistance = nodeDistance;
     this.#lastClusterDistance = clusterDistance;
     this.#lastProcessing = a.then(async (analysis) => {
-      const positions = await runLayout(analysis.graph, analysis.communities, {
+      const positions = await runLayout(analysis.graph, analysis.communities, analysis.radii, {
         repulsion,
         nodeDistance,
         clusterDistance,
@@ -237,6 +237,7 @@ async function runAnalyze(graph: LoadedGraph, resolution: number): Promise<Int32
 async function runLayout(
   graph: LoadedGraph,
   communities: Int32Array,
+  radii: Float32Array,
   params: { repulsion: number; nodeDistance: number; clusterDistance: number },
 ): Promise<Float32Array> {
   const worker = new Worker(new URL("../lib/layout.worker.ts", import.meta.url), {
@@ -249,6 +250,7 @@ async function runLayout(
       nodeCount: graph.ids.length,
       edges: graph.edgesFlat,
       communities,
+      radii,
       // The per-batch cluster spread used to amplify positions ~9x, which
       // dwarfed the spring/charge forces and meant the sliders had no
       // visible effect after auto-fit normalized the result.

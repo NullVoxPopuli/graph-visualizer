@@ -2,6 +2,7 @@
 import * as Comlink from "comlink";
 import {
   forceCenter,
+  forceCollide,
   forceLink,
   forceManyBody,
   forceSimulation,
@@ -18,6 +19,9 @@ export interface LayoutInit {
   nodeCount: number;
   edges: Int32Array;
   communities: Int32Array;
+  /** Display radius per node (world units). Drives `forceCollide` so bigger
+   *  nodes carve out proportionally more space and don't overlap small ones. */
+  radii: Float32Array;
   spreadFactor: number;
   repulsion: number;
   /** Equilibrium distance for edges that stay inside a single community. */
@@ -39,6 +43,7 @@ const layoutEngine = {
       nodeCount,
       edges,
       communities,
+      radii,
       spreadFactor,
       repulsion,
       nodeDistance,
@@ -76,8 +81,21 @@ const layoutEngine = {
       .force(
         "charge",
         forceManyBody<SimNode>()
-          .strength(-Math.abs(repulsion) * 6)
+          // Bigger nodes push their neighborhood out harder. `sqrt` so a
+          // single high-degree hub doesn't dominate the layout — degree 100
+          // is only ~3× degree 10 in repulsion, not 10×.
+          .strength((d) => -Math.abs(repulsion) * 6 * Math.sqrt(radii[d.id]! / 5))
           .theta(0.9),
+      )
+      // Hard-ish keep-out: no two nodes' bodies overlap. The radius factor
+      // adds a little breathing room past the visible body for incoming
+      // arrows and labels.
+      .force(
+        "collide",
+        forceCollide<SimNode>()
+          .radius((d) => radii[d.id]! * 1.5 + 2)
+          .strength(0.85)
+          .iterations(2),
       )
       .force(
         "intraLink",

@@ -191,14 +191,14 @@ export default class Controls extends Component<Signature> {
           edges
         </label>
         <label
-          title="Arrowhead at the source end of each edge — the node that listed the edge in its outgoing list."
+          title="Arrowhead at the source end of each edge — the node that listed the edge in its outgoing list. Off keeps the graph less busy."
         >
           <input
             type="checkbox"
             checked={{this.viewState.showArrows}}
             {{on "change" this.toggleArrows}}
           />
-          directions
+          arrows
         </label>
         <label>
           <input

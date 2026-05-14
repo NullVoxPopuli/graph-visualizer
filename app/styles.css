@@ -577,6 +577,43 @@ pre code {
   margin: 14px 0 4px;
 }
 
+.panel__section {
+  margin-top: 10px;
+}
+
+.panel__section > summary.panel__subhead {
+  margin: 0;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel__section > summary.panel__subhead::-webkit-details-marker {
+  display: none;
+}
+
+.panel__section > summary.panel__subhead::before {
+  content: "▶";
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--dim);
+  transition: transform 0.12s ease;
+}
+
+.panel__section[open] > summary.panel__subhead::before {
+  transform: rotate(90deg);
+}
+
+.panel__section[open] {
+  /* Reduce the gap between summary and the list when open so the rows
+     read as nested under the heading. */
+  padding-bottom: 4px;
+}
+
 .panel__stats,
 .panel__meta {
   display: grid;
