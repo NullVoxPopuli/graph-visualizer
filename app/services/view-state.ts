@@ -243,6 +243,51 @@ export default class ViewStateService extends Service {
   set clusterByLabel(v: boolean) {
     this.#setParam("labelCluster", v ? "1" : null);
   }
+
+  /**
+   * Cycles panel geometry, encoded as `left,top,width,height` in CSS px.
+   * `null` for any field means "use the default" (CSS-defined). The whole
+   * value drops out of the URL when nothing has been moved or resized.
+   */
+  get cyclesPanelGeometry(): PanelGeometry | null {
+    const raw = this.#queryParams["cyclesPanel"];
+
+    if (!raw) return null;
+
+    const parts = raw.split(",").map((s) => Number.parseFloat(s));
+
+    if (parts.length !== 4) return null;
+
+    const [left, top, width, height] = parts;
+
+    return {
+      left: Number.isFinite(left!) ? left! : null,
+      top: Number.isFinite(top!) ? top! : null,
+      width: Number.isFinite(width!) ? width! : null,
+      height: Number.isFinite(height!) ? height! : null,
+    };
+  }
+  set cyclesPanelGeometry(g: PanelGeometry | null) {
+    if (g === null) {
+      this.#setParam("cyclesPanel", null);
+
+      return;
+    }
+
+    // Round to integers — the panel never needs sub-pixel precision and
+    // it keeps the URL readable.
+    const fmt = (n: number | null): string => (n === null ? "" : `${Math.round(n)}`);
+    const serialized = [fmt(g.left), fmt(g.top), fmt(g.width), fmt(g.height)].join(",");
+
+    this.#setParam("cyclesPanel", serialized === ",,," ? null : serialized);
+  }
+}
+
+export interface PanelGeometry {
+  left: number | null;
+  top: number | null;
+  width: number | null;
+  height: number | null;
 }
 
 const EMPTY_SET: Set<number> = Object.freeze(new Set<number>());

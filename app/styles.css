@@ -807,6 +807,163 @@ pre code {
   pointer-events: none;
 }
 
+/* ---------- cycles panel ---------- */
+
+.cycles-panel {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  width: 280px;
+  /* Default to roughly half-screen — gets out of the way of everything
+     else until the user drags it. Manual resize (via the bottom-right
+     handle) overrides this with an inline height. */
+  height: 50vh;
+  min-width: 220px;
+  min-height: 120px;
+  max-width: 96vw;
+  max-height: 96vh;
+  background: var(--panel-soft);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 0 6px;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  z-index: 2;
+  /* `resize: both` puts a native drag handle in the bottom-right corner.
+     `overflow: hidden` here is what makes the resize handle appear; the
+     internal list does its own scrolling. */
+  resize: both;
+  overflow: hidden;
+}
+
+.cycles-panel__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.cycles-panel__titlebar:active {
+  cursor: grabbing;
+}
+
+.cycles-panel__grip {
+  color: var(--dim);
+  font-size: 14px;
+  letter-spacing: -1px;
+  line-height: 1;
+  /* Don't intercept the pointer — the whole titlebar is the drag target. */
+  pointer-events: none;
+}
+
+.cycles-panel__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.cycles-panel__count {
+  color: var(--fg);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.cycles-panel__list {
+  margin: 0;
+  padding: 6px 10px 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.cycles-panel__entry {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cycles-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 5px 8px;
+  cursor: pointer;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.cycles-panel__header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cycles-panel__entry-index {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cycles-panel__entry-summary {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cycles-panel__nodes {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cycles-panel__node {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  padding: 3px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cycles-panel__node:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cycles-panel__node.is-selected {
+  background: rgba(106, 167, 255, 0.14);
+  color: var(--accent);
+}
+
+.cycles-panel__node-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------- docs ---------- */
 
 .docs {

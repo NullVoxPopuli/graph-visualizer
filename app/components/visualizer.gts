@@ -13,6 +13,7 @@ import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { Renderer } from "#lib/renderer";
 
 import Controls from "./controls.gts";
+import CyclesPanel from "./cycles-panel.gts";
 import Hud from "./hud.gts";
 import InfoPanel from "./info-panel.gts";
 
@@ -792,6 +793,7 @@ export default class Visualizer extends Component {
     {{! these flicker out and back in while the layout worker reruns after }}
     {{! a slider change. Each child handles its own "not yet ready" state. }}
     <Controls @onResetView={{this.resetView}} />
+    <CyclesPanel />
     <InfoPanel />
     <Hud />
   </template>
