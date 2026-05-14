@@ -164,7 +164,7 @@ export default class Controls extends Component<Signature> {
         <button type="button" {{on "click" @onResetView}}>Reset view</button>
       </div>
       <p class="controls__hint">
-        drag: pan · wheel: zoom · click: select · right-click: clear
+        drag / wheel: pan · ctrl+wheel / pinch: zoom · click: select · right-click: clear
       </p>
     </div>
   </template>

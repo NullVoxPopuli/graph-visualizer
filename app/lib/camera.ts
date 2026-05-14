@@ -39,8 +39,13 @@ export class Camera {
       .filter((event: Event) => {
         if (event.type === "dblclick") return false;
 
-        const e = event as MouseEvent;
+        const e = event as MouseEvent & WheelEvent;
 
+        // Wheel without a modifier = trackpad two-finger drag (or plain
+        // mouse wheel) — handled as pan below, not by d3-zoom. Wheel WITH
+        // ctrl/meta (or pinch-zoom, which the browser also reports with
+        // ctrlKey=true) stays on the zoom path.
+        if (event.type === "wheel" && !e.ctrlKey && !e.metaKey) return false;
         if (e.ctrlKey && event.type !== "wheel") return false;
         if (event.type === "mousedown" && e.button !== 0 && e.button !== 1) return false;
 
@@ -57,7 +62,25 @@ export class Camera {
     this.behavior.on("end", fanout);
     this.selection.call(this.behavior);
     this.selection.on("dblclick.zoom", null);
+
+    canvas.addEventListener("wheel", this.#onWheelPan, { passive: false });
   }
+
+  // Trackpad two-finger drag (and plain mouse wheel) — translate the
+  // d3-zoom transform by the wheel delta. We can't go through `translateBy`
+  // because that expects pre-transform offsets; reach into the current
+  // transform and shift `t.x`/`t.y` by the delta directly.
+  #onWheelPan = (ev: WheelEvent): void => {
+    if (ev.ctrlKey || ev.metaKey) return;
+    ev.preventDefault();
+
+    const t = this.currentTransform();
+    // deltaMode 0 = pixels, 1 = lines (~16px), 2 = pages (~viewport).
+    const scale = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? this.height / this.dpr() : 1;
+    const shifted = t.translate(-ev.deltaX * scale / t.k, -ev.deltaY * scale / t.k);
+
+    this.behavior.transform(this.selection, shifted);
+  };
 
   resize(width: number, height: number): void {
     this.width = width;
@@ -107,6 +130,7 @@ export class Camera {
   destroy(): void {
     this.cancelAnim();
     this.selection.on(".zoom", null);
+    this.selection.node()?.removeEventListener("wheel", this.#onWheelPan);
     this.listeners.clear();
   }
 

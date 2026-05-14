@@ -434,11 +434,12 @@ export default class Visualizer extends Component {
         Layout failed.
       </div>
     {{/if}}
-    {{#if this.visualizer.isReady}}
-      <Controls @onResetView={{this.resetView}} />
-      <InfoPanel />
-      <Hud />
-    {{/if}}
+    {{! Render persistent UI unconditionally — gating on `isReady` makes }}
+    {{! these flicker out and back in while the layout worker reruns after }}
+    {{! a slider change. Each child handles its own "not yet ready" state. }}
+    <Controls @onResetView={{this.resetView}} />
+    <InfoPanel />
+    <Hud />
   </template>
 }
 
