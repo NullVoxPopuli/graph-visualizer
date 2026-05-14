@@ -15,6 +15,7 @@ export default class ApplicationRoute extends Route {
     h: { refreshModel: false },
     hidden: { refreshModel: false },
     hn: { refreshModel: false },
+    col: { refreshModel: false },
     sel: { refreshModel: false },
     r: { refreshModel: false },
     nd: { refreshModel: false },

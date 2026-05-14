@@ -57,6 +57,7 @@ export default class Visualizer extends Component {
   private lastShowHulls = false;
   private lastHiddenKey = "";
   private lastHiddenNodeKey = "";
+  private lastCollapsedKey = "";
   private lastSelectedId: string | null = null;
 
   /**
@@ -94,10 +95,12 @@ export default class Visualizer extends Component {
     canvas.addEventListener("pointermove", this.onPointerMove);
     canvas.addEventListener("pointerdown", this.onPointerDown);
     canvas.addEventListener("contextmenu", this.onContextMenu);
+    canvas.addEventListener("dblclick", this.onDblClick);
     this.cleanups.push(() => {
       canvas.removeEventListener("pointermove", this.onPointerMove);
       canvas.removeEventListener("pointerdown", this.onPointerDown);
       canvas.removeEventListener("contextmenu", this.onContextMenu);
+      canvas.removeEventListener("dblclick", this.onDblClick);
     });
 
     this.renderer.camera.onChange(() => {
@@ -136,6 +139,7 @@ export default class Visualizer extends Component {
     const showHulls = vs.showHulls;
     const hiddenKey = serializeHidden(vs.hiddenEdgeTypes);
     const hiddenNodeKey = serializeHidden(vs.hiddenNodeTypes);
+    const collapsedKey = serializeStringSet(vs.collapsedIds);
     const selectedId = vs.selectedId;
 
     if (showEdges !== this.lastShowEdges) {
@@ -158,8 +162,9 @@ export default class Visualizer extends Component {
       this.dirty = true;
     }
 
-    if (hiddenNodeKey !== this.lastHiddenNodeKey) {
+    if (hiddenNodeKey !== this.lastHiddenNodeKey || collapsedKey !== this.lastCollapsedKey) {
       this.lastHiddenNodeKey = hiddenNodeKey;
+      this.lastCollapsedKey = collapsedKey;
       this.rebuildHideNodeMask(scene);
       this.repackNodes(scene);
       this.repackEdges(scene);
@@ -175,8 +180,9 @@ export default class Visualizer extends Component {
 
   private rebuildHideNodeMask(scene: ProcessedScene): void {
     const hidden = this.viewState.hiddenNodeTypes;
+    const collapsedIds = this.viewState.collapsedIds;
 
-    if (hidden.size === 0) {
+    if (hidden.size === 0 && collapsedIds.size === 0) {
       this.hideNodeMask = null;
       this.effectiveRadii = null;
       this.nodeRemap = null;
@@ -185,12 +191,41 @@ export default class Visualizer extends Component {
       return;
     }
 
-    const { nodeTypeIds, edgesFlat } = scene.graph;
+    const { nodeTypeIds, edgesFlat, idToIndex } = scene.graph;
     const N = nodeTypeIds.length;
+
+    // Baseline visibility per node from the type filter.
+    const typeHidden = new Uint8Array(N);
+
+    for (let i = 0; i < N; i++) {
+      if (hidden.has(nodeTypeIds[i]!)) typeHidden[i] = 1;
+    }
+
+    // Direct outgoing targets of any node listed in `col` get their
+    // baseline flipped — collapse when they'd be visible, expand when the
+    // type filter would have hidden them. Multiple toggles targeting the
+    // same node still produce one flip (independent of how many parents
+    // toggled it, by design — predictable behavior beats vote-counting).
+    const invertTarget = new Uint8Array(N);
+
+    if (collapsedIds.size > 0) {
+      const collapsedIdxSet = new Uint8Array(N);
+
+      for (const id of collapsedIds) {
+        const idx = idToIndex.get(id);
+
+        if (idx !== undefined) collapsedIdxSet[idx] = 1;
+      }
+
+      for (let i = 0; i < edgesFlat.length; i += 2) {
+        if (collapsedIdxSet[edgesFlat[i]!] === 1) invertTarget[edgesFlat[i + 1]!]! = 1;
+      }
+    }
+
     const mask = new Uint8Array(N);
 
     for (let i = 0; i < N; i++) {
-      if (hidden.has(nodeTypeIds[i]!)) mask[i] = 1;
+      mask[i] = (typeHidden[i]! ^ invertTarget[i]!) as 0 | 1;
     }
 
     // Assign each hidden node an "owner" — its nearest visible predecessor,
@@ -495,6 +530,21 @@ export default class Visualizer extends Component {
     this.viewState.selectedId = null;
   };
 
+  onDblClick = (ev: MouseEvent): void => {
+    ev.preventDefault();
+    const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const sx = ev.clientX - rect.left;
+    const sy = ev.clientY - rect.top;
+    const idx = this.pickAt(sx, sy);
+
+    if (idx < 0) return;
+
+    const scene = this.visualizer.scene;
+
+    if (!scene) return;
+    this.viewState.toggleCollapsed(scene.graph.ids[idx]!);
+  };
+
   @action
   resetView(): void {
     const scene = this.visualizer.scene;
@@ -521,6 +571,7 @@ export default class Visualizer extends Component {
       // Rebuild the hide mask first — both repack calls below read it.
       this.rebuildHideNodeMask(scene);
       this.lastHiddenNodeKey = serializeHidden(this.viewState.hiddenNodeTypes);
+      this.lastCollapsedKey = serializeStringSet(this.viewState.collapsedIds);
       this.repackNodes(scene);
       this.repackEdges(scene);
       if (this.viewState.showHulls) this.repackHulls(scene);
@@ -584,4 +635,10 @@ function serializeHidden(set: Set<number>): string {
   if (set.size === 0) return "";
 
   return [...set].sort((a, b) => a - b).join(",");
+}
+
+function serializeStringSet(set: Set<string>): string {
+  if (set.size === 0) return "";
+
+  return [...set].sort().join(" ");
 }

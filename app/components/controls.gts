@@ -132,6 +132,15 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
+  clearCollapsed(): void {
+    this.viewState.clearCollapsed();
+  }
+
+  get collapsedCount(): number {
+    return this.viewState.collapsedIds.size;
+  }
+
+  @action
   setRepulsion(ev: Event): void {
     const v = Number.parseFloat((ev.target as HTMLInputElement).value);
 
@@ -249,6 +258,13 @@ export default class Controls extends Component<Signature> {
       </div>
       <div class="controls__row">
         <button type="button" {{on "click" @onResetView}}>Reset view</button>
+        {{#if this.collapsedCount}}
+          <button
+            type="button"
+            {{on "click" this.clearCollapsed}}
+            title="Reset all node-level expand / collapse toggles"
+          >Clear toggles ({{this.collapsedCount}})</button>
+        {{/if}}
       </div>
       <p class="controls__hint">
         drag / wheel: pan · ctrl+wheel / pinch: zoom · click: select · right-click: clear

@@ -95,6 +95,37 @@ export default class ViewStateService extends Service {
     this.#setParam("hn", serializeIntSet(toggleInSet(this.hiddenNodeTypes, id)));
   }
 
+  /**
+   * Per-node toggle: ids of nodes whose outgoing targets' visibility the
+   * user has flipped via double-click. The set composes with the type
+   * filter as XOR — a node listed here means each of its direct outgoing
+   * targets gets its `hiddenNodeTypes` baseline inverted. So with no type
+   * filter active it collapses, with `file` hidden it expands those files
+   * back, and toggling the same node twice returns to the baseline. Ids
+   * containing a literal `,` cannot round-trip through this URL encoding.
+   */
+  get collapsedIds(): Set<string> {
+    const raw = this.#queryParams["col"];
+
+    if (!raw) return EMPTY_STRING_SET;
+
+    return new Set(raw.split(",").filter((s) => s.length > 0));
+  }
+
+  toggleCollapsed(id: string): void {
+    const next = new Set(this.collapsedIds);
+
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    const serialized = next.size === 0 ? null : [...next].join(",");
+
+    this.#setParam("col", serialized);
+  }
+
+  clearCollapsed(): void {
+    this.#setParam("col", null);
+  }
+
   /** Selected node id as it appears in the input JSON (string form), or null. */
   get selectedId(): string | null {
     const v = this.#queryParams["sel"];
@@ -140,6 +171,7 @@ export default class ViewStateService extends Service {
 }
 
 const EMPTY_SET: Set<number> = Object.freeze(new Set<number>()) as Set<number>;
+const EMPTY_STRING_SET: Set<string> = Object.freeze(new Set<string>()) as Set<string>;
 
 function parseIntSet(raw: string | undefined | null): Set<number> {
   if (!raw) return EMPTY_SET;
