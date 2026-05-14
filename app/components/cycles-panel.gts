@@ -4,10 +4,13 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
-import { modifier } from "ember-modifier";
-
 import { buildContraction } from "#lib/contract";
 import { findAllCycles } from "#lib/cycle";
+import {
+  createApplyGeometryModifier,
+  createDragModifier,
+  createSizeObserverModifier,
+} from "#lib/floating-panel";
 import { computeRadii } from "#lib/pack";
 
 import type GraphService from "#services/graph";
@@ -102,172 +105,25 @@ export default class CyclesPanel extends Component {
   }
 
   // ---- window dragging + resize persistence ----
+  // Backed by `viewState.cyclesPanelGeometry`. The modifier factories
+  // capture `this` so each component instance writes to its own slot.
 
-  /**
-   * Wire pointer-based drag on the title bar. The actual position lives in
-   * the URL via `viewState.cyclesPanelGeometry`; this modifier just
-   * captures the gesture and writes the new (left, top) at pointermove.
-   * The size half is handled separately by `observePanelSize` reading the
-   * element's own CSS resize.
-   */
-  setupDrag = modifier((handle: HTMLElement) => {
-    let dragging: {
-      pointerId: number;
-      startX: number;
-      startY: number;
-      panelLeft: number;
-      panelTop: number;
-      panelWidth: number;
-      panelHeight: number;
-    } | null = null;
-
-    const panelEl = (): HTMLElement | null =>
-      handle.closest(".cycles-panel") as HTMLElement | null;
-
-    const onPointerDown = (ev: PointerEvent): void => {
-      if (ev.button !== 0) return;
-      // Let clicks on interactive children (close button, future menu
-      // bits) reach their own handlers instead of being captured for a
-      // drag.
-      const target = ev.target as HTMLElement | null;
-
-      if (target && target.closest("button, input, a, select, textarea")) return;
-
-      const panel = panelEl();
-
-      if (!panel) return;
-
-      const rect = panel.getBoundingClientRect();
-
-      dragging = {
-        pointerId: ev.pointerId,
-        startX: ev.clientX,
-        startY: ev.clientY,
-        panelLeft: rect.left,
-        panelTop: rect.top,
-        panelWidth: rect.width,
-        panelHeight: rect.height,
-      };
-      handle.setPointerCapture(ev.pointerId);
-      ev.preventDefault();
-    };
-
-    const onPointerMove = (ev: PointerEvent): void => {
-      if (!dragging || ev.pointerId !== dragging.pointerId) return;
-
-      const dx = ev.clientX - dragging.startX;
-      const dy = ev.clientY - dragging.startY;
-      // Clamp the title bar to stay visible — losing the drag handle
-      // entirely is a UX dead end.
-      const margin = 12;
-      const left = clamp(
-        dragging.panelLeft + dx,
-        margin - dragging.panelWidth + 80,
-        window.innerWidth - margin - 80,
-      );
-      const top = clamp(dragging.panelTop + dy, margin, window.innerHeight - margin - 24);
-
-      this.viewState.cyclesPanelGeometry = {
-        left,
-        top,
-        width: dragging.panelWidth,
-        height: dragging.panelHeight,
-      };
-    };
-
-    const onPointerUp = (ev: PointerEvent): void => {
-      if (!dragging || ev.pointerId !== dragging.pointerId) return;
-      handle.releasePointerCapture(dragging.pointerId);
-      dragging = null;
-    };
-
-    handle.addEventListener("pointerdown", onPointerDown);
-    handle.addEventListener("pointermove", onPointerMove);
-    handle.addEventListener("pointerup", onPointerUp);
-    handle.addEventListener("pointercancel", onPointerUp);
-
-    return () => {
-      handle.removeEventListener("pointerdown", onPointerDown);
-      handle.removeEventListener("pointermove", onPointerMove);
-      handle.removeEventListener("pointerup", onPointerUp);
-      handle.removeEventListener("pointercancel", onPointerUp);
-    };
+  setupDrag = createDragModifier({
+    panelSelector: ".cycles-panel",
+    get: () => this.viewState.cyclesPanelGeometry,
+    set: (g) => {
+      this.viewState.cyclesPanelGeometry = g;
+    },
   });
 
-  /**
-   * Apply the URL-backed geometry to the panel element. Setting `null` on
-   * a field falls back to whatever CSS provided (default bottom-left
-   * positioning + 50vh height), so a fresh URL still looks right.
-   */
-  applyGeometry = modifier((el: HTMLElement) => {
-    const g = this.viewState.cyclesPanelGeometry;
+  applyGeometry = createApplyGeometryModifier(() => this.viewState.cyclesPanelGeometry);
 
-    if (g === null) {
-      el.style.left = "";
-      el.style.top = "";
-      el.style.right = "";
-      el.style.bottom = "";
-      el.style.width = "";
-      el.style.height = "";
-
-      return;
-    }
-
-    if (g.left !== null && g.top !== null) {
-      el.style.left = `${g.left}px`;
-      el.style.top = `${g.top}px`;
-      el.style.right = "auto";
-      el.style.bottom = "auto";
-    }
-
-    if (g.width !== null) el.style.width = `${g.width}px`;
-    if (g.height !== null) el.style.height = `${g.height}px`;
-  });
-
-  /**
-   * Watch the user's native bottom-right resize handle. On change, commit
-   * the new width/height (alongside the current position) to the URL.
-   * We compare against the last-committed value so this doesn't fight the
-   * incoming URL state in a loop.
-   */
-  observePanelSize = modifier((el: HTMLElement) => {
-    let lastW = 0;
-    let lastH = 0;
-
-    const obs = new ResizeObserver((entries) => {
-      const entry = entries[0];
-
-      if (!entry) return;
-
-      const rect = el.getBoundingClientRect();
-      const w = Math.round(rect.width);
-      const h = Math.round(rect.height);
-
-      if (w === lastW && h === lastH) return;
-      lastW = w;
-      lastH = h;
-
-      const current = this.viewState.cyclesPanelGeometry;
-      // Only persist after the user has actually grabbed the handle — we
-      // know they did once the URL already has geometry OR the size
-      // differs from the CSS default.
-      const sameAsCurrent =
-        current !== null && current.width === w && current.height === h;
-
-      if (sameAsCurrent) return;
-
-      this.viewState.cyclesPanelGeometry = {
-        left: current?.left ?? rect.left,
-        top: current?.top ?? rect.top,
-        width: w,
-        height: h,
-      };
-    });
-
-    obs.observe(el);
-
-    return () => obs.disconnect();
-  });
+  observePanelSize = createSizeObserverModifier(
+    () => this.viewState.cyclesPanelGeometry,
+    (g) => {
+      this.viewState.cyclesPanelGeometry = g;
+    },
+  );
 
   <template>
     {{#if (and this.cycles.length this.viewState.cyclesPanelOpen)}}
@@ -343,10 +199,4 @@ function eq(a: unknown, b: unknown): boolean {
 
 function notEq(a: unknown, b: unknown): boolean {
   return a !== b;
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  if (hi < lo) return lo;
-
-  return v < lo ? lo : v > hi ? hi : v;
 }

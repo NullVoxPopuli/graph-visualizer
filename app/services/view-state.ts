@@ -1,6 +1,7 @@
 import Service, { service } from "@ember/service";
 
 import type RouterService from "@ember/routing/router-service";
+import type { PanelGeometry } from "#lib/floating-panel";
 
 // Values are strings when set, null when explicitly cleared. We keep cleared
 // keys in the bag so the next `transitionTo` removes them from the URL —
@@ -274,49 +275,53 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Info panel geometry, encoded the same way as `cyclesPanel`.
+   */
+  get infoPanelGeometry(): PanelGeometry | null {
+    return parsePanelGeometry(this.#queryParams["infoPanel"]);
+  }
+  set infoPanelGeometry(g: PanelGeometry | null) {
+    this.#setParam("infoPanel", serializePanelGeometry(g));
+  }
+
+  /**
    * Cycles panel geometry, encoded as `left,top,width,height` in CSS px.
    * `null` for any field means "use the default" (CSS-defined). The whole
    * value drops out of the URL when nothing has been moved or resized.
    */
   get cyclesPanelGeometry(): PanelGeometry | null {
-    const raw = this.#queryParams["cyclesPanel"];
-
-    if (!raw) return null;
-
-    const parts = raw.split(",").map((s) => Number.parseFloat(s));
-
-    if (parts.length !== 4) return null;
-
-    const [left, top, width, height] = parts;
-
-    return {
-      left: Number.isFinite(left!) ? left! : null,
-      top: Number.isFinite(top!) ? top! : null,
-      width: Number.isFinite(width!) ? width! : null,
-      height: Number.isFinite(height!) ? height! : null,
-    };
+    return parsePanelGeometry(this.#queryParams["cyclesPanel"]);
   }
   set cyclesPanelGeometry(g: PanelGeometry | null) {
-    if (g === null) {
-      this.#setParam("cyclesPanel", null);
-
-      return;
-    }
-
-    // Round to integers — the panel never needs sub-pixel precision and
-    // it keeps the URL readable.
-    const fmt = (n: number | null): string => (n === null ? "" : `${Math.round(n)}`);
-    const serialized = [fmt(g.left), fmt(g.top), fmt(g.width), fmt(g.height)].join(",");
-
-    this.#setParam("cyclesPanel", serialized === ",,," ? null : serialized);
+    this.#setParam("cyclesPanel", serializePanelGeometry(g));
   }
 }
 
-export interface PanelGeometry {
-  left: number | null;
-  top: number | null;
-  width: number | null;
-  height: number | null;
+function parsePanelGeometry(raw: string | undefined | null): PanelGeometry | null {
+  if (!raw) return null;
+
+  const parts = raw.split(",").map((s) => Number.parseFloat(s));
+
+  if (parts.length !== 4) return null;
+
+  const [left, top, width, height] = parts;
+
+  return {
+    left: Number.isFinite(left!) ? left! : null,
+    top: Number.isFinite(top!) ? top! : null,
+    width: Number.isFinite(width!) ? width! : null,
+    height: Number.isFinite(height!) ? height! : null,
+  };
+}
+
+function serializePanelGeometry(g: PanelGeometry | null): string | null {
+  if (g === null) return null;
+  // Round to integers — sub-pixel precision is wasted on a 1px-grid panel
+  // and the URL stays readable.
+  const fmt = (n: number | null): string => (n === null ? "" : `${Math.round(n)}`);
+  const serialized = [fmt(g.left), fmt(g.top), fmt(g.width), fmt(g.height)].join(",");
+
+  return serialized === ",,," ? null : serialized;
 }
 
 const EMPTY_SET: Set<number> = Object.freeze(new Set<number>());

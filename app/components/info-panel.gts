@@ -6,6 +6,11 @@ import { service } from "@ember/service";
 
 import { buildContraction } from "#lib/contract";
 import { findShortestCycleThrough } from "#lib/cycle";
+import {
+  createApplyGeometryModifier,
+  createDragModifier,
+  createSizeObserverModifier,
+} from "#lib/floating-panel";
 import { computeRadii } from "#lib/pack";
 
 import type GraphService from "#services/graph";
@@ -236,6 +241,25 @@ export default class InfoPanel extends Component {
     this.viewState.selectedId = null;
   }
 
+  // ---- drag + resize ----
+
+  setupDrag = createDragModifier({
+    panelSelector: ".panel",
+    get: () => this.viewState.infoPanelGeometry,
+    set: (g) => {
+      this.viewState.infoPanelGeometry = g;
+    },
+  });
+
+  applyGeometry = createApplyGeometryModifier(() => this.viewState.infoPanelGeometry);
+
+  observePanelSize = createSizeObserverModifier(
+    () => this.viewState.infoPanelGeometry,
+    (g) => {
+      this.viewState.infoPanelGeometry = g;
+    },
+  );
+
   @action
   selectNeighbor(id: string): void {
     this.viewState.selectedId = id;
@@ -273,8 +297,8 @@ export default class InfoPanel extends Component {
 
   <template>
     {{#if this.info}}
-      <aside class="panel">
-        <div class="panel__head">
+      <aside class="panel" {{this.applyGeometry}} {{this.observePanelSize}}>
+        <div class="panel__head" {{this.setupDrag}}>
           <h2 class="panel__title">{{this.info.label}}</h2>
           <button
             type="button"
@@ -283,6 +307,7 @@ export default class InfoPanel extends Component {
             aria-label="Close"
           >×</button>
         </div>
+        <div class="panel__body">
         <p class="panel__id">id: <code>{{this.info.id}}</code></p>
         {{#if this.info.type}}
           <dl class="panel__stats">
@@ -405,6 +430,7 @@ export default class InfoPanel extends Component {
             {{/each}}
           </dl>
         {{/if}}
+        </div>
       </aside>
     {{/if}}
   </template>
