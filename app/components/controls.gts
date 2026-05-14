@@ -7,6 +7,13 @@ import { service } from "@ember/service";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 
+const REPULSION_MIN = 1;
+const REPULSION_MAX = 30;
+const REPULSION_STEP = 0.5;
+const SPRING_MIN = 10;
+const SPRING_MAX = 300;
+const SPRING_STEP = 5;
+
 interface EdgeTypeRow {
   id: number;
   name: string;
@@ -74,16 +81,37 @@ export default class Controls extends Component<Signature> {
     this.viewState.toggleHiddenEdgeType(id);
   }
 
+  @action
+  setRepulsion(ev: Event): void {
+    const v = Number.parseFloat((ev.target as HTMLInputElement).value);
+
+    if (Number.isFinite(v)) this.viewState.repulsion = v;
+  }
+
+  @action
+  setSpringLength(ev: Event): void {
+    const v = Number.parseFloat((ev.target as HTMLInputElement).value);
+
+    if (Number.isFinite(v)) this.viewState.springLength = v;
+  }
+
   <template>
     <div class="controls">
-      <strong class="controls__title">Graph Visualizer</strong>
       <div class="controls__row">
         <label>
-          <input type="checkbox" checked={{this.viewState.showEdges}} {{on "change" this.toggleEdges}} />
+          <input
+            type="checkbox"
+            checked={{this.viewState.showEdges}}
+            {{on "change" this.toggleEdges}}
+          />
           edges
         </label>
         <label>
-          <input type="checkbox" checked={{this.viewState.showHulls}} {{on "change" this.toggleHulls}} />
+          <input
+            type="checkbox"
+            checked={{this.viewState.showHulls}}
+            {{on "change" this.toggleHulls}}
+          />
           cluster hulls
         </label>
       </div>
@@ -105,6 +133,33 @@ export default class Controls extends Component<Signature> {
           </div>
         </div>
       {{/if}}
+      <div class="controls__section">
+        <div class="controls__section-label">layout</div>
+        <label class="controls__slider">
+          <span class="controls__slider-name">edge length</span>
+          <input
+            type="range"
+            min={{SPRING_MIN}}
+            max={{SPRING_MAX}}
+            step={{SPRING_STEP}}
+            value={{this.viewState.springLength}}
+            {{on "change" this.setSpringLength}}
+          />
+          <span class="controls__slider-value">{{this.viewState.springLength}}</span>
+        </label>
+        <label class="controls__slider">
+          <span class="controls__slider-name">repulsion</span>
+          <input
+            type="range"
+            min={{REPULSION_MIN}}
+            max={{REPULSION_MAX}}
+            step={{REPULSION_STEP}}
+            value={{this.viewState.repulsion}}
+            {{on "change" this.setRepulsion}}
+          />
+          <span class="controls__slider-value">{{this.viewState.repulsion}}</span>
+        </label>
+      </div>
       <div class="controls__row">
         <button type="button" {{on "click" @onResetView}}>Reset view</button>
       </div>

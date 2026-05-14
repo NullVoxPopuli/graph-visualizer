@@ -380,6 +380,36 @@ pre code {
   font-size: 11px;
 }
 
+.controls__slider {
+  display: grid;
+  grid-template-columns: 78px 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+}
+
+.controls__slider-name {
+  color: var(--fg);
+}
+
+.controls__slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.controls__slider-value {
+  color: var(--dim);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 11px;
+  text-align: right;
+}
+
 .panel {
   position: fixed;
   right: 0;

@@ -58,14 +58,12 @@ export default class Visualizer extends Component {
   private lastHiddenKey = "";
   private lastSelectedId: string | null = null;
 
+  // ember-modifier auto-tracks reads inside the function body, so any tracked
+  // value read here would tear down + re-run the renderer on every change.
+  // Keep this body free of viewState/visualizer reads — the rAF loop and
+  // `reactToScene` handle reactive sync against the renderer.
   setupCanvas = modifier((canvas: HTMLCanvasElement) => {
     this.renderer = new Renderer(canvas);
-    this.renderer.setShowEdges(this.viewState.showEdges);
-    this.renderer.setShowHulls(this.viewState.showHulls);
-    this.lastShowEdges = this.viewState.showEdges;
-    this.lastShowHulls = this.viewState.showHulls;
-    this.lastHiddenKey = serializeHidden(this.viewState.hiddenEdgeTypes);
-    this.lastSelectedId = this.viewState.selectedId;
     this.handleResize();
     window.addEventListener("resize", this.resizeHandler);
 
@@ -82,7 +80,12 @@ export default class Visualizer extends Component {
       this.dirty = true;
     });
 
-    this.loop();
+    // Start the rAF loop via requestAnimationFrame rather than calling
+    // `loop()` directly. The loop body reads tracked state (scene, viewState
+    // getters); invoking it synchronously inside the modifier would tie the
+    // modifier's lifetime to those tracked tags and tear the renderer down
+    // on every URL change.
+    this.rafHandle = requestAnimationFrame(this.loop);
 
     return () => this.teardown();
   });
@@ -345,11 +348,15 @@ export default class Visualizer extends Component {
     const sy = ev.clientY - rect.top;
     const idx = this.pickAt(sx, sy);
 
+    // Only act on a node hit. Empty-space left-clicks pass through so
+    // d3-zoom can pan; clearing the selection is right-click or the close
+    // button.
+    if (idx < 0) return;
     if (idx === this.selectedIdx) return;
 
     const scene = this.visualizer.scene;
 
-    this.viewState.selectedId = idx >= 0 && scene ? scene.graph.ids[idx]! : null;
+    if (scene) this.viewState.selectedId = scene.graph.ids[idx]!;
   };
 
   onContextMenu = (ev: MouseEvent): void => {

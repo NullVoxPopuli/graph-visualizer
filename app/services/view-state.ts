@@ -1,5 +1,12 @@
-import Service from "@ember/service";
-import { tracked } from "@glimmer/tracking";
+import Service, { service } from "@ember/service";
+
+import type RouterService from "@ember/routing/router-service";
+
+// Values are strings when set, null when explicitly cleared. We keep cleared
+// keys in the bag so the next `transitionTo` removes them from the URL —
+// Ember leaves omitted keys alone, so a plain `delete` wouldn't actually
+// strip them from `location.search`.
+type QPs = Record<string, string | null>;
 
 /**
  * Single source of truth for UI state that is meaningful to remember across
@@ -9,91 +16,69 @@ import { tracked } from "@glimmer/tracking";
  *   h       — show cluster hulls (1/0, default 0)
  *   hidden  — comma-separated edge type ids the user has filtered out
  *   sel     — selected node id (string from the input JSON)
+ *   r       — repulsion force   (number, default 6)
+ *   s       — spring/edge length (number, default 60)
  *
- * The URL is the canonical representation. Reads parse `location.search`;
- * writes go through `history.replaceState`. A single `revision` tick is
- * bumped on each write so Glimmer can invalidate any getter that read this
- * service.
- *
- * This is intentionally a thin alias layer over query params — there are no
- * per-field tracked properties to keep in sync with the URL, and the URL
- * round-trips cleanly through copy/paste and the back button (well: it
- * would, if we used `pushState`; we use `replaceState` so back doesn't
- * traverse every toggle).
- *
- * Hover state, in-flight worker state, and computed counts/ticks don't
- * belong here — they're per-session and not user-meaningful.
+ * Reads come from `router.currentRoute.queryParams`. Writes go through
+ * `router.transitionTo({ queryParams })`, batched on rAF so a flurry of
+ * rapid setters (e.g. clicking through nodes) coalesces into a single
+ * transition — multiple in-flight transitions cancel each other and the
+ * URL ends up out of sync with what the user actually picked.
  */
+export const DEFAULT_REPULSION = 6;
+export const DEFAULT_SPRING_LENGTH = 60;
+
 export default class ViewStateService extends Service {
-  /**
-   * Bumped on every write + on `popstate`. Any getter that reads this
-   * becomes reactive without per-field `@tracked`. Consumers shouldn't
-   * touch this directly.
-   */
-  @tracked private revision = 0;
+  @service declare router: RouterService;
 
-  constructor(...args: ConstructorParameters<typeof Service>) {
-    super(...args);
-    window.addEventListener("popstate", this.onPopState);
+  // Reads merge the router's committed query params with any not-yet-flushed
+  // writes from `#pending`, so two rapid toggles read the just-set value
+  // instead of the (stale) value the router still has.
+  get #queryParams(): QPs {
+    const committed = (this.router.currentRoute?.queryParams ?? {}) as QPs;
+
+    return this.#pending === null ? committed : { ...committed, ...this.#pending };
   }
 
-  willDestroy(): void {
-    super.willDestroy();
-    window.removeEventListener("popstate", this.onPopState);
-  }
+  #frame: number | null = null;
+  #pending: QPs | null = null;
 
-  private onPopState = (): void => {
-    this.revision++;
-  };
+  #setParam(key: string, value: string | null): void {
+    const next: QPs = { ...this.#queryParams };
 
-  // ---- raw param access
+    next[key] = value === null || value === "" ? null : value;
+    this.#pending = next;
 
-  private params(): URLSearchParams {
-    // Touch the revision so this read becomes reactive — Glimmer-tracked
-    // getters that delegate here re-fire when the URL changes.
-    this.revision;
+    if (this.#frame !== null) cancelAnimationFrame(this.#frame);
 
-    return new URLSearchParams(window.location.search);
-  }
+    this.#frame = requestAnimationFrame(() => {
+      const qps = this.#pending ?? {};
 
-  private write(mut: (p: URLSearchParams) => void): void {
-    const p = new URLSearchParams(window.location.search);
-
-    mut(p);
-
-    const qs = p.toString();
-    const url = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
-
-    window.history.replaceState(null, "", url);
-    this.revision++;
-  }
-
-  private setParam(key: string, value: string | null): void {
-    this.write((p) => {
-      if (value === null || value === "") p.delete(key);
-      else p.set(key, value);
+      this.#frame = null;
+      this.#pending = null;
+      void this.router.transitionTo({ queryParams: qps });
     });
   }
 
   // ---- typed aliases
 
   get showEdges(): boolean {
-    return this.params().get("e") !== "0";
+    return this.#queryParams["e"] !== "0";
   }
   set showEdges(v: boolean) {
     // Default true; only encode the off state.
-    this.setParam("e", v ? null : "0");
+    this.#setParam("e", v ? null : "0");
   }
 
   get showHulls(): boolean {
-    return this.params().get("h") === "1";
+    return this.#queryParams["h"] === "1";
   }
   set showHulls(v: boolean) {
-    this.setParam("h", v ? "1" : null);
+    this.#setParam("h", v ? "1" : null);
   }
 
   get hiddenEdgeTypes(): Set<number> {
-    const raw = this.params().get("hidden");
+    const raw = this.#queryParams["hidden"];
 
     if (!raw) return EMPTY_SET;
 
@@ -115,17 +100,39 @@ export default class ViewStateService extends Service {
     else next.add(id);
     const serialized = next.size === 0 ? null : [...next].sort((a, b) => a - b).join(",");
 
-    this.setParam("hidden", serialized);
+    this.#setParam("hidden", serialized);
   }
 
   /** Selected node id as it appears in the input JSON (string form), or null. */
   get selectedId(): string | null {
-    const v = this.params().get("sel");
+    const v = this.#queryParams["sel"];
 
     return v && v.length > 0 ? v : null;
   }
   set selectedId(v: string | null) {
-    this.setParam("sel", v);
+    this.#setParam("sel", v);
+  }
+
+  /** Repulsion force fed into the d3-force charge body. */
+  get repulsion(): number {
+    const v = this.#queryParams["r"];
+    const n = v === undefined ? NaN : Number.parseFloat(v);
+
+    return Number.isFinite(n) ? n : DEFAULT_REPULSION;
+  }
+  set repulsion(n: number) {
+    this.#setParam("r", n === DEFAULT_REPULSION ? null : String(n));
+  }
+
+  /** Target edge (spring) length fed into the d3-force link force. */
+  get springLength(): number {
+    const v = this.#queryParams["s"];
+    const n = v === undefined ? NaN : Number.parseFloat(v);
+
+    return Number.isFinite(n) ? n : DEFAULT_SPRING_LENGTH;
+  }
+  set springLength(n: number) {
+    this.#setParam("s", n === DEFAULT_SPRING_LENGTH ? null : String(n));
   }
 }
 

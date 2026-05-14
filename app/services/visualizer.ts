@@ -9,6 +9,14 @@ import type { AnalyzeEngine, AnalyzeInit } from "#lib/analyze.worker";
 import type { LayoutEngine, LayoutInit } from "#lib/layout.worker";
 import type { LoadedGraph } from "#lib/types";
 import type GraphService from "./graph";
+import type ViewStateService from "./view-state";
+
+interface Analysis {
+  graph: LoadedGraph;
+  communities: Int32Array;
+  communityCount: number;
+  radii: Float32Array;
+}
 
 /**
  * The result of running the heavy pipeline (community detection + force
@@ -39,17 +47,47 @@ export interface ProcessedScene {
  */
 export default class VisualizerService extends Service {
   @service declare graph: GraphService;
+  @service declare viewState: ViewStateService;
 
   /**
-   * The processing promise. Recomputed only when `graph.current` changes
-   * (via `@cached`), so re-reads during a render hit the same promise and
-   * `getPromiseState` cache.
+   * Community detection + radii. Depends only on the graph topology — the
+   * layout sliders shouldn't re-run Louvain.
+   */
+  @cached
+  get analysis(): Promise<Analysis> | null {
+    const g = this.graph.current;
+
+    return g ? runAnalysis(g) : null;
+  }
+
+  /**
+   * Full pipeline: analysis + layout. Recomputed when `graph.current`
+   * changes (via `@cached`) and when the layout sliders (repulsion, spring
+   * length) move — so adjusting them re-runs only the force simulation.
    */
   @cached
   get processing(): Promise<ProcessedScene> | null {
-    const g = this.graph.current;
+    const a = this.analysis;
 
-    return g ? processGraph(g) : null;
+    if (a === null) return null;
+
+    const repulsion = this.viewState.repulsion;
+    const springLength = this.viewState.springLength;
+
+    return a.then(async (analysis) => {
+      const positions = await runLayout(analysis.graph, analysis.communities, {
+        repulsion,
+        springLength,
+      });
+
+      return {
+        graph: analysis.graph,
+        positions,
+        communities: analysis.communities,
+        communityCount: analysis.communityCount,
+        radii: analysis.radii,
+      };
+    });
   }
 
   /** isLoading / error / resolved on the active processing promise. */
@@ -107,7 +145,11 @@ async function runAnalyze(graph: LoadedGraph): Promise<Int32Array> {
  * Run the d3-force layout worker to completion. Returns the final positions
  * buffer; intermediate ticks are no longer surfaced.
  */
-async function runLayout(graph: LoadedGraph, communities: Int32Array): Promise<Float32Array> {
+async function runLayout(
+  graph: LoadedGraph,
+  communities: Int32Array,
+  params: { repulsion: number; springLength: number },
+): Promise<Float32Array> {
   const worker = new Worker(new URL("../lib/layout.worker.ts", import.meta.url), {
     type: "module",
   });
@@ -119,8 +161,8 @@ async function runLayout(graph: LoadedGraph, communities: Int32Array): Promise<F
       edges: graph.edgesFlat,
       communities,
       spreadFactor: 1.2,
-      repulsion: 6,
-      springLength: 60,
+      repulsion: params.repulsion,
+      springLength: params.springLength,
       cohesion: 0.12,
     };
 
@@ -130,9 +172,8 @@ async function runLayout(graph: LoadedGraph, communities: Int32Array): Promise<F
   }
 }
 
-async function processGraph(graph: LoadedGraph): Promise<ProcessedScene> {
+async function runAnalysis(graph: LoadedGraph): Promise<Analysis> {
   const communities = await runAnalyze(graph);
-  const positions = await runLayout(graph, communities);
   const radii = computeRadii(graph.inDegree, graph.outDegree);
   const seen = new Set<number>();
 
@@ -140,7 +181,6 @@ async function processGraph(graph: LoadedGraph): Promise<ProcessedScene> {
 
   return {
     graph,
-    positions,
     communities,
     communityCount: seen.size,
     radii,
