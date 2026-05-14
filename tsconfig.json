@@ -7,6 +7,15 @@
       "@embroider/core/virtual",
       "vite/client",
       "@glint/ember-tsc/types"
-    ]
+    ],
+    "paths": {
+      "#app/*": ["./app/*"],
+      "#config": ["./app/config.ts"],
+      "#components/*": ["./app/components/*"],
+      "#services/*": ["./app/services/*"],
+      "#lib/*": ["./app/lib/*"],
+      "#test-helpers/*": ["./tests/helpers/*"],
+      "#utils/*": ["./app/utils/*"]
+    }
   }
 }

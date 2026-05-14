@@ -1,0 +1,145 @@
+/**
+ * 2D orthographic camera, driven by d3-zoom.
+ *
+ * Public state read by the renderer's shaders:
+ *   x, y        — world coords of the screen center
+ *   zoom        — device-px per world-unit
+ *   width/height — device-px canvas size
+ *
+ * d3-zoom is the input handler (mouse drag pan, wheel zoom, programmatic
+ * `transform` calls). We convert its `(k, t.x, t.y)` CSS-pixel transform
+ * into our (cx, cy, deviceZoom) and write into the public fields on every
+ * change.
+ */
+import { select, type Selection } from "d3-selection";
+import {
+  type D3ZoomEvent,
+  zoom as d3zoom,
+  type ZoomBehavior,
+  zoomIdentity,
+  type ZoomTransform,
+} from "d3-zoom";
+
+export class Camera {
+  x = 0;
+  y = 0;
+  zoom = 1;
+  width = 1;
+  height = 1;
+
+  private behavior: ZoomBehavior<HTMLCanvasElement, unknown>;
+  private selection: Selection<HTMLCanvasElement, unknown, null, undefined>;
+  private listeners = new Set<(ev: D3ZoomEvent<HTMLCanvasElement, unknown>) => void>();
+  private animFrame: number | null = null;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.selection = select(canvas);
+    this.behavior = d3zoom<HTMLCanvasElement, unknown>()
+      .scaleExtent([1e-9, 1e6])
+      .filter((event: Event) => {
+        if (event.type === "dblclick") return false;
+
+        const e = event as MouseEvent;
+
+        if (e.ctrlKey && event.type !== "wheel") return false;
+        if (event.type === "mousedown" && e.button !== 0 && e.button !== 1) return false;
+
+        return true;
+      });
+
+    const fanout = (event: D3ZoomEvent<HTMLCanvasElement, unknown>): void => {
+      if (event.type === "zoom") this.applyTransform(event.transform);
+      for (const fn of this.listeners) fn(event);
+    };
+
+    this.behavior.on("start", fanout);
+    this.behavior.on("zoom", fanout);
+    this.behavior.on("end", fanout);
+    this.selection.call(this.behavior);
+    this.selection.on("dblclick.zoom", null);
+  }
+
+  resize(width: number, height: number): void {
+    this.width = width;
+    this.height = height;
+    this.applyTransform(this.currentTransform());
+  }
+
+  onChange(fn: (ev: D3ZoomEvent<HTMLCanvasElement, unknown>) => void): () => void {
+    this.listeners.add(fn);
+
+    return () => {
+      this.listeners.delete(fn);
+    };
+  }
+
+  screenToWorld(sx: number, sy: number): [number, number] {
+    return [
+      (sx - this.width / 2) / this.zoom + this.x,
+      (sy - this.height / 2) / this.zoom + this.y,
+    ];
+  }
+
+  fit(minX: number, minY: number, maxX: number, maxY: number, pad = 0.08): void {
+    const w = Math.max(1e-6, maxX - minX);
+    const h = Math.max(1e-6, maxY - minY);
+    const zx = this.width / (w * (1 + pad));
+    const zy = this.height / (h * (1 + pad));
+    const z = Math.min(zx, zy);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    this.setView(cx, cy, z);
+  }
+
+  setView(cx: number, cy: number, deviceZoom: number): void {
+    this.cancelAnim();
+    this.behavior.transform(this.selection, this.transformFor(cx, cy, deviceZoom));
+  }
+
+  cancelAnim(): void {
+    if (this.animFrame !== null) {
+      cancelAnimationFrame(this.animFrame);
+      this.animFrame = null;
+    }
+  }
+
+  destroy(): void {
+    this.cancelAnim();
+    this.selection.on(".zoom", null);
+    this.listeners.clear();
+  }
+
+  private dpr(): number {
+    return window.devicePixelRatio || 1;
+  }
+
+  private currentTransform(): ZoomTransform {
+    return this.transformFor(this.x, this.y, this.zoom);
+  }
+
+  /**
+   * Convert centered (cx, cy, deviceZoom) → d3-zoom transform.
+   * d3-zoom uses CSS-pixel input: screenCss = world * k + t.{x,y}.
+   * We render with screenDev = world * deviceZoom + width/2 - cx*deviceZoom.
+   * So k = deviceZoom / dpr; t.x = (width/dpr)/2 - cx * k.
+   */
+  private transformFor(cx: number, cy: number, deviceZoom: number): ZoomTransform {
+    const dpr = this.dpr();
+    const k = deviceZoom / dpr;
+    const cssCenterX = this.width / 2 / dpr;
+    const cssCenterY = this.height / 2 / dpr;
+
+    return zoomIdentity.translate(cssCenterX - cx * k, cssCenterY - cy * k).scale(k);
+  }
+
+  private applyTransform(t: ZoomTransform): void {
+    const dpr = this.dpr();
+    const cssCenterX = this.width / 2 / dpr;
+    const cssCenterY = this.height / 2 / dpr;
+
+    this.zoom = t.k * dpr;
+    this.x = (cssCenterX - t.x) / t.k;
+    this.y = (cssCenterY - t.y) / t.k;
+  }
+}

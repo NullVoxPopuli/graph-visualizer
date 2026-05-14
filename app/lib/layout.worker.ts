@@ -1,0 +1,257 @@
+/// <reference lib="webworker" />
+import * as Comlink from "comlink";
+import {
+  forceCenter,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  type Simulation,
+  type SimulationLinkDatum,
+  type SimulationNodeDatum,
+} from "d3-force";
+
+interface SimNode extends SimulationNodeDatum {
+  id: number;
+}
+
+export interface LayoutInit {
+  nodeCount: number;
+  edges: Int32Array;
+  communities: Int32Array;
+  spreadFactor: number;
+  repulsion: number;
+  springLength: number;
+  cohesion: number;
+}
+
+const layoutEngine = {
+  /**
+   * Run the force-directed simulation to completion and return the final
+   * positions buffer. The previous streaming-callback API was dropped in
+   * favor of a single promise so callers can drive the loading state with
+   * `getPromiseState` instead of maintaining their own ticking state.
+   */
+  async run(init: LayoutInit): Promise<Float32Array> {
+    const { nodeCount, edges, communities, spreadFactor, repulsion, springLength, cohesion } =
+      init;
+
+    const nodes: SimNode[] = [];
+
+    for (let i = 0; i < nodeCount; i++) nodes.push({ id: i });
+
+    const links: SimulationLinkDatum<SimNode>[] = [];
+
+    for (let i = 0; i < edges.length; i += 2) {
+      const a = edges[i]!;
+      const b = edges[i + 1]!;
+
+      if (a !== b) links.push({ source: a, target: b });
+    }
+
+    seedByCommunity(nodes, communities);
+
+    const sim: Simulation<SimNode, SimulationLinkDatum<SimNode>> = forceSimulation(nodes)
+      .force(
+        "charge",
+        forceManyBody<SimNode>()
+          .strength(-Math.abs(repulsion) * 6)
+          .theta(0.9),
+      )
+      .force(
+        "link",
+        forceLink<SimNode, SimulationLinkDatum<SimNode>>(links)
+          .id((n) => n.id)
+          .distance(springLength)
+          .strength(0.02),
+      )
+      .force("center", forceCenter(0, 0).strength(0.02))
+      .force("cohesion", communityCohesionForce(communities, cohesion))
+      .alpha(1)
+      .alphaDecay(0.05)
+      .velocityDecay(0.35)
+      .stop();
+
+    const TOTAL = 180;
+    const BATCH = 15;
+    let it = 0;
+
+    while (it < TOTAL) {
+      const end = Math.min(TOTAL, it + BATCH);
+
+      for (; it < end; it++) sim.tick();
+      if (spreadFactor !== 1) applyClusterSpread(nodes, communities, spreadFactor);
+      // Yield between batches so the worker has a chance to GC and accept
+      // any incoming messages (terminate, etc.). We no longer emit anything
+      // mid-flight — callers see only the final result.
+      if (it < TOTAL) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const positions = new Float32Array(nodeCount * 2);
+
+    for (let i = 0; i < nodeCount; i++) {
+      const n = nodes[i]!;
+
+      positions[2 * i] = n.x ?? 0;
+      positions[2 * i + 1] = n.y ?? 0;
+    }
+
+    return positions;
+  },
+};
+
+export type LayoutEngine = typeof layoutEngine;
+
+Comlink.expose(layoutEngine);
+
+function seedByCommunity(nodes: SimNode[], communities: Int32Array): void {
+  const counts = new Map<number, number>();
+
+  for (let i = 0; i < nodes.length; i++) {
+    const c = communities[i]!;
+
+    counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+
+  const keys = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!);
+  const centroids = new Map<number, [number, number]>();
+  let acc = 0;
+  const total = nodes.length;
+  const R = Math.sqrt(total) * 18;
+
+  for (let k = 0; k < keys.length; k++) {
+    const c = keys[k]!;
+    const t = acc / total;
+    const angle = k * 137.508 * (Math.PI / 180);
+    const radius = R * Math.sqrt(t + 0.02);
+
+    centroids.set(c, [Math.cos(angle) * radius, Math.sin(angle) * radius]);
+    acc += counts.get(c)!;
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    const c = communities[i]!;
+    const [cx, cy] = centroids.get(c)!;
+
+    nodes[i]!.x = cx + (Math.random() - 0.5) * 12;
+    nodes[i]!.y = cy + (Math.random() - 0.5) * 12;
+  }
+}
+
+function communityCohesionForce(
+  communities: Int32Array,
+  strength: number,
+): (alpha: number) => void {
+  let nodes: SimNode[] = [];
+  let maxComm = 0;
+
+  for (let i = 0; i < communities.length; i++) {
+    if (communities[i]! > maxComm) maxComm = communities[i]!;
+  }
+
+  const MAX_INDEXED_COMM = 200_000;
+  const cap = Math.min(maxComm + 1, MAX_INDEXED_COMM);
+  const sumX = new Float64Array(cap);
+  const sumY = new Float64Array(cap);
+  const counts = new Int32Array(cap);
+
+  const force = (alpha: number): void => {
+    if (strength <= 0 || nodes.length === 0) return;
+    sumX.fill(0);
+    sumY.fill(0);
+    counts.fill(0);
+
+    for (let i = 0; i < nodes.length; i++) {
+      const c = communities[i]!;
+
+      if (c < 0 || c >= cap) continue;
+
+      const n = nodes[i]!;
+
+      sumX[c]! += n.x ?? 0;
+      sumY[c]! += n.y ?? 0;
+      counts[c]!++;
+    }
+
+    for (let i = 0; i < nodes.length; i++) {
+      const c = communities[i]!;
+
+      if (c < 0 || c >= cap) continue;
+
+      const k = counts[c]!;
+
+      if (k <= 1) continue;
+
+      const cx = sumX[c]! / k;
+      const cy = sumY[c]! / k;
+      const n = nodes[i]!;
+
+      n.vx = (n.vx ?? 0) + (cx - (n.x ?? 0)) * strength * alpha;
+      n.vy = (n.vy ?? 0) + (cy - (n.y ?? 0)) * strength * alpha;
+    }
+  };
+
+  (force as { initialize?: (n: SimNode[]) => void }).initialize = (n: SimNode[]) => {
+    nodes = n;
+  };
+
+  return force;
+}
+
+function applyClusterSpread(
+  nodes: SimNode[],
+  communities: Int32Array,
+  spreadFactor: number,
+): void {
+  let maxComm = 0;
+
+  for (let i = 0; i < communities.length; i++) {
+    if (communities[i]! > maxComm) maxComm = communities[i]!;
+  }
+
+  const MAX_INDEXED_COMM = 200_000;
+  const cap = Math.min(maxComm + 1, MAX_INDEXED_COMM);
+  const sumX = new Float64Array(cap);
+  const sumY = new Float64Array(cap);
+  const counts = new Int32Array(cap);
+  let gx = 0;
+  let gy = 0;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    const x = n.x ?? 0;
+    const y = n.y ?? 0;
+    const c = communities[i]!;
+
+    gx += x;
+    gy += y;
+    if (c < 0 || c >= cap) continue;
+    sumX[c]! += x;
+    sumY[c]! += y;
+    counts[c]!++;
+  }
+
+  gx /= nodes.length;
+  gy /= nodes.length;
+
+  const shiftX = new Float64Array(cap);
+  const shiftY = new Float64Array(cap);
+
+  for (let c = 0; c < cap; c++) {
+    const k = counts[c]!;
+
+    if (k === 0) continue;
+    shiftX[c] = (spreadFactor - 1) * (sumX[c]! / k - gx);
+    shiftY[c] = (spreadFactor - 1) * (sumY[c]! / k - gy);
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    const c = communities[i]!;
+
+    if (c < 0 || c >= cap) continue;
+
+    const n = nodes[i]!;
+
+    n.x = (n.x ?? 0) + shiftX[c]!;
+    n.y = (n.y ?? 0) + shiftY[c]!;
+  }
+}

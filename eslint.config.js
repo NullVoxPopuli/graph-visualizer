@@ -11,6 +11,15 @@ import { configs } from "@nullvoxpopuli/eslint-configs";
 
 export default [
   ...configs.ember(import.meta.dirname),
-  // your modifications here
-  // see: https://eslint.org/docs/user-guide/configuring/configuration-files#how-do-overrides-work
+  {
+    // typed-array hot paths in the renderer/layout pipeline use `array[i]!`
+    // assertions because TS's `noUncheckedIndexedAccess` widens them to
+    // `T | undefined`, but for these contiguous buffers the indices are
+    // always in-range. Replacing them with `?? 0` etc. would obscure intent
+    // and add branches in inner loops.
+    files: ["app/lib/**/*.ts", "app/components/visualizer.gts"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "off",
+    },
+  },
 ];

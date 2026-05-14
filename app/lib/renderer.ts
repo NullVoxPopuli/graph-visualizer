@@ -1,0 +1,327 @@
+/**
+ * WebGL2 renderer for large graphs (10k+ nodes, 100k+ edges).
+ *
+ *  - Nodes: single drawArraysInstanced. Per-instance: (x, y, radius_world,
+ *    r, g, b, a, flags). Vertex shader rasterizes a quad; fragment shader
+ *    discards outside a circle and antialiases the edge.
+ *  - Edges: single drawArrays(gl.LINES) with a pre-built vertex buffer of
+ *    (x, y, r, g, b, a) per vertex. Alpha is set low for density.
+ *  - Hulls: drawArrays(gl.TRIANGLES) — precomputed convex hulls
+ *    triangulated as fans.
+ *
+ * The camera transform is supplied via uniforms (uCamera xy + uZoom +
+ * uViewport). No DOM, no per-node objects on the hot path — typed arrays
+ * throughout.
+ */
+import { Camera } from "./camera.ts";
+
+const NODE_VS = /* glsl */ `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aQuad;
+layout(location=1) in vec2 aInstPos;
+layout(location=2) in float aInstRadius;
+layout(location=3) in vec4 aInstColor;
+layout(location=4) in float aInstFlags;
+uniform vec2 uCamera;
+uniform float uZoom;
+uniform vec2 uViewport;
+out vec2 vQuad;
+out vec4 vColor;
+out float vRadiusPx;
+out float vFlags;
+void main() {
+  // screen-space radius floor so tiny nodes stay clickable; must match
+  // the floor used in hit testing so the visual lines up with the pick.
+  float rPx = max(4.0, aInstRadius * uZoom);
+  if (aInstFlags > 1.5) rPx *= 1.6;
+  vec2 world = aInstPos + aQuad * (rPx / uZoom);
+  vec2 screen = (world - uCamera) * uZoom;
+  vec2 clip = screen / (uViewport * 0.5);
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  vQuad = aQuad;
+  vColor = aInstColor;
+  vRadiusPx = rPx;
+  vFlags = aInstFlags;
+}`;
+
+const NODE_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vQuad;
+in vec4 vColor;
+in float vRadiusPx;
+in float vFlags;
+out vec4 fragColor;
+void main() {
+  float d = length(vQuad);
+  float aa = max(1.0 / vRadiusPx, 0.01);
+  float body = smoothstep(1.0, 1.0 - aa, d);
+  if (body < 0.01) discard;
+  vec4 c = vColor;
+  if (vFlags > 0.5) {
+    float ring = smoothstep(0.85, 0.82, d) * smoothstep(0.95, 0.98, d);
+    c.rgb = mix(c.rgb, vec3(1.0), ring);
+  }
+  fragColor = vec4(c.rgb, c.a * body);
+}`;
+
+const LINE_VS = /* glsl */ `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec4 aColor;
+uniform vec2 uCamera;
+uniform float uZoom;
+uniform vec2 uViewport;
+out vec4 vColor;
+void main() {
+  vec2 screen = (aPos - uCamera) * uZoom;
+  vec2 clip = screen / (uViewport * 0.5);
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  vColor = aColor;
+}`;
+
+const LINE_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec4 vColor;
+out vec4 fragColor;
+void main() { fragColor = vColor; }`;
+
+function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
+  const s = gl.createShader(type)!;
+
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    const info = gl.getShaderInfoLog(s);
+
+    gl.deleteShader(s);
+    throw new Error(`Shader compile: ${info}`);
+  }
+
+  return s;
+}
+
+function link(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
+  const p = gl.createProgram();
+
+  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    const info = gl.getProgramInfoLog(p);
+
+    gl.deleteProgram(p);
+    throw new Error(`Program link: ${info}`);
+  }
+
+  return p;
+}
+
+export class Renderer {
+  gl: WebGL2RenderingContext;
+  camera: Camera;
+
+  private nodeProg: WebGLProgram;
+  private lineProg: WebGLProgram;
+  private hullProg: WebGLProgram;
+
+  private nodeVao: WebGLVertexArrayObject;
+  private nodeInstVbo: WebGLBuffer;
+  private nodeInstCount = 0;
+  private nodeInstCapacity = 0;
+
+  private lineVao: WebGLVertexArrayObject;
+  private lineVbo: WebGLBuffer;
+  private lineVertexCount = 0;
+  private lineCapacity = 0;
+
+  private hullVao: WebGLVertexArrayObject;
+  private hullVbo: WebGLBuffer;
+  private hullVertexCount = 0;
+  private hullCapacity = 0;
+
+  private showEdges = true;
+  private showHulls = false;
+
+  constructor(canvas: HTMLCanvasElement) {
+    const gl = canvas.getContext("webgl2", {
+      antialias: true,
+      alpha: false,
+      premultipliedAlpha: false,
+    });
+
+    if (!gl) throw new Error("WebGL2 not available in this browser.");
+    this.gl = gl;
+    this.camera = new Camera(canvas);
+
+    gl.clearColor(0.043, 0.051, 0.063, 1);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    this.nodeProg = link(gl, NODE_VS, NODE_FS);
+    this.lineProg = link(gl, LINE_VS, LINE_FS);
+    this.hullProg = link(gl, LINE_VS, LINE_FS);
+
+    // node VAO
+    this.nodeVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.nodeVao);
+
+    const quadVbo = gl.createBuffer();
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadVbo);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+      gl.STATIC_DRAW,
+    );
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    this.nodeInstVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstVbo);
+
+    const stride = 32; // 8 floats / instance
+
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribDivisor(1, 1);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, stride, 8);
+    gl.vertexAttribDivisor(2, 1);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, stride, 12);
+    gl.vertexAttribDivisor(3, 1);
+    gl.enableVertexAttribArray(4);
+    gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 28);
+    gl.vertexAttribDivisor(4, 1);
+
+    // line VAO
+    this.lineVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.lineVao);
+    this.lineVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 24, 8);
+
+    // hull VAO (same layout)
+    this.hullVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.hullVao);
+    this.hullVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.hullVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 24, 8);
+
+    gl.bindVertexArray(null);
+  }
+
+  resize(cssWidth: number, cssHeight: number, dpr: number): void {
+    const gl = this.gl;
+    const c = gl.canvas as HTMLCanvasElement;
+
+    c.width = Math.floor(cssWidth * dpr);
+    c.height = Math.floor(cssHeight * dpr);
+    c.style.width = `${cssWidth}px`;
+    c.style.height = `${cssHeight}px`;
+    gl.viewport(0, 0, c.width, c.height);
+    this.camera.resize(c.width, c.height);
+  }
+
+  setShowEdges(v: boolean): void {
+    this.showEdges = v;
+  }
+  setShowHulls(v: boolean): void {
+    this.showHulls = v;
+  }
+
+  /** Upload packed node instances. data length must be >= 8 * count. */
+  uploadNodeInstances(data: Float32Array, count: number): void {
+    const gl = this.gl;
+
+    gl.bindVertexArray(this.nodeVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstVbo);
+
+    if (count > this.nodeInstCapacity) {
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      this.nodeInstCapacity = count;
+    } else {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, 8 * count));
+    }
+
+    this.nodeInstCount = count;
+    gl.bindVertexArray(null);
+  }
+
+  /** Upload edge line vertices. data length must be >= 6 * vertexCount. */
+  uploadLines(data: Float32Array, vertexCount: number): void {
+    const gl = this.gl;
+
+    gl.bindVertexArray(this.lineVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineVbo);
+
+    if (vertexCount > this.lineCapacity) {
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      this.lineCapacity = vertexCount;
+    } else {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, 6 * vertexCount));
+    }
+
+    this.lineVertexCount = vertexCount;
+    gl.bindVertexArray(null);
+  }
+
+  uploadHulls(data: Float32Array, vertexCount: number): void {
+    const gl = this.gl;
+
+    gl.bindVertexArray(this.hullVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.hullVbo);
+
+    if (vertexCount > this.hullCapacity) {
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      this.hullCapacity = vertexCount;
+    } else {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, 6 * vertexCount));
+    }
+
+    this.hullVertexCount = vertexCount;
+    gl.bindVertexArray(null);
+  }
+
+  private setCameraUniforms(prog: WebGLProgram): void {
+    const gl = this.gl;
+
+    gl.useProgram(prog);
+    gl.uniform2f(gl.getUniformLocation(prog, "uCamera"), this.camera.x, this.camera.y);
+    gl.uniform1f(gl.getUniformLocation(prog, "uZoom"), this.camera.zoom);
+    gl.uniform2f(gl.getUniformLocation(prog, "uViewport"), gl.canvas.width, gl.canvas.height);
+  }
+
+  draw(): void {
+    const gl = this.gl;
+
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    if (this.showHulls && this.hullVertexCount > 0) {
+      this.setCameraUniforms(this.hullProg);
+      gl.bindVertexArray(this.hullVao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.hullVertexCount);
+    }
+
+    if (this.showEdges && this.lineVertexCount > 0) {
+      this.setCameraUniforms(this.lineProg);
+      gl.bindVertexArray(this.lineVao);
+      gl.drawArrays(gl.LINES, 0, this.lineVertexCount);
+    }
+
+    if (this.nodeInstCount > 0) {
+      this.setCameraUniforms(this.nodeProg);
+      gl.bindVertexArray(this.nodeVao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeInstCount);
+    }
+
+    gl.bindVertexArray(null);
+  }
+}

@@ -10,6 +10,8 @@
  * - https://ember-primitives.pages.dev/6-utils/createService.md
  *   - https://ember-primitives.pages.dev/6-utils/createAsyncService.md
  */
+import "./styles.css";
+
 import Application from "ember-strict-application-resolver";
 
 export default class App extends Application {

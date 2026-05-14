@@ -1,0 +1,43 @@
+{
+  "nodes": [
+    {
+      "id": "AuthService",
+      "label": "AuthService",
+      "edges": [
+        { "nodeId": "User",       "edgeType": "depends-on" },
+        { "nodeId": "TokenStore", "edgeType": "depends-on" },
+        { "nodeId": "Logger",     "edgeType": "calls" }
+      ],
+      "meta": { "package": "@core/auth", "lines": 412 }
+    },
+    {
+      "id": "BillingService",
+      "label": "BillingService",
+      "edges": [
+        { "nodeId": "AuthService", "edgeType": "depends-on" },
+        { "nodeId": "Invoice",     "edgeType": "owns" },
+        { "nodeId": "Logger",      "edgeType": "calls" }
+      ],
+      "meta": { "package": "@core/billing", "lines": 980 }
+    },
+    {
+      "id": "ReportService",
+      "label": "ReportService",
+      "edges": [
+        { "nodeId": "AuthService",    "edgeType": "depends-on" },
+        { "nodeId": "BillingService", "edgeType": "calls" },
+        "Logger"
+      ],
+      "meta": { "package": "@core/reports", "lines": 305 }
+    },
+    {
+      "id": "Invoice",
+      "label": "Invoice",
+      "edges": [{ "nodeId": "User", "edgeType": "references" }],
+      "meta": { "package": "@core/billing", "kind": "entity" }
+    },
+    { "id": "User",       "label": "User",       "meta": { "kind": "entity" } },
+    { "id": "TokenStore", "label": "TokenStore", "edges": ["Logger"] },
+    { "id": "Logger",     "label": "Logger" }
+  ]
+}
