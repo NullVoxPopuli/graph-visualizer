@@ -5,8 +5,13 @@ import { communityColorInto } from "./colors.ts";
  * compatible with the renderer's instanced vertex layout:
  *   (x, y, radius_world, r, g, b, a, flags)
  *
- * `flags` is 0 by default, 1 for selected, 2 for hovered. The vertex shader
- * reads this to grow the node + draw a ring.
+ * `flags` is a small bitmask consumed by the vertex/fragment shader so
+ * states compose freely:
+ *   bit 0 (1) = selected     → animated dashed halo
+ *   bit 1 (2) = hovered      → body grows
+ *   bit 2 (4) = cycle member → red outline
+ * (selected and hovered are still mutually exclusive at pack time —
+ * selection wins — but selected + cycle can both be on for the chosen node.)
  *
  * Reuses `out` if it's large enough; otherwise allocates a new one. Returns
  * the (possibly reallocated) buffer.
@@ -19,6 +24,7 @@ export function packNodes(
   hovered: number,
   dimMask: Uint8Array | null,
   hideMask: Uint8Array | null,
+  cycleMask: Uint8Array | null,
   out: Float32Array,
 ): Float32Array {
   const N = communities.length;
@@ -50,8 +56,9 @@ export function packNodes(
 
     let flags = 0;
 
-    if (i === selected) flags = 1;
-    else if (i === hovered) flags = 2;
+    if (i === selected) flags |= 1;
+    else if (i === hovered) flags |= 2;
+    if (cycleMask !== null && cycleMask[i] === 1) flags |= 4;
     out[base + 7] = flags;
   }
 

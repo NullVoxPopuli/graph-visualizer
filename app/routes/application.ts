@@ -6,19 +6,19 @@ import Route from "@ember/routing/route";
  * into the URL. Without this declaration the router holds the params in
  * `currentRoute.queryParams` but never writes them to `location.search`.
  *
- * All four are URL-only ({@link ViewStateService}) — flipping them must
+ * All of them are URL-only ({@link ViewStateService}) — flipping them must
  * not refresh the model.
  */
 export default class ApplicationRoute extends Route {
   queryParams = {
-    e: { refreshModel: false },
-    h: { refreshModel: false },
-    hidden: { refreshModel: false },
-    hn: { refreshModel: false },
-    col: { refreshModel: false },
-    sel: { refreshModel: false },
-    r: { refreshModel: false },
-    nd: { refreshModel: false },
-    cd: { refreshModel: false },
+    edges: { refreshModel: false },
+    hulls: { refreshModel: false },
+    hiddenEdgeTypes: { refreshModel: false },
+    hiddenNodeTypes: { refreshModel: false },
+    collapsed: { refreshModel: false },
+    selected: { refreshModel: false },
+    repulsion: { refreshModel: false },
+    nodeDistance: { refreshModel: false },
+    clusterDistance: { refreshModel: false },
   };
 }

@@ -12,13 +12,15 @@ type QPs = Record<string, string | null>;
  * Single source of truth for UI state that is meaningful to remember across
  * reloads / shareable URLs:
  *
- *   e       — show edges        (1/0, default 1)
- *   h       — show cluster hulls (1/0, default 0)
- *   hidden  — comma-separated edge type ids the user has filtered out
- *   sel     — selected node id (string from the input JSON)
- *   r       — repulsion force        (number, default 6)
- *   nd      — node distance, intra-cluster spring length  (number, default 18)
- *   cd      — cluster distance, inter-cluster spring length (number, default 180)
+ *   edges             — show edges                          (1/0, default 1)
+ *   hulls             — show cluster hulls                  (1/0, default 0)
+ *   hiddenEdgeTypes   — comma-separated edge type ids filtered out
+ *   hiddenNodeTypes   — comma-separated node type ids filtered out
+ *   collapsed         — comma-separated node ids whose targets are inverted
+ *   selected          — selected node id (string from input JSON)
+ *   repulsion         — repulsion force                     (number, default 6)
+ *   nodeDistance      — intra-cluster spring length         (number, default 18)
+ *   clusterDistance   — inter-cluster spring length         (number, default 180)
  *
  * Reads come from `router.currentRoute.queryParams`. Writes go through
  * `router.transitionTo({ queryParams })`, batched on rAF so a flurry of
@@ -65,34 +67,34 @@ export default class ViewStateService extends Service {
   // ---- typed aliases
 
   get showEdges(): boolean {
-    return this.#queryParams["e"] !== "0";
+    return this.#queryParams["edges"] !== "0";
   }
   set showEdges(v: boolean) {
     // Default true; only encode the off state.
-    this.#setParam("e", v ? null : "0");
+    this.#setParam("edges", v ? null : "0");
   }
 
   get showHulls(): boolean {
-    return this.#queryParams["h"] === "1";
+    return this.#queryParams["hulls"] === "1";
   }
   set showHulls(v: boolean) {
-    this.#setParam("h", v ? "1" : null);
+    this.#setParam("hulls", v ? "1" : null);
   }
 
   get hiddenEdgeTypes(): Set<number> {
-    return parseIntSet(this.#queryParams["hidden"]);
+    return parseIntSet(this.#queryParams["hiddenEdgeTypes"]);
   }
 
   toggleHiddenEdgeType(id: number): void {
-    this.#setParam("hidden", serializeIntSet(toggleInSet(this.hiddenEdgeTypes, id)));
+    this.#setParam("hiddenEdgeTypes", serializeIntSet(toggleInSet(this.hiddenEdgeTypes, id)));
   }
 
   get hiddenNodeTypes(): Set<number> {
-    return parseIntSet(this.#queryParams["hn"]);
+    return parseIntSet(this.#queryParams["hiddenNodeTypes"]);
   }
 
   toggleHiddenNodeType(id: number): void {
-    this.#setParam("hn", serializeIntSet(toggleInSet(this.hiddenNodeTypes, id)));
+    this.#setParam("hiddenNodeTypes", serializeIntSet(toggleInSet(this.hiddenNodeTypes, id)));
   }
 
   /**
@@ -105,7 +107,7 @@ export default class ViewStateService extends Service {
    * containing a literal `,` cannot round-trip through this URL encoding.
    */
   get collapsedIds(): Set<string> {
-    const raw = this.#queryParams["col"];
+    const raw = this.#queryParams["collapsed"];
 
     if (!raw) return EMPTY_STRING_SET;
 
@@ -119,54 +121,54 @@ export default class ViewStateService extends Service {
     else next.add(id);
     const serialized = next.size === 0 ? null : [...next].join(",");
 
-    this.#setParam("col", serialized);
+    this.#setParam("collapsed", serialized);
   }
 
   clearCollapsed(): void {
-    this.#setParam("col", null);
+    this.#setParam("collapsed", null);
   }
 
   /** Selected node id as it appears in the input JSON (string form), or null. */
   get selectedId(): string | null {
-    const v = this.#queryParams["sel"];
+    const v = this.#queryParams["selected"];
 
     return v && v.length > 0 ? v : null;
   }
   set selectedId(v: string | null) {
-    this.#setParam("sel", v);
+    this.#setParam("selected", v);
   }
 
   /** Repulsion force fed into the d3-force charge body. */
   get repulsion(): number {
-    const v = this.#queryParams["r"];
+    const v = this.#queryParams["repulsion"];
     const n = v === undefined ? NaN : Number.parseFloat(v);
 
     return Number.isFinite(n) ? n : DEFAULT_REPULSION;
   }
   set repulsion(n: number) {
-    this.#setParam("r", n === DEFAULT_REPULSION ? null : String(n));
+    this.#setParam("repulsion", n === DEFAULT_REPULSION ? null : String(n));
   }
 
   /** Spring length for edges that stay inside a community. */
   get nodeDistance(): number {
-    const v = this.#queryParams["nd"];
+    const v = this.#queryParams["nodeDistance"];
     const n = v === undefined ? NaN : Number.parseFloat(v);
 
     return Number.isFinite(n) ? n : DEFAULT_NODE_DISTANCE;
   }
   set nodeDistance(n: number) {
-    this.#setParam("nd", n === DEFAULT_NODE_DISTANCE ? null : String(n));
+    this.#setParam("nodeDistance", n === DEFAULT_NODE_DISTANCE ? null : String(n));
   }
 
   /** Spring length for edges that cross community boundaries. */
   get clusterDistance(): number {
-    const v = this.#queryParams["cd"];
+    const v = this.#queryParams["clusterDistance"];
     const n = v === undefined ? NaN : Number.parseFloat(v);
 
     return Number.isFinite(n) ? n : DEFAULT_CLUSTER_DISTANCE;
   }
   set clusterDistance(n: number) {
-    this.#setParam("cd", n === DEFAULT_CLUSTER_DISTANCE ? null : String(n));
+    this.#setParam("clusterDistance", n === DEFAULT_CLUSTER_DISTANCE ? null : String(n));
   }
 }
 

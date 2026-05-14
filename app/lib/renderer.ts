@@ -15,6 +15,10 @@
  */
 import { Camera } from "./camera.ts";
 
+// aInstFlags is a packed bitmask so selection / hover / cycle can compose:
+//   bit 0 (1) = selected     — animated dashed halo
+//   bit 1 (2) = hovered      — grow body radius
+//   bit 2 (4) = cycle member — red outline
 const NODE_VS = /* glsl */ `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aQuad;
@@ -31,14 +35,18 @@ out float vBodyPx;
 out float vQuadPx;
 out float vFlags;
 void main() {
+  int flags = int(aInstFlags);
+  bool sel = (flags & 1) != 0;
+  bool hov = (flags & 2) != 0;
+  bool cyc = (flags & 4) != 0;
   // screen-space body radius floor so tiny nodes stay clickable; must
   // match the floor used in hit testing so the visual lines up with the
   // pick.
   float bodyPx = max(4.0, aInstRadius * uZoom);
-  if (aInstFlags > 1.5) bodyPx *= 1.6;          // hover: grow body
+  if (hov) bodyPx *= 1.6;                       // hover: grow body
   float quadPx = bodyPx;
-  if (aInstFlags > 0.5 && aInstFlags < 1.5)
-    quadPx = bodyPx * 1.6;                       // selected: grow quad to fit halo
+  if (cyc) quadPx = bodyPx * 1.25;              // cycle: room for a thin red ring
+  if (sel) quadPx = bodyPx * 1.6;               // selected: bigger halo wins
   vec2 world = aInstPos + aQuad * (quadPx / uZoom);
   vec2 screen = (world - uCamera) * uZoom;
   vec2 clip = screen / (uViewport * 0.5);
@@ -61,6 +69,9 @@ uniform float uTime;
 out vec4 fragColor;
 const float TAU = 6.2831853;
 void main() {
+  int flags = int(vFlags);
+  bool sel = (flags & 1) != 0;
+  bool cyc = (flags & 4) != 0;
   float d = length(vQuad);
   float dPx = d * vQuadPx;
   float bodyAa = max(1.0 / vBodyPx, 0.01);
@@ -73,16 +84,26 @@ void main() {
     return;
   }
 
-  // Selected: animated dashed halo just outside the body.
-  if (vFlags > 0.5 && vFlags < 1.5) {
-    float ringIn = smoothstep(1.10, 1.15, r);
-    float ringOut = 1.0 - smoothstep(1.35, 1.40, r);
+  // Cycle membership: red ring hugging the node body.
+  if (cyc) {
+    float ringIn = smoothstep(1.00, 1.04, r);
+    float ringOut = 1.0 - smoothstep(1.15, 1.20, r);
+    float ring = ringIn * ringOut;
+    if (ring > 0.01) {
+      fragColor = vec4(1.0, 0.25, 0.3, ring * 0.95);
+      return;
+    }
+  }
+
+  // Selected: animated dashed halo (drawn farther out than the cycle ring).
+  if (sel) {
+    float ringIn = smoothstep(1.25, 1.30, r);
+    float ringOut = 1.0 - smoothstep(1.50, 1.55, r);
     float ring = ringIn * ringOut;
     if (ring > 0.01) {
       float angle = atan(vQuad.y, vQuad.x) + uTime * 0.8;
       float dashes = 14.0;
       float phase = fract(angle / TAU * dashes);
-      // AA around the dash edge (phase = 0.5).
       float dashOn = 1.0 - smoothstep(0.48, 0.52, phase);
       float a = ring * dashOn;
       if (a > 0.01) {
@@ -171,6 +192,15 @@ export class Renderer {
   private hullVertexCount = 0;
   private hullCapacity = 0;
 
+  /**
+   * Highlight overlay for cycle edges (red). Drawn on top of the regular
+   * line pass so the cycle path pops above the dimmed community edges.
+   */
+  private cycleVao!: WebGLVertexArrayObject;
+  private cycleVbo!: WebGLBuffer;
+  private cycleVertexCount = 0;
+  private cycleCapacity = 0;
+
   private showEdges = true;
   private showHulls = false;
 
@@ -240,6 +270,16 @@ export class Renderer {
     gl.bindVertexArray(this.hullVao);
     this.hullVbo = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.hullVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 24, 8);
+
+    // cycle VAO (same layout as line)
+    this.cycleVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.cycleVao);
+    this.cycleVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.cycleVbo);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 24, 0);
     gl.enableVertexAttribArray(1);
@@ -320,6 +360,24 @@ export class Renderer {
     gl.bindVertexArray(null);
   }
 
+  /** Upload cycle-highlight edge vertices. Same layout as `uploadLines`. */
+  uploadCycleEdges(data: Float32Array, vertexCount: number): void {
+    const gl = this.gl;
+
+    gl.bindVertexArray(this.cycleVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.cycleVbo);
+
+    if (vertexCount > this.cycleCapacity) {
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      this.cycleCapacity = vertexCount;
+    } else if (vertexCount > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, 6 * vertexCount));
+    }
+
+    this.cycleVertexCount = vertexCount;
+    gl.bindVertexArray(null);
+  }
+
   private setCameraUniforms(prog: WebGLProgram): void {
     const gl = this.gl;
 
@@ -344,6 +402,12 @@ export class Renderer {
       this.setCameraUniforms(this.lineProg);
       gl.bindVertexArray(this.lineVao);
       gl.drawArrays(gl.LINES, 0, this.lineVertexCount);
+    }
+
+    if (this.cycleVertexCount > 0) {
+      this.setCameraUniforms(this.lineProg);
+      gl.bindVertexArray(this.cycleVao);
+      gl.drawArrays(gl.LINES, 0, this.cycleVertexCount);
     }
 
     if (this.nodeInstCount > 0) {

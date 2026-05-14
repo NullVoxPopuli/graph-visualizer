@@ -6,6 +6,8 @@ import { modifier } from "ember-modifier";
 import Flatbush from "flatbush";
 
 import { communityColor } from "#lib/colors";
+import { buildContraction } from "#lib/contract";
+import { findShortestCycleThrough } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packEdges, packNodes } from "#lib/pack";
 import { Renderer } from "#lib/renderer";
@@ -36,6 +38,9 @@ export default class Visualizer extends Component {
 
   private nodeInstanceBuf: Float32Array = new Float32Array(0);
   private edgeBuf: Float32Array = new Float32Array(0);
+  private cycleBuf: Float32Array = new Float32Array(0);
+  /** Per-node 1/0 mask: 1 = node is on the highlighted cycle. */
+  private cycleMask: Uint8Array | null = null;
   private hullBuf: Float32Array = new Float32Array(0);
   private hullVerts = 0;
 
@@ -166,6 +171,9 @@ export default class Visualizer extends Component {
       this.lastHiddenNodeKey = hiddenNodeKey;
       this.lastCollapsedKey = collapsedKey;
       this.rebuildHideNodeMask(scene);
+      // Cycle depends on the contracted graph — recompute before nodes so
+      // the red ring lands on the current cycle members.
+      this.repackCycle(scene);
       this.repackNodes(scene);
       this.repackEdges(scene);
       this.dirty = true;
@@ -173,128 +181,93 @@ export default class Visualizer extends Component {
 
     if (selectedId !== this.lastSelectedId) {
       this.lastSelectedId = selectedId;
+      // Cycle must come first — `repackNodes` reads `cycleMask` so the
+      // red outline shows up the same frame the cycle edges do.
+      this.repackCycle(scene);
       this.repackNodes(scene);
       this.dirty = true;
     }
   }
 
-  private rebuildHideNodeMask(scene: ProcessedScene): void {
-    const hidden = this.viewState.hiddenNodeTypes;
-    const collapsedIds = this.viewState.collapsedIds;
+  private repackCycle(scene: ProcessedScene): void {
+    if (!this.renderer) return;
 
-    if (hidden.size === 0 && collapsedIds.size === 0) {
-      this.hideNodeMask = null;
-      this.effectiveRadii = null;
-      this.nodeRemap = null;
-      this.pickerDirty = true;
+    const selected = this.selectedIdx;
+
+    if (selected < 0) {
+      this.cycleMask = null;
+      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
 
       return;
     }
 
-    const { nodeTypeIds, edgesFlat, idToIndex } = scene.graph;
-    const N = nodeTypeIds.length;
+    const cycle = findShortestCycleThrough(scene.graph, selected, this.nodeRemap);
 
-    // Baseline visibility per node from the type filter.
-    const typeHidden = new Uint8Array(N);
+    if (cycle === null || cycle.length < 2) {
+      this.cycleMask = null;
+      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
 
-    for (let i = 0; i < N; i++) {
-      if (hidden.has(nodeTypeIds[i]!)) typeHidden[i] = 1;
+      return;
     }
 
-    // Direct outgoing targets of any node listed in `col` get their
-    // baseline flipped — collapse when they'd be visible, expand when the
-    // type filter would have hidden them. Multiple toggles targeting the
-    // same node still produce one flip (independent of how many parents
-    // toggled it, by design — predictable behavior beats vote-counting).
-    const invertTarget = new Uint8Array(N);
-
-    if (collapsedIds.size > 0) {
-      const collapsedIdxSet = new Uint8Array(N);
-
-      for (const id of collapsedIds) {
-        const idx = idToIndex.get(id);
-
-        if (idx !== undefined) collapsedIdxSet[idx] = 1;
-      }
-
-      for (let i = 0; i < edgesFlat.length; i += 2) {
-        if (collapsedIdxSet[edgesFlat[i]!] === 1) invertTarget[edgesFlat[i + 1]!]! = 1;
-      }
-    }
-
+    const N = scene.communities.length;
     const mask = new Uint8Array(N);
 
-    for (let i = 0; i < N; i++) {
-      mask[i] = (typeHidden[i]! ^ invertTarget[i]!) as 0 | 1;
+    for (const i of cycle) mask[i] = 1;
+    this.cycleMask = mask;
+
+    // Each cycle edge: 2 vertices × 6 floats (x, y, r, g, b, a).
+    const need = cycle.length * 12;
+
+    if (this.cycleBuf.length < need) this.cycleBuf = new Float32Array(need);
+
+    const buf = this.cycleBuf;
+    // Bright red so it pops over the dim community-colored edges.
+    const R = 1.0;
+    const G = 0.25;
+    const B = 0.3;
+    const A = 0.95;
+    let k = 0;
+
+    const emit = (a: number, b: number): void => {
+      buf[k++] = scene.positions[2 * a]!;
+      buf[k++] = scene.positions[2 * a + 1]!;
+      buf[k++] = R;
+      buf[k++] = G;
+      buf[k++] = B;
+      buf[k++] = A;
+      buf[k++] = scene.positions[2 * b]!;
+      buf[k++] = scene.positions[2 * b + 1]!;
+      buf[k++] = R;
+      buf[k++] = G;
+      buf[k++] = B;
+      buf[k++] = A;
+    };
+
+    for (let i = 0; i < cycle.length - 1; i++) emit(cycle[i]!, cycle[i + 1]!);
+    // Closing edge: last node → first.
+    emit(cycle[cycle.length - 1]!, cycle[0]!);
+
+    this.renderer.uploadCycleEdges(buf, cycle.length * 2);
+  }
+
+  private rebuildHideNodeMask(scene: ProcessedScene): void {
+    const c = buildContraction(
+      scene.graph,
+      scene.radii,
+      this.viewState.hiddenNodeTypes,
+      this.viewState.collapsedIds,
+    );
+
+    if (c === null) {
+      this.hideNodeMask = null;
+      this.effectiveRadii = null;
+      this.nodeRemap = null;
+    } else {
+      this.hideNodeMask = c.hideMask;
+      this.effectiveRadii = c.effectiveRadii;
+      this.nodeRemap = c.nodeRemap;
     }
-
-    // Assign each hidden node an "owner" — its nearest visible predecessor,
-    // following outgoing edges of the visible graph through chains of
-    // hidden nodes. First-write wins so an edge-contracted (V → V')
-    // relationship is stable even when multiple visibles point at the same
-    // hidden island. The owner doubles as the rep used to contract edges.
-    const owner = new Int32Array(N).fill(-1);
-
-    // Pass 1: direct visible→hidden edges.
-    for (let i = 0; i < edgesFlat.length; i += 2) {
-      const a = edgesFlat[i]!;
-      const b = edgesFlat[i + 1]!;
-
-      if (mask[b] === 1 && mask[a] === 0 && owner[b]! === -1) owner[b] = a;
-    }
-
-    // Pass 2..k: propagate through hidden chains until stable. Bounded by N
-    // so a pathological all-hidden cycle still terminates.
-    let changed = true;
-    let passes = 0;
-
-    while (changed && passes < N) {
-      changed = false;
-      passes++;
-      for (let i = 0; i < edgesFlat.length; i += 2) {
-        const a = edgesFlat[i]!;
-        const b = edgesFlat[i + 1]!;
-
-        if (mask[b] === 1 && mask[a] === 1 && owner[a]! !== -1 && owner[b]! === -1) {
-          owner[b] = owner[a]!;
-          changed = true;
-        }
-      }
-    }
-
-    // Build nodeRemap: visibles map to themselves, hiddens to their owner
-    // (or -1 if unreachable).
-    const remap = new Int32Array(N);
-
-    for (let i = 0; i < N; i++) remap[i] = mask[i] === 0 ? i : owner[i]!;
-
-    // Area absorption: visible nodes grow to swallow the area of the
-    // hidden nodes they own. Working in r² keeps total ink constant — a
-    // package with N files ends up as big as the N tiny file dots it used
-    // to draw, just consolidated into one disc.
-    const absorbedArea = new Float32Array(N);
-
-    for (let i = 0; i < N; i++) {
-      if (mask[i] === 1 && owner[i]! >= 0) {
-        absorbedArea[owner[i]!]! += scene.radii[i]! * scene.radii[i]!;
-      }
-    }
-
-    const eff = new Float32Array(N);
-
-    for (let i = 0; i < N; i++) {
-      if (mask[i] === 1) {
-        eff[i] = 0;
-      } else {
-        const own = scene.radii[i]!;
-
-        eff[i] = absorbedArea[i] > 0 ? Math.sqrt(own * own + absorbedArea[i]!) : own;
-      }
-    }
-
-    this.hideNodeMask = mask;
-    this.effectiveRadii = eff;
-    this.nodeRemap = remap;
     this.pickerDirty = true;
   }
 
@@ -308,6 +281,7 @@ export default class Visualizer extends Component {
       this.hoveredIdx,
       null,
       this.hideNodeMask,
+      this.cycleMask,
       this.nodeInstanceBuf,
     );
     this.renderer.uploadNodeInstances(this.nodeInstanceBuf, scene.communities.length);
@@ -572,6 +546,7 @@ export default class Visualizer extends Component {
       this.rebuildHideNodeMask(scene);
       this.lastHiddenNodeKey = serializeHidden(this.viewState.hiddenNodeTypes);
       this.lastCollapsedKey = serializeStringSet(this.viewState.collapsedIds);
+      this.repackCycle(scene);
       this.repackNodes(scene);
       this.repackEdges(scene);
       if (this.viewState.showHulls) this.repackHulls(scene);

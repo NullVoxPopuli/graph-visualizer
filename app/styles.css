@@ -472,6 +472,23 @@ pre code {
   margin: 0;
 }
 
+.panel__cycle {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panel__cycle li {
+  color: var(--fg);
+}
+
+.panel__cycle-id {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .panel__stats dt,
 .panel__meta dt {
   color: var(--muted);
