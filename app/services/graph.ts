@@ -31,6 +31,13 @@ export default class GraphService extends Service {
   @tracked restoring = true;
 
   #db: IDBPDatabase | undefined;
+  /**
+   * Flips true the moment the user (or some non-restore code path) sets
+   * a graph. The IDB restore checks this before clobbering — without the
+   * guard, a click on an example link that resolves faster than the IDB
+   * round-trip is silently overwritten by whatever was last persisted.
+   */
+  #userLoadSeen = false;
 
   constructor(...args: ConstructorParameters<typeof Service>) {
     super(...args);
@@ -55,6 +62,7 @@ export default class GraphService extends Service {
    * text is the original input — the parser is idempotent over it.
    */
   async load(g: LoadedGraph, source?: { text: string; name: string }): Promise<void> {
+    this.#userLoadSeen = true;
     this.current = g;
     this.fileName = source?.name ?? null;
 
@@ -74,6 +82,7 @@ export default class GraphService extends Service {
   }
 
   async clear(): Promise<void> {
+    this.#userLoadSeen = true;
     this.current = null;
     this.fileName = null;
 
@@ -108,11 +117,16 @@ export default class GraphService extends Service {
         db.get(STORE_NAME, NAME_KEY) as Promise<string | undefined>,
       ]);
 
-      if (text) {
+      // If the user already loaded something while we were waiting on IDB,
+      // don't clobber it. This is the race that used to leave the cycles
+      // panel (and HUD, and canvas) stuck on the previously persisted file.
+      if (text && !this.#userLoadSeen) {
         const parsed = parseGraphJson(text);
 
-        this.current = parsed;
-        this.fileName = name ?? null;
+        if (!this.#userLoadSeen) {
+          this.current = parsed;
+          this.fileName = name ?? null;
+        }
       }
     } catch (err) {
       console.error("Failed to restore graph from IDB:", err);

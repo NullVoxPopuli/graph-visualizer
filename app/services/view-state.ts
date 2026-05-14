@@ -173,6 +173,23 @@ export default class ViewStateService extends Service {
     this.#setParam("hiddenNodes", null);
   }
 
+  /**
+   * Drop every URL-backed setting that's tied to the specific graph
+   * that *was* loaded — selection, hidden node ids, collapsed toggles,
+   * type filters, edge-type filters. Type-filter / edge-type ids index
+   * into the previous graph's interned name lists, so leaving them in
+   * place after a swap silently filters by the wrong type. Layout
+   * sliders, panel geometry, and the panel open/close stay put because
+   * they're graph-agnostic.
+   */
+  resetGraphSpecific(): void {
+    this.#setParam("selected", null);
+    this.#setParam("collapsed", null);
+    this.#setParam("hiddenNodes", null);
+    this.#setParam("hiddenNodeTypes", null);
+    this.#setParam("hiddenEdgeTypes", null);
+  }
+
   /** Selected node id as it appears in the input JSON (string form), or null. */
   get selectedId(): string | null {
     const v = this.#queryParams["selected"];

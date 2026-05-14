@@ -308,11 +308,15 @@ export default class CyclesPanel extends Component {
                     <button
                       type="button"
                       class="cycles-panel__node {{if (eq node.id this.selectedId) 'is-selected'}}"
+                      title={{node.id}}
                       {{on "click" (fn this.selectNode node.id)}}
                       {{on "mouseenter" (fn this.hoverNode node.id)}}
                       {{on "mouseleave" this.unhoverNode}}
                     >
                       <span class="cycles-panel__node-label">{{node.label}}</span>
+                      {{#if (notEq node.id node.label)}}
+                        <code class="cycles-panel__node-id">{{node.id}}</code>
+                      {{/if}}
                     </button>
                   </li>
                 {{/each}}
@@ -335,6 +339,10 @@ function and(a: unknown, b: unknown): unknown {
 
 function eq(a: unknown, b: unknown): boolean {
   return a === b;
+}
+
+function notEq(a: unknown, b: unknown): boolean {
+  return a !== b;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
