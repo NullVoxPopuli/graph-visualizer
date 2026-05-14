@@ -41,7 +41,7 @@ export function createDragModifier(opts: DragOptions): ReturnType<typeof modifie
     } | null = null;
 
     const panelEl = (): HTMLElement | null =>
-      handle.closest(opts.panelSelector) as HTMLElement | null;
+      handle.closest(opts.panelSelector);
 
     const onPointerDown = (ev: PointerEvent): void => {
       if (ev.button !== 0) return;
@@ -139,6 +139,7 @@ export function createApplyGeometryModifier(
       el.style.right = "auto";
       el.style.bottom = "auto";
     }
+
     if (g.width !== null) el.style.width = `${g.width}px`;
     if (g.height !== null) el.style.height = `${g.height}px`;
   });

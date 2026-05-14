@@ -317,6 +317,7 @@ function parsePanelGeometry(raw: string | undefined | null): PanelGeometry | nul
 
 function serializePanelGeometry(g: PanelGeometry | null): string | null {
   if (g === null) return null;
+
   // Round to integers — sub-pixel precision is wasted on a 1px-grid panel
   // and the URL stays readable.
   const fmt = (n: number | null): string => (n === null ? "" : `${Math.round(n)}`);

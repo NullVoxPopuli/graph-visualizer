@@ -68,9 +68,9 @@
     "@ember/test-waiters": "4.1.1",
     "@embroider/core": "4.4.7",
     "@embroider/vite": "1.7.2",
-    "@glint/ember-tsc": "1.5.0",
+    "@glint/ember-tsc": "1.6.1",
     "@glint/template": "1.7.7",
-    "@glint/tsserver-plugin": "2.4.0",
+    "@glint/tsserver-plugin": "2.4.2",
     "@nullvoxpopuli/eslint-configs": "5.5.0",
     "@rollup/plugin-babel": "7.0.0",
     "@types/d3-force": "^3.0.10",
@@ -89,7 +89,7 @@
     "qunit-theme-ember": "1.0.0",
     "testem": "3.20.0",
     "typescript": "6.0.3",
-    "vite": "8.0.12"
+    "vite": "8.0.13"
   },
   "engines": {
     "node": ">= 24"

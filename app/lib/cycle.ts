@@ -203,6 +203,7 @@ function tarjanScc(
           stack.push(w);
           onStack[w] = 1;
           recursed = true;
+
           break;
         } else if (onStack[w] === 1 && indexOf[w]! < lowlink[v]!) {
           lowlink[v] = indexOf[w]!;
@@ -225,6 +226,7 @@ function tarjanScc(
       }
 
       depth--;
+
       if (depth > 0) {
         const parent = callNode[depth - 1]!;
 

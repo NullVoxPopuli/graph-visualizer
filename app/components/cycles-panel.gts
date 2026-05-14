@@ -13,10 +13,10 @@ import {
 } from "#lib/floating-panel";
 import { computeRadii } from "#lib/pack";
 
+import type { LoadedGraph } from "#lib/types";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
-import type { LoadedGraph } from "#lib/types";
 
 interface CycleNode {
   id: string;

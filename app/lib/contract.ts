@@ -112,6 +112,7 @@ export function buildContraction(
       const b = edgesFlat[i + 1]!;
 
       if (idHidden[a] === 1 || idHidden[b] === 1) continue;
+
       if (mask[b] === 1 && mask[a] === 1 && owner[a]! !== -1 && owner[b]! === -1) {
         owner[b] = owner[a]!;
         changed = true;

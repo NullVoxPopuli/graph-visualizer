@@ -330,6 +330,7 @@ function labelPrefix(label: string): string {
   const slash = label.lastIndexOf("/");
 
   if (slash > 0) return label.slice(0, slash);
+
   const dot = label.lastIndexOf(".");
 
   if (dot > 0) return label.slice(0, dot);
