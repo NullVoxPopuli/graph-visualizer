@@ -12,6 +12,10 @@ export default class ViewPage extends Component {
   <template>
     {{#if this.graph.current}}
       <Visualizer />
+    {{else if this.graph.restoring}}
+      <section class="empty-state">
+        <p>Restoring previous graph&hellip;</p>
+      </section>
     {{else}}
       <section class="empty-state">
         <h1>No graph loaded</h1>

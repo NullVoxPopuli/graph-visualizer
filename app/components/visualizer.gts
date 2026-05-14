@@ -146,6 +146,7 @@ export default class Visualizer extends Component {
     const id = this.viewState.selectedId;
 
     if (!scene || id === null) return -1;
+
     const idx = scene.graph.idToIndex.get(id);
 
     return idx ?? -1;
@@ -216,6 +217,7 @@ export default class Visualizer extends Component {
       // red outline shows up the same frame the cycle edges do.
       this.repackCycle(scene);
       this.repackNodes(scene);
+
       // When the global edges toggle is off we only show the edges touching
       // the selected node, so changing the selection swaps the visible set.
       // Same idea for arrows.
@@ -223,6 +225,7 @@ export default class Visualizer extends Component {
         this.repackEdges(scene);
         this.repackArrows(scene);
       }
+
       this.dirty = true;
     }
   }
@@ -327,12 +330,14 @@ export default class Visualizer extends Component {
 
     for (let k = 0; k < edges.length; k += 2) {
       if (edges[k] !== selected) continue;
+
       let b = edges[k + 1]!;
 
       if (remap !== null) {
         b = remap[b]!;
         if (b < 0) continue;
       }
+
       dim[b] = 0;
     }
 
@@ -362,6 +367,7 @@ export default class Visualizer extends Component {
       this.effectiveRadii = c.effectiveRadii;
       this.nodeRemap = c.nodeRemap;
     }
+
     this.pickerDirty = true;
   }
 
@@ -666,6 +672,7 @@ export default class Visualizer extends Component {
 
   onDblClick = (ev: MouseEvent): void => {
     ev.preventDefault();
+
     const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
     const sx = ev.clientX - rect.left;
     const sy = ev.clientY - rect.top;
@@ -734,6 +741,7 @@ export default class Visualizer extends Component {
       // selected node animates and would otherwise freeze the moment the
       // dirty flag clears.
       if (this.viewState.selectedId !== null) this.dirty = true;
+
       if (this.dirty && this.renderer) {
         this.renderer.draw();
         this.dirty = false;

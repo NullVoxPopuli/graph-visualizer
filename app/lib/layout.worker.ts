@@ -69,6 +69,7 @@ const layoutEngine = {
       const b = edges[i + 1]!;
 
       if (a === b) continue;
+
       const link: SimulationLinkDatum<SimNode> = { source: a, target: b };
 
       if (communities[a] === communities[b]) intraLinks.push(link);

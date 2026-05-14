@@ -1,14 +1,15 @@
 import Service, { service } from "@ember/service";
+
 import * as Comlink from "comlink";
 import { getPromiseState, type State } from "reactiveweb/get-promise-state";
 
 import { computeRadii } from "#lib/pack";
 
+import type GraphService from "./graph";
+import type ViewStateService from "./view-state";
 import type { AnalyzeEngine, AnalyzeInit } from "#lib/analyze.worker";
 import type { LayoutEngine, LayoutInit } from "#lib/layout.worker";
 import type { LoadedGraph } from "#lib/types";
-import type GraphService from "./graph";
-import type ViewStateService from "./view-state";
 
 interface Analysis {
   graph: LoadedGraph;

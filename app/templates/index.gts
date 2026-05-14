@@ -7,7 +7,7 @@ import ExampleLinks from "#components/example-links";
 import FileDrop from "#components/file-drop";
 
 import type RouterService from "@ember/routing/router-service";
-import type { LoadedGraph } from "#lib/types";
+import type { ParsedInput } from "#components/file-drop";
 import type GraphService from "#services/graph";
 
 export default class IndexPage extends Component {
@@ -15,8 +15,8 @@ export default class IndexPage extends Component {
   @service declare router: RouterService;
 
   @action
-  onParsed(g: LoadedGraph): void {
-    this.graph.load(g);
+  async onParsed(input: ParsedInput): Promise<void> {
+    await this.graph.load(input.parsed, { text: input.text, name: input.name });
     void this.router.transitionTo("view");
   }
 
@@ -30,8 +30,9 @@ export default class IndexPage extends Component {
         </p>
         <p class="landing__privacy">
           <strong>Your data stays on this device.</strong> The file you drop is
-          read locally in your browser. Nothing is uploaded, sent to a server,
-          or persisted &mdash; close the tab and it&apos;s gone.
+          read locally in your browser and cached in
+          <code>IndexedDB</code> so a refresh keeps you where you were.
+          Nothing is uploaded or sent to a server.
         </p>
       </div>
       <FileDrop @onParsed={{this.onParsed}} class="landing__drop" />

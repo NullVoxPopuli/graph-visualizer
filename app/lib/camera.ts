@@ -142,6 +142,7 @@ export class Camera {
       const zNow = Math.exp(fromZoomLog + (toZoomLog - fromZoomLog) * e);
 
       this.behavior.transform(this.selection, this.transformFor(cxNow, cyNow, zNow));
+
       if (u < 1) {
         this.animFrame = requestAnimationFrame(tick);
       } else {

@@ -3,16 +3,18 @@ import { tracked } from "@glimmer/tracking";
 import { fn } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
+
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
-import { EXAMPLES, type Example } from "#lib/examples";
+import { type Example,EXAMPLES } from "#lib/examples";
 import { parseGraphJson } from "#lib/parser";
 
+import type { ParsedInput } from "./file-drop.gts";
 import type { LoadedGraph } from "#lib/types";
 
 interface Signature {
   Args: {
-    onParsed: (g: LoadedGraph) => void;
+    onParsed: (input: ParsedInput) => void;
     /** Optional leading text before the list of links, e.g. "Try an example:". */
     prefix?: string;
   };
@@ -34,6 +36,7 @@ export default class ExampleLinks extends Component<Signature> {
     const err = this.state?.error;
 
     if (!err) return null;
+
     const original = err.original;
     const msg = original instanceof Error ? original.message : String(original);
 
@@ -44,11 +47,18 @@ export default class ExampleLinks extends Component<Signature> {
   load(ex: Example, ev: Event): void {
     ev.preventDefault();
     if (this.state?.isLoading) return;
-    this.promise = fetchExample(ex.url).then((g) => {
-      this.args.onParsed(g);
+    this.promise = (async () => {
+      const resp = await fetch(ex.url);
 
-      return g;
-    });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      const text = await resp.text();
+      const parsed = parseGraphJson(text);
+
+      this.args.onParsed({ parsed, text, name: nameFromUrl(ex.url) });
+
+      return parsed;
+    })();
   }
 
   <template>
@@ -73,12 +83,8 @@ export default class ExampleLinks extends Component<Signature> {
   </template>
 }
 
-async function fetchExample(url: string): Promise<LoadedGraph> {
-  const resp = await fetch(url);
+function nameFromUrl(url: string): string {
+  const tail = url.split("/").pop();
 
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-  const text = await resp.text();
-
-  return parseGraphJson(text);
+  return tail ?? url;
 }

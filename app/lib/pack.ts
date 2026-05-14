@@ -116,7 +116,7 @@ export function packEdges(
   let drawn = 0;
 
   for (let i = 0; i < E; i++) {
-    if (filter && hiddenTypes!.has(edgeTypeIds![i]!)) continue;
+    if (filter && hiddenTypes.has(edgeTypeIds[i]!)) continue;
 
     let a = edgesFlat[2 * i]!;
     let b = edgesFlat[2 * i + 1]!;
@@ -134,6 +134,7 @@ export function packEdges(
     }
 
     if (restrict && a !== restrictToNode && b !== restrictToNode) continue;
+
     const ca = communities[a]!;
     const cb = communities[b]!;
     const cross = ca !== cb;
@@ -197,7 +198,7 @@ export function packArrows(
   let count = 0;
 
   for (let i = 0; i < E; i++) {
-    if (filter && hiddenTypes!.has(edgeTypeIds![i]!)) continue;
+    if (filter && hiddenTypes.has(edgeTypeIds[i]!)) continue;
 
     let a = edgesFlat[2 * i]!;
     let b = edgesFlat[2 * i + 1]!;

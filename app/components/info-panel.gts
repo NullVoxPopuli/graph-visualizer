@@ -41,6 +41,7 @@ export default class InfoPanel extends Component {
     const g = this.graph.current;
 
     if (id === null || !g) return null;
+
     const idx = g.idToIndex.get(id);
 
     if (idx === undefined) return null;
@@ -71,6 +72,7 @@ export default class InfoPanel extends Component {
 
     for (let k = 0; k < edges.length; k += 2) {
       if (edges[k + 1] !== info.index) continue;
+
       const src = edges[k]!;
 
       if (seen.has(src)) continue;
@@ -99,6 +101,7 @@ export default class InfoPanel extends Component {
 
     for (let k = 0; k < edges.length; k += 2) {
       if (edges[k] !== info.index) continue;
+
       const tgt = edges[k + 1]!;
 
       if (seen.has(tgt)) continue;
@@ -155,6 +158,7 @@ export default class InfoPanel extends Component {
     const g = this.graph.current;
 
     if (!info || !g) return [];
+
     const cycle = findShortestCycleThrough(g, info.index, null);
 
     if (!cycle) return [];
@@ -171,6 +175,7 @@ export default class InfoPanel extends Component {
    */
   get showFullCycle(): boolean {
     if (this.fullCycleNodes.length === 0) return false;
+
     if (this.viewState.hiddenNodeTypes.size === 0 && this.viewState.collapsedIds.size === 0) {
       return false;
     }

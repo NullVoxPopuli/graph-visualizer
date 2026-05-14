@@ -53,6 +53,7 @@
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
     "graphology-types": "^0.24.7",
+    "idb": "^8.0.0",
     "nvp.ui": "^0.5.3",
     "reactiveweb": "^1.9.1",
     "vite-ember-ssr": "0.1.0-alpha.13"

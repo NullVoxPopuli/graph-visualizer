@@ -2,6 +2,7 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
+
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import { parseGraphJson } from "#lib/parser";
@@ -9,8 +10,14 @@ import { SchemaError } from "#lib/schema";
 
 import type { LoadedGraph } from "#lib/types";
 
+export interface ParsedInput {
+  parsed: LoadedGraph;
+  text: string;
+  name: string;
+}
+
 interface Signature {
-  Args: { onParsed: (g: LoadedGraph) => void };
+  Args: { onParsed: (input: ParsedInput) => void };
   Element: HTMLDivElement;
 }
 
@@ -32,6 +39,7 @@ export default class FileDrop extends Component<Signature> {
     const err = this.state?.error;
 
     if (!err) return null;
+
     const original = err.original;
 
     if (original instanceof SchemaError) return original.message;
@@ -42,11 +50,14 @@ export default class FileDrop extends Component<Signature> {
 
   @action
   handleFile(file: File): void {
-    this.filePromise = parseFile(file).then((g) => {
-      this.args.onParsed(g);
+    this.filePromise = (async () => {
+      const text = await file.text();
+      const parsed = parseGraphJson(text);
 
-      return g;
-    });
+      this.args.onParsed({ parsed, text, name: file.name });
+
+      return parsed;
+    })();
   }
 
   @action
@@ -73,6 +84,7 @@ export default class FileDrop extends Component<Signature> {
   onDrop(ev: DragEvent): void {
     ev.preventDefault();
     this.isDragging = false;
+
     const f = ev.dataTransfer?.files?.[0];
 
     if (f) this.handleFile(f);
@@ -106,8 +118,3 @@ export default class FileDrop extends Component<Signature> {
   </template>
 }
 
-async function parseFile(file: File): Promise<LoadedGraph> {
-  const text = await file.text();
-
-  return parseGraphJson(text);
-}

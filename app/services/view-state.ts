@@ -132,6 +132,7 @@ export default class ViewStateService extends Service {
 
     if (next.has(id)) next.delete(id);
     else next.add(id);
+
     const serialized = next.size === 0 ? null : [...next].join(",");
 
     this.#setParam("collapsed", serialized);
@@ -200,11 +201,12 @@ export default class ViewStateService extends Service {
   }
 }
 
-const EMPTY_SET: Set<number> = Object.freeze(new Set<number>()) as Set<number>;
-const EMPTY_STRING_SET: Set<string> = Object.freeze(new Set<string>()) as Set<string>;
+const EMPTY_SET: Set<number> = Object.freeze(new Set<number>());
+const EMPTY_STRING_SET: Set<string> = Object.freeze(new Set<string>());
 
 function parseIntSet(raw: string | undefined | null): Set<number> {
   if (!raw) return EMPTY_SET;
+
   const out = new Set<number>();
 
   for (const tok of raw.split(",")) {

@@ -59,14 +59,14 @@ export function buildContraction(
     }
 
     for (let i = 0; i < edgesFlat.length; i += 2) {
-      if (collapsedIdxSet[edgesFlat[i]!] === 1) invertTarget[edgesFlat[i + 1]!]! = 1;
+      if (collapsedIdxSet[edgesFlat[i]!] === 1) invertTarget[edgesFlat[i + 1]!] = 1;
     }
   }
 
   const mask = new Uint8Array(N);
 
   for (let i = 0; i < N; i++) {
-    mask[i] = (typeHidden[i]! ^ invertTarget[i]!) as 0 | 1;
+    mask[i] = (typeHidden[i]! ^ invertTarget[i]!);
   }
 
   // Assign each hidden node an "owner" — its nearest visible predecessor.
@@ -85,6 +85,7 @@ export function buildContraction(
   while (changed && passes < N) {
     changed = false;
     passes++;
+
     for (let i = 0; i < edgesFlat.length; i += 2) {
       const a = edgesFlat[i]!;
       const b = edgesFlat[i + 1]!;

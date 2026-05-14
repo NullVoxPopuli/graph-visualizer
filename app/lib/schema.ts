@@ -95,6 +95,7 @@ export function validate(input: unknown): InputGraph {
         const e = edgeArr[k];
 
         if (typeof e === "string" || typeof e === "number") continue;
+
         if (e !== null && typeof e === "object") {
           const eo = e as Record<string, unknown>;
 

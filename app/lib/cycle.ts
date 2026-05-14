@@ -66,7 +66,7 @@ export function findShortestCycleThrough(
   for (let i = 0; i < M; i++) {
     const a = remappedA[i]!;
 
-    outAdj[outIdx[a]! + filled[a]!]! = remappedB[i]!;
+    outAdj[outIdx[a]! + filled[a]!] = remappedB[i]!;
     filled[a]!++;
   }
 
@@ -74,6 +74,7 @@ export function findShortestCycleThrough(
   const seen = new Uint8Array(N);
 
   seen[source] = 1;
+
   const queue: number[] = [source];
   let head = 0;
 
@@ -91,6 +92,7 @@ export function findShortestCycleThrough(
           path.push(cur);
           cur = parent[cur]!;
         }
+
         path.reverse();
 
         return [source, ...path];
