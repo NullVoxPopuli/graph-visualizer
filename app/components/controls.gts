@@ -155,6 +155,41 @@ export default class Controls extends Component<Signature> {
     return this.viewState.collapsedIds.size;
   }
 
+  /**
+   * Hidden nodes (set via the info panel's "Hide node" button). Each
+   * entry pairs the id with its current label so the controls panel can
+   * show something readable; if the id no longer resolves (different
+   * graph loaded) we fall back to the raw id.
+   */
+  get hiddenNodes(): { id: string; label: string }[] {
+    const ids = this.viewState.hiddenNodeIds;
+
+    if (ids.size === 0) return [];
+
+    const g = this.graph.current;
+    const out: { id: string; label: string }[] = [];
+
+    for (const id of ids) {
+      const idx = g?.idToIndex.get(id);
+
+      out.push({ id, label: idx !== undefined ? (g!.labels[idx] ?? id) : id });
+    }
+
+    out.sort((a, b) => a.label.localeCompare(b.label));
+
+    return out;
+  }
+
+  @action
+  unhideNode(id: string): void {
+    this.viewState.toggleHiddenNodeId(id);
+  }
+
+  @action
+  clearHiddenNodes(): void {
+    this.viewState.clearHiddenNodes();
+  }
+
   @action
   setRepulsion(ev: Event): void {
     const v = Number.parseFloat((ev.target as HTMLInputElement).value);
@@ -258,6 +293,34 @@ export default class Controls extends Component<Signature> {
               </label>
             {{/each}}
           </div>
+        </div>
+      {{/if}}
+      {{#if this.hiddenNodes.length}}
+        <div class="controls__section">
+          <div class="controls__section-head">
+            <span class="controls__section-label">hidden nodes ({{this.hiddenNodes.length}})</span>
+            <button
+              type="button"
+              class="controls__section-action"
+              {{on "click" this.clearHiddenNodes}}
+              title="Show all hidden nodes again"
+            >show all</button>
+          </div>
+          <ul class="controls__hidden-list">
+            {{#each this.hiddenNodes as |h|}}
+              <li class="controls__hidden">
+                <button
+                  type="button"
+                  class="controls__hidden-row"
+                  title="Show {{h.label}}"
+                  {{on "click" (fn this.unhideNode h.id)}}
+                >
+                  <span class="controls__hidden-label">{{h.label}}</span>
+                  <code class="controls__hidden-id">{{h.id}}</code>
+                </button>
+              </li>
+            {{/each}}
+          </ul>
         </div>
       {{/if}}
       <details class="controls__section controls__details">

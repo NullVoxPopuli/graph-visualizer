@@ -26,14 +26,21 @@ export interface Contraction {
  * Build the contraction for the current type filter + per-node toggles.
  * Returns `null` when nothing is hidden (caller falls back to the raw
  * scene radii and no remap).
+ *
+ * `hiddenNodeIds` are individual nodes the user explicitly hid; they
+ * differ from `hiddenTypes` in that they never get folded into a visible
+ * owner — their `nodeRemap` entry stays `-1` so any edge touching them
+ * is dropped entirely (consistent with "hidden from the graph and cycle
+ * detection").
  */
 export function buildContraction(
   graph: LoadedGraph,
   radii: Float32Array,
   hiddenTypes: Set<number>,
   collapsedIds: Set<string>,
+  hiddenNodeIds: Set<string> = new Set(),
 ): Contraction | null {
-  if (hiddenTypes.size === 0 && collapsedIds.size === 0) return null;
+  if (hiddenTypes.size === 0 && collapsedIds.size === 0 && hiddenNodeIds.size === 0) return null;
 
   const { nodeTypeIds, edgesFlat, idToIndex } = graph;
   const N = nodeTypeIds.length;
@@ -42,6 +49,15 @@ export function buildContraction(
 
   for (let i = 0; i < N; i++) {
     if (hiddenTypes.has(nodeTypeIds[i]!)) typeHidden[i] = 1;
+  }
+
+  // Per-id user hides — hard-drop, no owner folding.
+  const idHidden = new Uint8Array(N);
+
+  for (const id of hiddenNodeIds) {
+    const idx = idToIndex.get(id);
+
+    if (idx !== undefined) idHidden[idx] = 1;
   }
 
   // Direct outgoing targets of any node listed in `col` get their
@@ -66,16 +82,21 @@ export function buildContraction(
   const mask = new Uint8Array(N);
 
   for (let i = 0; i < N; i++) {
-    mask[i] = typeHidden[i]! ^ invertTarget[i]!;
+    // Hard-hidden wins over any expand/collapse interplay.
+    if (idHidden[i] === 1) mask[i] = 1;
+    else mask[i] = typeHidden[i]! ^ invertTarget[i]!;
   }
 
   // Assign each hidden node an "owner" — its nearest visible predecessor.
+  // ID-hidden nodes deliberately skip this so their edges are dropped
+  // instead of folded onto a neighbor.
   const owner = new Int32Array(N).fill(-1);
 
   for (let i = 0; i < edgesFlat.length; i += 2) {
     const a = edgesFlat[i]!;
     const b = edgesFlat[i + 1]!;
 
+    if (idHidden[b] === 1 || idHidden[a] === 1) continue;
     if (mask[b] === 1 && mask[a] === 0 && owner[b]! === -1) owner[b] = a;
   }
 
@@ -90,6 +111,7 @@ export function buildContraction(
       const a = edgesFlat[i]!;
       const b = edgesFlat[i + 1]!;
 
+      if (idHidden[a] === 1 || idHidden[b] === 1) continue;
       if (mask[b] === 1 && mask[a] === 1 && owner[a]! !== -1 && owner[b]! === -1) {
         owner[b] = owner[a]!;
         changed = true;

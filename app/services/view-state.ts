@@ -142,6 +142,37 @@ export default class ViewStateService extends Service {
     this.#setParam("collapsed", null);
   }
 
+  /**
+   * Ids of individual nodes the user has explicitly hidden from the graph
+   * (via the info-panel "Hide" button). Hidden nodes vanish from the
+   * canvas, their edges drop out, and they don't participate in cycle
+   * detection. Distinct from `hiddenNodeTypes` (which hides by category)
+   * and `collapsedIds` (which folds children). Ids containing a literal
+   * `,` cannot round-trip through this URL encoding.
+   */
+  get hiddenNodeIds(): Set<string> {
+    const raw = this.#queryParams["hiddenNodes"];
+
+    if (!raw) return EMPTY_STRING_SET;
+
+    return new Set(raw.split(",").filter((s) => s.length > 0));
+  }
+
+  toggleHiddenNodeId(id: string): void {
+    const next = new Set(this.hiddenNodeIds);
+
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+
+    const serialized = next.size === 0 ? null : [...next].join(",");
+
+    this.#setParam("hiddenNodes", serialized);
+  }
+
+  clearHiddenNodes(): void {
+    this.#setParam("hiddenNodes", null);
+  }
+
   /** Selected node id as it appears in the input JSON (string form), or null. */
   get selectedId(): string | null {
     const v = this.#queryParams["selected"];

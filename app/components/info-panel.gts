@@ -136,6 +136,7 @@ export default class InfoPanel extends Component {
       radii,
       this.viewState.hiddenNodeTypes,
       this.viewState.collapsedIds,
+      this.viewState.hiddenNodeIds,
     );
     const remap = contraction?.nodeRemap ?? null;
     const cycle = findShortestCycleThrough(g, info.index, remap);
@@ -176,7 +177,11 @@ export default class InfoPanel extends Component {
   get showFullCycle(): boolean {
     if (this.fullCycleNodes.length === 0) return false;
 
-    if (this.viewState.hiddenNodeTypes.size === 0 && this.viewState.collapsedIds.size === 0) {
+    if (
+      this.viewState.hiddenNodeTypes.size === 0 &&
+      this.viewState.collapsedIds.size === 0 &&
+      this.viewState.hiddenNodeIds.size === 0
+    ) {
       return false;
     }
 
@@ -251,6 +256,21 @@ export default class InfoPanel extends Component {
     this.visualizer.externalHoverId = null;
   }
 
+  /**
+   * Hide the currently selected node from the graph + cycle detection.
+   * The node's id joins the `hiddenNodes` URL list; the selection is
+   * cleared so the panel collapses (otherwise it would dangle on an
+   * invisible node).
+   */
+  @action
+  hideSelected(): void {
+    const id = this.info?.id;
+
+    if (!id) return;
+    this.viewState.toggleHiddenNodeId(id);
+    this.viewState.selectedId = null;
+  }
+
   <template>
     {{#if this.info}}
       <aside class="panel">
@@ -269,6 +289,15 @@ export default class InfoPanel extends Component {
             <dt>type</dt><dd>{{this.info.type}}</dd>
           </dl>
         {{/if}}
+
+        <p class="panel__actions">
+          <button
+            type="button"
+            class="panel__action"
+            {{on "click" this.hideSelected}}
+            title="Drop this node from the graph and cycle detection. Show it again from the controls panel."
+          >Hide node</button>
+        </p>
 
         <details class="panel__section" open={{this.inOpen}}>
           <summary class="panel__subhead">in ({{this.inNeighbors.length}})</summary>
