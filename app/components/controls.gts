@@ -155,6 +155,15 @@ export default class Controls extends Component<Signature> {
     return this.viewState.collapsedIds.size;
   }
 
+  @action
+  openCyclesPanel(): void {
+    this.viewState.cyclesPanelOpen = true;
+  }
+
+  get showCyclesPanelButton(): boolean {
+    return this.graph.current !== null && !this.viewState.cyclesPanelOpen;
+  }
+
   /**
    * Hidden nodes (set via the info panel's "Hide node" button). Each
    * entry pairs the id with its current label so the controls panel can
@@ -385,6 +394,13 @@ export default class Controls extends Component<Signature> {
             {{on "click" this.clearCollapsed}}
             title="Reset all node-level expand / collapse toggles"
           >Clear toggles ({{this.collapsedCount}})</button>
+        {{/if}}
+        {{#if this.showCyclesPanelButton}}
+          <button
+            type="button"
+            {{on "click" this.openCyclesPanel}}
+            title="Open the cycle list panel"
+          >Show cycles</button>
         {{/if}}
       </div>
       <p class="controls__hint">

@@ -853,13 +853,23 @@ pre code {
   cursor: grabbing;
 }
 
-.cycles-panel__grip {
-  color: var(--dim);
-  font-size: 14px;
-  letter-spacing: -1px;
+.cycles-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
   line-height: 1;
-  /* Don't intercept the pointer — the whole titlebar is the drag target. */
-  pointer-events: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  /* Keep the close button clickable above the drag handle's pointerdown. */
+  position: relative;
+  z-index: 1;
+}
+
+.cycles-panel__close:hover {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .cycles-panel__title {

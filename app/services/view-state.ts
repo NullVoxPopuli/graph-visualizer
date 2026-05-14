@@ -245,6 +245,18 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Whether the cycles panel is visible. On by default — the URL only
+   * encodes the closed state so a fresh share-link doesn't carry an
+   * implicit "and also hide the panel".
+   */
+  get cyclesPanelOpen(): boolean {
+    return this.#queryParams["cyclesPanelOpen"] !== "0";
+  }
+  set cyclesPanelOpen(v: boolean) {
+    this.#setParam("cyclesPanelOpen", v ? null : "0");
+  }
+
+  /**
    * Cycles panel geometry, encoded as `left,top,width,height` in CSS px.
    * `null` for any field means "use the default" (CSS-defined). The whole
    * value drops out of the URL when nothing has been moved or resized.

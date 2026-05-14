@@ -96,6 +96,11 @@ export default class CyclesPanel extends Component {
     this.visualizer.externalHoverId = null;
   }
 
+  @action
+  close(): void {
+    this.viewState.cyclesPanelOpen = false;
+  }
+
   // ---- window dragging + resize persistence ----
 
   /**
@@ -121,6 +126,12 @@ export default class CyclesPanel extends Component {
 
     const onPointerDown = (ev: PointerEvent): void => {
       if (ev.button !== 0) return;
+      // Let clicks on interactive children (close button, future menu
+      // bits) reach their own handlers instead of being captured for a
+      // drag.
+      const target = ev.target as HTMLElement | null;
+
+      if (target && target.closest("button, input, a, select, textarea")) return;
 
       const panel = panelEl();
 
@@ -259,7 +270,7 @@ export default class CyclesPanel extends Component {
   });
 
   <template>
-    {{#if this.cycles.length}}
+    {{#if (and this.cycles.length this.viewState.cyclesPanelOpen)}}
       <aside
         class="cycles-panel"
         aria-label="Cycle list"
@@ -271,7 +282,13 @@ export default class CyclesPanel extends Component {
             Cycles
             <span class="cycles-panel__count">{{this.cycles.length}}</span>
           </h3>
-          <span class="cycles-panel__grip" aria-hidden="true">⋮⋮</span>
+          <button
+            type="button"
+            class="cycles-panel__close"
+            aria-label="Close cycles panel"
+            title="Close"
+            {{on "click" this.close}}
+          >×</button>
         </div>
         <ol class="cycles-panel__list">
           {{#each this.cycles key="key" as |cycle i|}}
@@ -310,6 +327,10 @@ export default class CyclesPanel extends Component {
 
 function add(a: number, b: number): number {
   return a + b;
+}
+
+function and(a: unknown, b: unknown): unknown {
+  return a && b;
 }
 
 function eq(a: unknown, b: unknown): boolean {
