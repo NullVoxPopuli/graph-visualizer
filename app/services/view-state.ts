@@ -82,6 +82,18 @@ export default class ViewStateService extends Service {
     this.#setParam("hulls", v ? "1" : null);
   }
 
+  /**
+   * Whether to draw the directional arrowhead at the source end of each
+   * edge (the node that listed the edge in its outgoing list). On by
+   * default — the URL only encodes the off state.
+   */
+  get showArrows(): boolean {
+    return this.#queryParams["arrows"] !== "0";
+  }
+  set showArrows(v: boolean) {
+    this.#setParam("arrows", v ? null : "0");
+  }
+
   get hiddenEdgeTypes(): Set<number> {
     return parseIntSet(this.#queryParams["hiddenEdgeTypes"]);
   }

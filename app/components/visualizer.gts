@@ -9,7 +9,7 @@ import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
 import { findShortestCycleThrough } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
-import { packEdges, packNodes } from "#lib/pack";
+import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { Renderer } from "#lib/renderer";
 
 import Controls from "./controls.gts";
@@ -38,9 +38,17 @@ export default class Visualizer extends Component {
 
   private nodeInstanceBuf: Float32Array = new Float32Array(0);
   private edgeBuf: Float32Array = new Float32Array(0);
+  private arrowBuf: Float32Array = new Float32Array(0);
   private cycleBuf: Float32Array = new Float32Array(0);
   /** Per-node 1/0 mask: 1 = node is on the highlighted cycle. */
   private cycleMask: Uint8Array | null = null;
+  /**
+   * Per-node 1/0 mask: 1 = node should render dimmed. Built when a node is
+   * selected; the selected node, its direct outgoing targets (from the
+   * input JSON's `edges` list), and any cycle members are left un-dimmed.
+   * `null` while nothing is selected.
+   */
+  private dimMask: Uint8Array | null = null;
   private hullBuf: Float32Array = new Float32Array(0);
   private hullVerts = 0;
 
@@ -60,6 +68,7 @@ export default class Visualizer extends Component {
   private lastResolved: ProcessedScene | null = null;
   private lastShowEdges = true;
   private lastShowHulls = false;
+  private lastShowArrows = true;
   private lastHiddenKey = "";
   private lastHiddenNodeKey = "";
   private lastCollapsedKey = "";
@@ -142,6 +151,7 @@ export default class Visualizer extends Component {
     const vs = this.viewState;
     const showEdges = vs.showEdges;
     const showHulls = vs.showHulls;
+    const showArrows = vs.showArrows;
     const hiddenKey = serializeHidden(vs.hiddenEdgeTypes);
     const hiddenNodeKey = serializeHidden(vs.hiddenNodeTypes);
     const collapsedKey = serializeStringSet(vs.collapsedIds);
@@ -161,9 +171,17 @@ export default class Visualizer extends Component {
       this.dirty = true;
     }
 
+    if (showArrows !== this.lastShowArrows) {
+      this.lastShowArrows = showArrows;
+      this.renderer?.setShowArrows(showArrows);
+      if (showArrows) this.repackArrows(scene);
+      this.dirty = true;
+    }
+
     if (hiddenKey !== this.lastHiddenKey) {
       this.lastHiddenKey = hiddenKey;
       this.repackEdges(scene);
+      this.repackArrows(scene);
       this.dirty = true;
     }
 
@@ -176,6 +194,7 @@ export default class Visualizer extends Component {
       this.repackCycle(scene);
       this.repackNodes(scene);
       this.repackEdges(scene);
+      this.repackArrows(scene);
       this.dirty = true;
     }
 
@@ -196,59 +215,89 @@ export default class Visualizer extends Component {
 
     if (selected < 0) {
       this.cycleMask = null;
-      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
-
-      return;
-    }
-
-    const cycle = findShortestCycleThrough(scene.graph, selected, this.nodeRemap);
-
-    if (cycle === null || cycle.length < 2) {
-      this.cycleMask = null;
+      this.dimMask = null;
       this.renderer.uploadCycleEdges(new Float32Array(0), 0);
 
       return;
     }
 
     const N = scene.communities.length;
-    const mask = new Uint8Array(N);
+    const cycle = findShortestCycleThrough(scene.graph, selected, this.nodeRemap);
+    let cycleMask: Uint8Array | null = null;
 
-    for (const i of cycle) mask[i] = 1;
-    this.cycleMask = mask;
+    if (cycle !== null && cycle.length >= 2) {
+      cycleMask = new Uint8Array(N);
+      for (const i of cycle) cycleMask[i] = 1;
 
-    // Each cycle edge: 2 vertices × 6 floats (x, y, r, g, b, a).
-    const need = cycle.length * 12;
+      // Each cycle edge: 2 vertices × 6 floats (x, y, r, g, b, a).
+      const need = cycle.length * 12;
 
-    if (this.cycleBuf.length < need) this.cycleBuf = new Float32Array(need);
+      if (this.cycleBuf.length < need) this.cycleBuf = new Float32Array(need);
 
-    const buf = this.cycleBuf;
-    // Bright red so it pops over the dim community-colored edges.
-    const R = 1.0;
-    const G = 0.25;
-    const B = 0.3;
-    const A = 0.95;
-    let k = 0;
+      const buf = this.cycleBuf;
+      // Bright red so it pops over the dim community-colored edges.
+      const R = 1.0;
+      const G = 0.25;
+      const B = 0.3;
+      const A = 0.95;
+      let k = 0;
 
-    const emit = (a: number, b: number): void => {
-      buf[k++] = scene.positions[2 * a]!;
-      buf[k++] = scene.positions[2 * a + 1]!;
-      buf[k++] = R;
-      buf[k++] = G;
-      buf[k++] = B;
-      buf[k++] = A;
-      buf[k++] = scene.positions[2 * b]!;
-      buf[k++] = scene.positions[2 * b + 1]!;
-      buf[k++] = R;
-      buf[k++] = G;
-      buf[k++] = B;
-      buf[k++] = A;
-    };
+      const emit = (a: number, b: number): void => {
+        buf[k++] = scene.positions[2 * a]!;
+        buf[k++] = scene.positions[2 * a + 1]!;
+        buf[k++] = R;
+        buf[k++] = G;
+        buf[k++] = B;
+        buf[k++] = A;
+        buf[k++] = scene.positions[2 * b]!;
+        buf[k++] = scene.positions[2 * b + 1]!;
+        buf[k++] = R;
+        buf[k++] = G;
+        buf[k++] = B;
+        buf[k++] = A;
+      };
 
-    for (let i = 0; i < cycle.length - 1; i++) emit(cycle[i]!, cycle[i + 1]!);
-    // Closing edge: last node → first.
-    emit(cycle[cycle.length - 1]!, cycle[0]!);
+      for (let i = 0; i < cycle.length - 1; i++) emit(cycle[i]!, cycle[i + 1]!);
+      // Closing edge: last node → first.
+      emit(cycle[cycle.length - 1]!, cycle[0]!);
 
-    this.renderer.uploadCycleEdges(buf, cycle.length * 2);
+      this.renderer.uploadCycleEdges(buf, cycle.length * 2);
+    } else {
+      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
+    }
+
+    this.cycleMask = cycleMask;
+
+    // Dim everything that isn't the selected node, one of its direct
+    // outgoing targets (per the input JSON's `edges` list), or a cycle
+    // member. `edgesFlat` stores pre-remap node indices, so targets pass
+    // through `nodeRemap` to land on the visible representative when node
+    // contraction is active.
+    const dim = new Uint8Array(N).fill(1);
+
+    dim[selected] = 0;
+
+    const edges = scene.graph.edgesFlat;
+    const remap = this.nodeRemap;
+
+    for (let k = 0; k < edges.length; k += 2) {
+      if (edges[k] !== selected) continue;
+      let b = edges[k + 1]!;
+
+      if (remap !== null) {
+        b = remap[b]!;
+        if (b < 0) continue;
+      }
+      dim[b] = 0;
+    }
+
+    if (cycleMask !== null) {
+      for (let i = 0; i < N; i++) {
+        if (cycleMask[i] === 1) dim[i] = 0;
+      }
+    }
+
+    this.dimMask = dim;
   }
 
   private rebuildHideNodeMask(scene: ProcessedScene): void {
@@ -279,7 +328,7 @@ export default class Visualizer extends Component {
       scene.communities,
       this.selectedIdx,
       this.hoveredIdx,
-      null,
+      this.dimMask,
       this.hideNodeMask,
       this.cycleMask,
       this.nodeInstanceBuf,
@@ -308,6 +357,30 @@ export default class Visualizer extends Component {
 
     this.edgeBuf = buffer;
     this.renderer.uploadLines(this.edgeBuf, vertexCount);
+  }
+
+  private repackArrows(scene: ProcessedScene): void {
+    if (!this.renderer) return;
+
+    if (!this.viewState.showArrows) {
+      this.renderer.uploadArrows(new Float32Array(0), 0);
+
+      return;
+    }
+
+    const { buffer, count } = packArrows(
+      scene.graph.edgesFlat,
+      scene.positions,
+      this.effectiveRadii ?? scene.radii,
+      scene.communities,
+      this.arrowBuf,
+      scene.graph.edgeTypeIds,
+      this.viewState.hiddenEdgeTypes,
+      this.nodeRemap,
+    );
+
+    this.arrowBuf = buffer;
+    this.renderer.uploadArrows(this.arrowBuf, count);
   }
 
   private repackHulls(scene: ProcessedScene): void {
@@ -546,9 +619,18 @@ export default class Visualizer extends Component {
       this.rebuildHideNodeMask(scene);
       this.lastHiddenNodeKey = serializeHidden(this.viewState.hiddenNodeTypes);
       this.lastCollapsedKey = serializeStringSet(this.viewState.collapsedIds);
+      // Sync the renderer's toggles with the URL-backed state before the
+      // first draw so an `arrows=0` URL doesn't briefly render arrows.
+      this.lastShowEdges = this.viewState.showEdges;
+      this.lastShowHulls = this.viewState.showHulls;
+      this.lastShowArrows = this.viewState.showArrows;
+      this.renderer?.setShowEdges(this.lastShowEdges);
+      this.renderer?.setShowHulls(this.lastShowHulls);
+      this.renderer?.setShowArrows(this.lastShowArrows);
       this.repackCycle(scene);
       this.repackNodes(scene);
       this.repackEdges(scene);
+      this.repackArrows(scene);
       if (this.viewState.showHulls) this.repackHulls(scene);
       this.fitInitialView(scene);
       this.dirty = true;

@@ -136,6 +136,42 @@ in vec4 vColor;
 out vec4 fragColor;
 void main() { fragColor = vColor; }`;
 
+// Directional arrowhead at the source end of each edge — instanced
+// triangles sized in device pixels so they read the same at any zoom.
+// `aQuad` is one of three local-space corners along the source→target
+// axis: (0, 0) = tip, (-1, 1) = base-left, (-1, -1) = base-right.
+const ARROW_VS = /* glsl */ `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aQuad;
+layout(location=1) in vec2 aInstSrc;
+layout(location=2) in vec2 aInstTgt;
+layout(location=3) in vec4 aInstColor;
+layout(location=4) in float aInstSrcRadius;
+uniform vec2 uCamera;
+uniform float uZoom;
+uniform vec2 uViewport;
+out vec4 vColor;
+void main() {
+  vec2 srcScreen = (aInstSrc - uCamera) * uZoom;
+  vec2 tgtScreen = (aInstTgt - uCamera) * uZoom;
+  vec2 d = srcScreen - tgtScreen;
+  float dLen = length(d);
+  vec2 dir = dLen > 0.0001 ? d / dLen : vec2(1.0, 0.0);
+  vec2 perp = vec2(-dir.y, dir.x);
+  // Mirror the node vertex shader's screen-px radius floor so the
+  // arrow tip lines up just outside the visible body at any zoom.
+  float srcRadiusPx = max(4.0, aInstSrcRadius * uZoom);
+  float arrowLen = 12.0;
+  float halfWidth = 6.0;
+  float gapPx = 3.0;
+  vec2 tipScreen = srcScreen - dir * (srcRadiusPx + gapPx);
+  vec2 cornerOffset = aQuad.x * dir * arrowLen + aQuad.y * perp * halfWidth;
+  vec2 screen = tipScreen + cornerOffset;
+  vec2 clip = screen / (uViewport * 0.5);
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  vColor = aInstColor;
+}`;
+
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
   const s = gl.createShader(type)!;
 
@@ -176,6 +212,7 @@ export class Renderer {
   private nodeProg: WebGLProgram;
   private lineProg: WebGLProgram;
   private hullProg: WebGLProgram;
+  private arrowProg: WebGLProgram;
 
   private nodeVao: WebGLVertexArrayObject;
   private nodeInstVbo: WebGLBuffer;
@@ -201,8 +238,19 @@ export class Renderer {
   private cycleVertexCount = 0;
   private cycleCapacity = 0;
 
+  /**
+   * Directional arrowheads at the source end of each edge. Drawn between
+   * the line pass and the node pass so they sit on top of the lines but
+   * never overlap the node bodies.
+   */
+  private arrowVao!: WebGLVertexArrayObject;
+  private arrowInstVbo!: WebGLBuffer;
+  private arrowInstCount = 0;
+  private arrowInstCapacity = 0;
+
   private showEdges = true;
   private showHulls = false;
+  private showArrows = true;
 
   constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext("webgl2", {
@@ -222,6 +270,7 @@ export class Renderer {
     this.nodeProg = link(gl, NODE_VS, NODE_FS);
     this.lineProg = link(gl, LINE_VS, LINE_FS);
     this.hullProg = link(gl, LINE_VS, LINE_FS);
+    this.arrowProg = link(gl, ARROW_VS, LINE_FS);
 
     // node VAO
     this.nodeVao = gl.createVertexArray()!;
@@ -285,6 +334,41 @@ export class Renderer {
     gl.enableVertexAttribArray(1);
     gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 24, 8);
 
+    // arrow VAO — 3 static triangle corners (per-vertex), 9 floats per
+    // arrow (per-instance: src.xy, tgt.xy, rgba, srcRadius).
+    this.arrowVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.arrowVao);
+
+    const arrowQuadVbo = gl.createBuffer();
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, arrowQuadVbo);
+    // tip at (0, 0); base corners along -X with ±1 in the perpendicular axis
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([0, 0, -1, 1, -1, -1]),
+      gl.STATIC_DRAW,
+    );
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    this.arrowInstVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.arrowInstVbo);
+
+    const arrowStride = 36; // 9 floats / instance
+
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, arrowStride, 0);
+    gl.vertexAttribDivisor(1, 1);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, arrowStride, 8);
+    gl.vertexAttribDivisor(2, 1);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, arrowStride, 16);
+    gl.vertexAttribDivisor(3, 1);
+    gl.enableVertexAttribArray(4);
+    gl.vertexAttribPointer(4, 1, gl.FLOAT, false, arrowStride, 32);
+    gl.vertexAttribDivisor(4, 1);
+
     gl.bindVertexArray(null);
   }
 
@@ -305,6 +389,9 @@ export class Renderer {
   }
   setShowHulls(v: boolean): void {
     this.showHulls = v;
+  }
+  setShowArrows(v: boolean): void {
+    this.showArrows = v;
   }
 
   /** Upload packed node instances. data length must be >= 8 * count. */
@@ -360,6 +447,27 @@ export class Renderer {
     gl.bindVertexArray(null);
   }
 
+  /**
+   * Upload per-instance arrowhead data. `data` length must be ≥ 9 * count.
+   * Layout: (srcX, srcY, tgtX, tgtY, r, g, b, a, srcRadiusWorld).
+   */
+  uploadArrows(data: Float32Array, count: number): void {
+    const gl = this.gl;
+
+    gl.bindVertexArray(this.arrowVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.arrowInstVbo);
+
+    if (count > this.arrowInstCapacity) {
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      this.arrowInstCapacity = count;
+    } else if (count > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, 9 * count));
+    }
+
+    this.arrowInstCount = count;
+    gl.bindVertexArray(null);
+  }
+
   /** Upload cycle-highlight edge vertices. Same layout as `uploadLines`. */
   uploadCycleEdges(data: Float32Array, vertexCount: number): void {
     const gl = this.gl;
@@ -408,6 +516,12 @@ export class Renderer {
       this.setCameraUniforms(this.lineProg);
       gl.bindVertexArray(this.cycleVao);
       gl.drawArrays(gl.LINES, 0, this.cycleVertexCount);
+    }
+
+    if (this.showEdges && this.showArrows && this.arrowInstCount > 0) {
+      this.setCameraUniforms(this.arrowProg);
+      gl.bindVertexArray(this.arrowVao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, this.arrowInstCount);
     }
 
     if (this.nodeInstCount > 0) {

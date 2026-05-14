@@ -125,6 +125,11 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
+  toggleArrows(): void {
+    this.viewState.showArrows = !this.viewState.showArrows;
+  }
+
+  @action
   toggleEdgeType(id: number): void {
     this.viewState.toggleHiddenEdgeType(id);
   }
@@ -181,6 +186,16 @@ export default class Controls extends Component<Signature> {
             {{on "change" this.toggleEdges}}
           />
           edges
+        </label>
+        <label
+          title="Arrowhead at the source end of each edge — the node that listed the edge in its outgoing list."
+        >
+          <input
+            type="checkbox"
+            checked={{this.viewState.showArrows}}
+            {{on "change" this.toggleArrows}}
+          />
+          directions
         </label>
         <label>
           <input

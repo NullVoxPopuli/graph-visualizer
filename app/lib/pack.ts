@@ -52,7 +52,7 @@ export function packNodes(
 
     const dimmed = dimMask !== null && dimMask[i] === 1;
 
-    out[base + 6] = hidden ? 0 : dimmed ? 0.15 : 1;
+    out[base + 6] = hidden ? 0 : dimmed ? 0.35 : 1;
 
     let flags = 0;
 
@@ -149,6 +149,83 @@ export function packEdges(
   }
 
   return { buffer: out, vertexCount: drawn * 2 };
+}
+
+/**
+ * Pack per-arrow instance data for the directional arrowhead pass.
+ *
+ * Layout per instance (9 floats / 36 bytes):
+ *   (srcX, srcY, tgtX, tgtY, r, g, b, a, srcRadiusWorld)
+ *
+ * The arrowhead sits at the source end (`edgesFlat[2k]`) — that's the node
+ * that listed the edge in its outgoing list, i.e. the importer. Skip
+ * filters mirror `packEdges` so arrowheads track the visible edges
+ * exactly. With `nodeRemap`, both endpoints route through the contracted
+ * graph and duplicates collapse — one arrow per visible (from, to) pair.
+ */
+export function packArrows(
+  edgesFlat: Int32Array,
+  positions: Float32Array,
+  radii: Float32Array,
+  communities: Int32Array,
+  out: Float32Array,
+  edgeTypeIds: Int32Array | null = null,
+  hiddenTypes: Set<number> | null = null,
+  nodeRemap: Int32Array | null = null,
+): { buffer: Float32Array; count: number } {
+  const E = edgesFlat.length / 2;
+  const need = E * 9;
+
+  if (out.length < need) out = new Float32Array(need);
+
+  const filter = edgeTypeIds !== null && hiddenTypes !== null && hiddenTypes.size > 0;
+  const N = communities.length;
+  const seen = nodeRemap === null ? null : new Set<number>();
+  const color: [number, number, number] = [0, 0, 0];
+  let count = 0;
+
+  for (let i = 0; i < E; i++) {
+    if (filter && hiddenTypes!.has(edgeTypeIds![i]!)) continue;
+
+    let a = edgesFlat[2 * i]!;
+    let b = edgesFlat[2 * i + 1]!;
+
+    if (nodeRemap !== null) {
+      a = nodeRemap[a]!;
+      b = nodeRemap[b]!;
+      if (a < 0 || b < 0) continue;
+      if (a === b) continue;
+
+      const key = a * N + b;
+
+      if (seen!.has(key)) continue;
+      seen!.add(key);
+    }
+
+    const ca = communities[a]!;
+    const cb = communities[b]!;
+    const cross = ca !== cb;
+
+    communityColorInto(ca, color);
+
+    // Arrowheads are roughly 3× the line's alpha so direction reads even
+    // when the lines themselves are dim. Cross-community arrows pop more.
+    const alpha = cross ? 0.7 : 0.55;
+    const base = count * 9;
+
+    out[base] = positions[2 * a]!;
+    out[base + 1] = positions[2 * a + 1]!;
+    out[base + 2] = positions[2 * b]!;
+    out[base + 3] = positions[2 * b + 1]!;
+    out[base + 4] = color[0];
+    out[base + 5] = color[1];
+    out[base + 6] = color[2];
+    out[base + 7] = alpha;
+    out[base + 8] = radii[a]!;
+    count++;
+  }
+
+  return { buffer: out, count };
 }
 
 /**
