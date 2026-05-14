@@ -14,8 +14,7 @@
         "@acme/utils/strings.ts",
         "@acme/utils/cache.ts",
         "@acme/utils/types.ts",
-        "@acme/utils/validation.ts",
-        { "nodeId": "@acme/db/types.ts", "edgeType": "imports" }
+        "@acme/utils/validation.ts"
       ],
       "meta": {
         "files": 10
@@ -33,8 +32,7 @@
         "@acme/db/models/user.ts",
         "@acme/db/models/account.ts",
         "@acme/db/models/session.ts",
-        "@acme/db/types.ts",
-        { "nodeId": "@acme/utils/validation.ts", "edgeType": "imports" }
+        "@acme/db/types.ts"
       ],
       "meta": {
         "files": 8
@@ -403,6 +401,7 @@
       "label": "@acme/db/types.ts",
       "type": "file",
       "edges": [
+        { "nodeId": "@acme/utils/validation.ts", "edgeType": "imports" },
         {
           "nodeId": "@acme/db/queries.ts",
           "edgeType": "type-imports"
@@ -1036,6 +1035,7 @@
       "label": "@acme/api/validation.ts",
       "type": "file",
       "edges": [
+        { "nodeId": "@acme/db/types.ts", "edgeType": "imports" },
         {
           "nodeId": "@acme/api/middleware/auth.ts",
           "edgeType": "imports"
