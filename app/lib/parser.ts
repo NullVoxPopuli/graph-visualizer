@@ -30,6 +30,24 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
   const metas: unknown[] = new Array<unknown>(N);
   const idToIndex = new Map<string, number>();
 
+  // Node-type interning mirrors edge-type interning. Index 0 is the empty
+  // (untyped) name; nodes without a `type` field hash there.
+  const nodeTypeNames: string[] = [""];
+  const nodeTypeIndex = new Map<string, number>([["", 0]]);
+  const internNodeType = (name: string): number => {
+    const existing = nodeTypeIndex.get(name);
+
+    if (existing !== undefined) return existing;
+
+    const idx = nodeTypeNames.length;
+
+    nodeTypeNames.push(name);
+    nodeTypeIndex.set(name, idx);
+
+    return idx;
+  };
+  const nodeTypeIdList: number[] = new Array<number>(N);
+
   for (let i = 0; i < N; i++) {
     const n = input.nodes[i]!;
     const id = String(n.id);
@@ -42,6 +60,7 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
     ids[i] = id;
     labels[i] = n.label ?? id;
     metas[i] = n.meta;
+    nodeTypeIdList[i] = internNodeType(n.type ?? "");
   }
 
   // Edge-type interning. Index 0 is reserved for the empty (untyped) name —
@@ -152,5 +171,7 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
     inDegree,
     edgeTypeNames,
     edgeTypeIds,
+    nodeTypeNames,
+    nodeTypeIds: Int32Array.from(nodeTypeIdList),
   };
 }

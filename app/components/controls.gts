@@ -24,6 +24,13 @@ interface EdgeTypeRow {
   hidden: boolean;
 }
 
+interface NodeTypeRow {
+  id: number;
+  name: string;
+  count: number;
+  hidden: boolean;
+}
+
 interface Signature {
   Args: {
     onResetView: () => void;
@@ -33,6 +40,41 @@ interface Signature {
 export default class Controls extends Component<Signature> {
   @service declare viewState: ViewStateService;
   @service declare graph: GraphService;
+
+  /**
+   * Node-type breakdown for the filter section. Returns an empty list when
+   * fewer than two distinct types are present in the loaded graph — at one
+   * type the filter is just an "everything on/off" switch, which isn't
+   * worth surfacing.
+   */
+  get nodeTypes(): NodeTypeRow[] {
+    const g = this.graph.current;
+
+    if (!g) return [];
+
+    const names = g.nodeTypeNames;
+
+    if (names.length < 2) return [];
+
+    const counts = new Int32Array(names.length);
+
+    for (let i = 0; i < g.nodeTypeIds.length; i++) counts[g.nodeTypeIds[i]!]!++;
+
+    const hidden = this.viewState.hiddenNodeTypes;
+    const out: NodeTypeRow[] = [];
+
+    for (let id = 0; id < names.length; id++) {
+      if (counts[id] === 0) continue;
+      out.push({
+        id,
+        name: names[id] === "" ? "untyped" : names[id]!,
+        count: counts[id]!,
+        hidden: hidden.has(id),
+      });
+    }
+
+    return out;
+  }
 
   /**
    * Edge-type breakdown for the filter section. Returns an empty list when
@@ -85,6 +127,11 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
+  toggleNodeType(id: number): void {
+    this.viewState.toggleHiddenNodeType(id);
+  }
+
+  @action
   setRepulsion(ev: Event): void {
     const v = Number.parseFloat((ev.target as HTMLInputElement).value);
 
@@ -125,6 +172,24 @@ export default class Controls extends Component<Signature> {
           cluster hulls
         </label>
       </div>
+      {{#if this.nodeTypes.length}}
+        <div class="controls__section">
+          <div class="controls__section-label">node types</div>
+          <div class="controls__types">
+            {{#each this.nodeTypes as |t|}}
+              <label class="controls__type">
+                <input
+                  type="checkbox"
+                  checked={{not t.hidden}}
+                  {{on "change" (fn this.toggleNodeType t.id)}}
+                />
+                <span class="controls__type-name">{{t.name}}</span>
+                <span class="controls__type-count">{{t.count}}</span>
+              </label>
+            {{/each}}
+          </div>
+        </div>
+      {{/if}}
       {{#if this.edgeTypes.length}}
         <div class="controls__section">
           <div class="controls__section-label">edge types</div>

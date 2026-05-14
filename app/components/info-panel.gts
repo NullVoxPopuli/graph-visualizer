@@ -10,6 +10,7 @@ interface SelectedInfo {
   index: number;
   id: string;
   label: string;
+  type: string;
   outDegree: number;
   inDegree: number;
   meta: unknown;
@@ -38,6 +39,7 @@ export default class InfoPanel extends Component {
       index: idx,
       id: g.ids[idx]!,
       label: g.labels[idx]!,
+      type: g.nodeTypeNames[g.nodeTypeIds[idx] ?? 0] ?? "",
       outDegree: g.outDegree[idx] ?? 0,
       inDegree: g.inDegree[idx] ?? 0,
       meta: g.metas[idx],
@@ -77,6 +79,9 @@ export default class InfoPanel extends Component {
         </div>
         <p class="panel__id">id: <code>{{this.info.id}}</code></p>
         <dl class="panel__stats">
+          {{#if this.info.type}}
+            <dt>type</dt><dd>{{this.info.type}}</dd>
+          {{/if}}
           <dt>out-degree</dt><dd>{{this.info.outDegree}}</dd>
           <dt>in-degree</dt><dd>{{this.info.inDegree}}</dd>
         </dl>

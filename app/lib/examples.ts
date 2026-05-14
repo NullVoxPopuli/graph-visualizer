@@ -22,6 +22,11 @@ export const EXAMPLES: Example[] = [
     url: "/examples/typed-edges.json",
   },
   {
+    label: "monorepo",
+    description: "7 packages, ~10 files each · package / file types, imports / type-imports / re-exports",
+    url: "/examples/monorepo.json",
+  },
+  {
     label: "medium",
     description: "200 nodes · 5 clusters, generated",
     url: "/examples/medium.json",

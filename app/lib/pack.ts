@@ -18,6 +18,7 @@ export function packNodes(
   selected: number,
   hovered: number,
   dimMask: Uint8Array | null,
+  hideMask: Uint8Array | null,
   out: Float32Array,
 ): Float32Array {
   const N = communities.length;
@@ -31,17 +32,21 @@ export function packNodes(
     communityColorInto(communities[i]!, color);
 
     const base = i * 8;
+    const hidden = hideMask !== null && hideMask[i] === 1;
 
     out[base] = positions[2 * i]!;
     out[base + 1] = positions[2 * i + 1]!;
-    out[base + 2] = radii[i]!;
+    // Zero-radius hidden nodes render invisibly (the fragment shader
+    // discards them) but stay at the same instance index so the picker /
+    // selection bookkeeping doesn't have to renumber.
+    out[base + 2] = hidden ? 0 : radii[i]!;
     out[base + 3] = color[0];
     out[base + 4] = color[1];
     out[base + 5] = color[2];
 
     const dimmed = dimMask !== null && dimMask[i] === 1;
 
-    out[base + 6] = dimmed ? 0.15 : 1;
+    out[base + 6] = hidden ? 0 : dimmed ? 0.15 : 1;
 
     let flags = 0;
 
@@ -64,6 +69,16 @@ export function packNodes(
  * sits in the hidden set are skipped — both endpoints are simply not
  * emitted, so the returned `vertexCount` reflects only the visible edges.
  */
+/**
+ * Pack edge line vertices with optional node remapping for contraction.
+ *
+ * When `nodeRemap` is non-null, each endpoint is replaced by its remap
+ * entry — `-1` means "drop this endpoint" (hidden with no owner), and
+ * equal remaps mean a self-loop after contraction and are also dropped.
+ * Surviving edges are deduped by `(from, to)` so a swarm of file→file
+ * imports between two packages collapses to a single package→package
+ * line.
+ */
 export function packEdges(
   edgesFlat: Int32Array,
   positions: Float32Array,
@@ -71,6 +86,7 @@ export function packEdges(
   out: Float32Array,
   edgeTypeIds: Int32Array | null = null,
   hiddenTypes: Set<number> | null = null,
+  nodeRemap: Int32Array | null = null,
 ): { buffer: Float32Array; vertexCount: number } {
   const E = edgesFlat.length / 2;
   const need = E * 12;
@@ -78,6 +94,8 @@ export function packEdges(
   if (out.length < need) out = new Float32Array(need);
 
   const filter = edgeTypeIds !== null && hiddenTypes !== null && hiddenTypes.size > 0;
+  const N = communities.length;
+  const seen = nodeRemap === null ? null : new Set<number>();
   const color: [number, number, number] = [0, 0, 0];
   let k = 0;
   let drawn = 0;
@@ -85,8 +103,20 @@ export function packEdges(
   for (let i = 0; i < E; i++) {
     if (filter && hiddenTypes!.has(edgeTypeIds![i]!)) continue;
 
-    const a = edgesFlat[2 * i]!;
-    const b = edgesFlat[2 * i + 1]!;
+    let a = edgesFlat[2 * i]!;
+    let b = edgesFlat[2 * i + 1]!;
+
+    if (nodeRemap !== null) {
+      a = nodeRemap[a]!;
+      b = nodeRemap[b]!;
+      if (a < 0 || b < 0) continue;
+      if (a === b) continue;
+
+      const key = a * N + b;
+
+      if (seen!.has(key)) continue;
+      seen!.add(key);
+    }
     const ca = communities[a]!;
     const cb = communities[b]!;
     const cross = ca !== cb;

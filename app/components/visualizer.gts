@@ -56,7 +56,31 @@ export default class Visualizer extends Component {
   private lastShowEdges = true;
   private lastShowHulls = false;
   private lastHiddenKey = "";
+  private lastHiddenNodeKey = "";
   private lastSelectedId: string | null = null;
+
+  /**
+   * Cached "hidden by node type" mask, keyed on `lastHiddenNodeKey`. `null`
+   * means no node types are hidden — pack and pick skip the mask read in
+   * that case.
+   */
+  private hideNodeMask: Uint8Array | null = null;
+
+  /**
+   * Per-node display radius adjusted for absorbed hidden neighbors.
+   * When a hidden node H is pointed to by visible node V, V's area grows
+   * by H's area (so the hidden mass appears "shoved inside"). `null`
+   * means no node types are hidden — callers fall back to `scene.radii`.
+   */
+  private effectiveRadii: Float32Array | null = null;
+
+  /**
+   * Per-node remap used to contract edges through hidden nodes. Visible
+   * nodes map to themselves; hidden nodes map to their nearest visible
+   * predecessor (propagated through chains of hidden nodes), or `-1` if
+   * unreachable from any visible node. `null` when nothing is hidden.
+   */
+  private nodeRemap: Int32Array | null = null;
 
   // ember-modifier auto-tracks reads inside the function body, so any tracked
   // value read here would tear down + re-run the renderer on every change.
@@ -111,6 +135,7 @@ export default class Visualizer extends Component {
     const showEdges = vs.showEdges;
     const showHulls = vs.showHulls;
     const hiddenKey = serializeHidden(vs.hiddenEdgeTypes);
+    const hiddenNodeKey = serializeHidden(vs.hiddenNodeTypes);
     const selectedId = vs.selectedId;
 
     if (showEdges !== this.lastShowEdges) {
@@ -133,6 +158,14 @@ export default class Visualizer extends Component {
       this.dirty = true;
     }
 
+    if (hiddenNodeKey !== this.lastHiddenNodeKey) {
+      this.lastHiddenNodeKey = hiddenNodeKey;
+      this.rebuildHideNodeMask(scene);
+      this.repackNodes(scene);
+      this.repackEdges(scene);
+      this.dirty = true;
+    }
+
     if (selectedId !== this.lastSelectedId) {
       this.lastSelectedId = selectedId;
       this.repackNodes(scene);
@@ -140,15 +173,106 @@ export default class Visualizer extends Component {
     }
   }
 
+  private rebuildHideNodeMask(scene: ProcessedScene): void {
+    const hidden = this.viewState.hiddenNodeTypes;
+
+    if (hidden.size === 0) {
+      this.hideNodeMask = null;
+      this.effectiveRadii = null;
+      this.nodeRemap = null;
+      this.pickerDirty = true;
+
+      return;
+    }
+
+    const { nodeTypeIds, edgesFlat } = scene.graph;
+    const N = nodeTypeIds.length;
+    const mask = new Uint8Array(N);
+
+    for (let i = 0; i < N; i++) {
+      if (hidden.has(nodeTypeIds[i]!)) mask[i] = 1;
+    }
+
+    // Assign each hidden node an "owner" — its nearest visible predecessor,
+    // following outgoing edges of the visible graph through chains of
+    // hidden nodes. First-write wins so an edge-contracted (V → V')
+    // relationship is stable even when multiple visibles point at the same
+    // hidden island. The owner doubles as the rep used to contract edges.
+    const owner = new Int32Array(N).fill(-1);
+
+    // Pass 1: direct visible→hidden edges.
+    for (let i = 0; i < edgesFlat.length; i += 2) {
+      const a = edgesFlat[i]!;
+      const b = edgesFlat[i + 1]!;
+
+      if (mask[b] === 1 && mask[a] === 0 && owner[b]! === -1) owner[b] = a;
+    }
+
+    // Pass 2..k: propagate through hidden chains until stable. Bounded by N
+    // so a pathological all-hidden cycle still terminates.
+    let changed = true;
+    let passes = 0;
+
+    while (changed && passes < N) {
+      changed = false;
+      passes++;
+      for (let i = 0; i < edgesFlat.length; i += 2) {
+        const a = edgesFlat[i]!;
+        const b = edgesFlat[i + 1]!;
+
+        if (mask[b] === 1 && mask[a] === 1 && owner[a]! !== -1 && owner[b]! === -1) {
+          owner[b] = owner[a]!;
+          changed = true;
+        }
+      }
+    }
+
+    // Build nodeRemap: visibles map to themselves, hiddens to their owner
+    // (or -1 if unreachable).
+    const remap = new Int32Array(N);
+
+    for (let i = 0; i < N; i++) remap[i] = mask[i] === 0 ? i : owner[i]!;
+
+    // Area absorption: visible nodes grow to swallow the area of the
+    // hidden nodes they own. Working in r² keeps total ink constant — a
+    // package with N files ends up as big as the N tiny file dots it used
+    // to draw, just consolidated into one disc.
+    const absorbedArea = new Float32Array(N);
+
+    for (let i = 0; i < N; i++) {
+      if (mask[i] === 1 && owner[i]! >= 0) {
+        absorbedArea[owner[i]!]! += scene.radii[i]! * scene.radii[i]!;
+      }
+    }
+
+    const eff = new Float32Array(N);
+
+    for (let i = 0; i < N; i++) {
+      if (mask[i] === 1) {
+        eff[i] = 0;
+      } else {
+        const own = scene.radii[i]!;
+
+        eff[i] = absorbedArea[i] > 0 ? Math.sqrt(own * own + absorbedArea[i]!) : own;
+      }
+    }
+
+    this.hideNodeMask = mask;
+    this.effectiveRadii = eff;
+    this.nodeRemap = remap;
+    this.pickerDirty = true;
+  }
+
   private repackNodes(scene: ProcessedScene): void {
     if (!this.renderer) return;
     this.nodeInstanceBuf = packNodes(
       scene.positions,
-      scene.radii,
+      this.effectiveRadii ?? scene.radii,
       scene.communities,
       this.selectedIdx,
       this.hoveredIdx,
       null,
+      this.hideNodeMask,
       this.nodeInstanceBuf,
     );
     this.renderer.uploadNodeInstances(this.nodeInstanceBuf, scene.communities.length);
@@ -170,6 +294,7 @@ export default class Visualizer extends Component {
       this.edgeBuf,
       scene.graph.edgeTypeIds,
       this.viewState.hiddenEdgeTypes,
+      this.nodeRemap,
     );
 
     this.edgeBuf = buffer;
@@ -269,12 +394,13 @@ export default class Visualizer extends Component {
       return;
     }
 
+    const radii = this.effectiveRadii ?? scene.radii;
     const idx = new Flatbush(N);
 
     for (let i = 0; i < N; i++) {
       const x = scene.positions[2 * i]!;
       const y = scene.positions[2 * i + 1]!;
-      const r = scene.radii[i]!;
+      const r = radii[i]!;
 
       idx.add(x - r, y - r, x + r, y + r);
     }
@@ -308,10 +434,14 @@ export default class Visualizer extends Component {
     let best = -1;
     let bestDist = Infinity;
 
+    const radii = this.effectiveRadii ?? scene.radii;
+
     for (const c of candidates) {
+      if (this.hideNodeMask !== null && this.hideNodeMask[c] === 1) continue;
+
       const x = scene.positions[2 * c]!;
       const y = scene.positions[2 * c + 1]!;
-      const r = Math.max(scene.radii[c]!, minHitWorld);
+      const r = Math.max(radii[c]!, minHitWorld);
       const dx = wx - x;
       const dy = wy - y;
       const d2 = dx * dx + dy * dy;
@@ -388,6 +518,9 @@ export default class Visualizer extends Component {
     if (scene && scene !== this.lastResolved) {
       this.lastResolved = scene;
       this.pickerDirty = true;
+      // Rebuild the hide mask first — both repack calls below read it.
+      this.rebuildHideNodeMask(scene);
+      this.lastHiddenNodeKey = serializeHidden(this.viewState.hiddenNodeTypes);
       this.repackNodes(scene);
       this.repackEdges(scene);
       if (this.viewState.showHulls) this.repackHulls(scene);

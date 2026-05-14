@@ -1,0 +1,1330 @@
+{
+  "nodes": [
+    {
+      "id": "@acme/utils",
+      "label": "@acme/utils",
+      "type": "package",
+      "edges": [
+        "@acme/utils/index.ts",
+        "@acme/utils/logger.ts",
+        "@acme/utils/errors.ts",
+        "@acme/utils/retry.ts",
+        "@acme/utils/debounce.ts",
+        "@acme/utils/dates.ts",
+        "@acme/utils/strings.ts",
+        "@acme/utils/cache.ts",
+        "@acme/utils/types.ts",
+        "@acme/utils/validation.ts"
+      ],
+      "meta": {
+        "files": 10
+      }
+    },
+    {
+      "id": "@acme/db",
+      "label": "@acme/db",
+      "type": "package",
+      "edges": [
+        "@acme/db/index.ts",
+        "@acme/db/client.ts",
+        "@acme/db/migrations.ts",
+        "@acme/db/queries.ts",
+        "@acme/db/models/user.ts",
+        "@acme/db/models/account.ts",
+        "@acme/db/models/session.ts",
+        "@acme/db/types.ts"
+      ],
+      "meta": {
+        "files": 8
+      }
+    },
+    {
+      "id": "@acme/auth",
+      "label": "@acme/auth",
+      "type": "package",
+      "edges": [
+        "@acme/auth/index.ts",
+        "@acme/auth/auth-service.ts",
+        "@acme/auth/token-store.ts",
+        "@acme/auth/jwt.ts",
+        "@acme/auth/hash.ts",
+        "@acme/auth/session.ts",
+        "@acme/auth/types.ts"
+      ],
+      "meta": {
+        "files": 7
+      }
+    },
+    {
+      "id": "@acme/billing",
+      "label": "@acme/billing",
+      "type": "package",
+      "edges": [
+        "@acme/billing/index.ts",
+        "@acme/billing/billing-service.ts",
+        "@acme/billing/invoice.ts",
+        "@acme/billing/payment.ts",
+        "@acme/billing/subscription.ts",
+        "@acme/billing/refund.ts",
+        "@acme/billing/formatters.ts",
+        "@acme/billing/types.ts"
+      ],
+      "meta": {
+        "files": 8
+      }
+    },
+    {
+      "id": "@acme/ui",
+      "label": "@acme/ui",
+      "type": "package",
+      "edges": [
+        "@acme/ui/index.ts",
+        "@acme/ui/Button.tsx",
+        "@acme/ui/Input.tsx",
+        "@acme/ui/Modal.tsx",
+        "@acme/ui/Toast.tsx",
+        "@acme/ui/theme.ts",
+        "@acme/ui/types.ts"
+      ],
+      "meta": {
+        "files": 7
+      }
+    },
+    {
+      "id": "@acme/api",
+      "label": "@acme/api",
+      "type": "package",
+      "edges": [
+        "@acme/api/index.ts",
+        "@acme/api/server.ts",
+        "@acme/api/routes/auth.ts",
+        "@acme/api/routes/billing.ts",
+        "@acme/api/routes/users.ts",
+        "@acme/api/middleware/auth.ts",
+        "@acme/api/middleware/logger.ts",
+        "@acme/api/error-handler.ts",
+        "@acme/api/validation.ts",
+        "@acme/api/types.ts"
+      ],
+      "meta": {
+        "files": 10
+      }
+    },
+    {
+      "id": "@acme/web",
+      "label": "@acme/web",
+      "type": "package",
+      "edges": [
+        "@acme/web/index.tsx",
+        "@acme/web/App.tsx",
+        "@acme/web/router.tsx",
+        "@acme/web/store.ts",
+        "@acme/web/pages/login.tsx",
+        "@acme/web/pages/dashboard.tsx",
+        "@acme/web/pages/billing.tsx",
+        "@acme/web/pages/profile.tsx",
+        "@acme/web/hooks/useAuth.ts",
+        "@acme/web/hooks/useUser.ts",
+        "@acme/web/components/Header.tsx",
+        "@acme/web/components/Sidebar.tsx",
+        "@acme/web/components/Footer.tsx"
+      ],
+      "meta": {
+        "files": 13
+      }
+    },
+    {
+      "id": "@acme/utils/index.ts",
+      "label": "@acme/utils/index.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/cache.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/logger.ts",
+      "label": "@acme/utils/logger.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/errors.ts",
+      "label": "@acme/utils/errors.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/logger.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/retry.ts",
+      "label": "@acme/utils/retry.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/logger.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/cache.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/debounce.ts",
+      "label": "@acme/utils/debounce.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/strings.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/errors.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/dates.ts",
+      "label": "@acme/utils/dates.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/logger.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/strings.ts",
+      "label": "@acme/utils/strings.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/retry.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/cache.ts",
+      "label": "@acme/utils/cache.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/debounce.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/dates.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/types.ts",
+      "label": "@acme/utils/types.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/validation.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/strings.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/utils/validation.ts",
+      "label": "@acme/utils/validation.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/utils/strings.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/retry.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/index.ts",
+      "label": "@acme/db/index.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/validation.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/cache.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/client.ts",
+      "label": "@acme/db/client.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/migrations.ts",
+      "label": "@acme/db/migrations.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/types.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/queries.ts",
+      "label": "@acme/db/queries.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/models/user.ts",
+      "label": "@acme/db/models/user.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/validation.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/types.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/models/account.ts",
+      "label": "@acme/db/models/account.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/client.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/strings.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/models/session.ts",
+      "label": "@acme/db/models/session.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/types.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/types.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/db/types.ts",
+      "label": "@acme/db/types.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/db/queries.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/db/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/dates.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/dates.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/auth/index.ts",
+      "label": "@acme/auth/index.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/auth/auth-service.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/models/user.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/auth/auth-service.ts",
+      "label": "@acme/auth/auth-service.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/auth/token-store.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/errors.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/index.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/auth/token-store.ts",
+      "label": "@acme/auth/token-store.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/auth/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/types.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/auth/jwt.ts",
+      "label": "@acme/auth/jwt.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/auth/token-store.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/auth/hash.ts",
+      "label": "@acme/auth/hash.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/auth/auth-service.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/logger.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/logger.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/auth/session.ts",
+      "label": "@acme/auth/session.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/auth/index.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/strings.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/auth/types.ts",
+      "label": "@acme/auth/types.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/auth/jwt.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/hash.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/retry.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/logger.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/index.ts",
+      "label": "@acme/billing/index.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/invoice.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/debounce.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/billing-service.ts",
+      "label": "@acme/billing/billing-service.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/refund.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/types.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/db/client.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/logger.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/invoice.ts",
+      "label": "@acme/billing/invoice.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/refund.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/db/client.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/payment.ts",
+      "label": "@acme/billing/payment.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/refund.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/subscription.ts",
+      "label": "@acme/billing/subscription.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/formatters.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/billing-service.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/db/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/user.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/queries.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/refund.ts",
+      "label": "@acme/billing/refund.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/invoice.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/payment.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/db/client.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/formatters.ts",
+      "label": "@acme/billing/formatters.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/payment.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/strings.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/index.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/billing/types.ts",
+      "label": "@acme/billing/types.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/billing/billing-service.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/billing/payment.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/errors.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/types.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/ui/index.ts",
+      "label": "@acme/ui/index.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/ui/Modal.tsx",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/ui/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/dates.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/models/user.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/ui/Button.tsx",
+      "label": "@acme/ui/Button.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/ui/theme.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/ui/Input.tsx",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/auth/token-store.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/billing/formatters.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/ui/Input.tsx",
+      "label": "@acme/ui/Input.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/ui/Modal.tsx",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/billing/invoice.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/ui/Modal.tsx",
+      "label": "@acme/ui/Modal.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/ui/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/index.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/api/index.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/ui/Toast.tsx",
+      "label": "@acme/ui/Toast.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/ui/Modal.tsx",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/ui/theme.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/auth/token-store.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/session.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/ui/theme.ts",
+      "label": "@acme/ui/theme.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/ui/Button.tsx",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/ui/Input.tsx",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/billing/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/middleware/auth.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/billing/payment.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/ui/types.ts",
+      "label": "@acme/ui/types.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/ui/Input.tsx",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/types.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/index.ts",
+      "label": "@acme/api/index.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/error-handler.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/auth/hash.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/server.ts",
+      "label": "@acme/api/server.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/middleware/auth.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/hash.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/routes/auth.ts",
+      "label": "@acme/api/routes/auth.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/dates.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/routes/billing.ts",
+      "label": "@acme/api/routes/billing.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/middleware/logger.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/api/routes/auth.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/errors.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/routes/users.ts",
+      "label": "@acme/api/routes/users.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/server.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/api/types.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/retry.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/auth-service.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/middleware/auth.ts",
+      "label": "@acme/api/middleware/auth.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/validation.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/billing/types.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/middleware/logger.ts",
+      "label": "@acme/api/middleware/logger.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/error-handler.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/index.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/index.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/auth/index.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/error-handler.ts",
+      "label": "@acme/api/error-handler.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/validation.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/routes/billing.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/invoice.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/validation.ts",
+      "label": "@acme/api/validation.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/middleware/auth.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/server.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/models/user.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/errors.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/api/types.ts",
+      "label": "@acme/api/types.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/api/routes/users.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/utils/validation.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/index.tsx",
+      "label": "@acme/web/index.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/hooks/useAuth.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/session.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/auth/auth-service.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/App.tsx",
+      "label": "@acme/web/App.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/components/Header.tsx",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/web/index.tsx",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/utils/debounce.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/refund.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/router.tsx",
+      "label": "@acme/web/router.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/components/Sidebar.tsx",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/validation.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/store.ts",
+      "label": "@acme/web/store.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/hooks/useUser.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/api/error-handler.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/migrations.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/pages/login.tsx",
+      "label": "@acme/web/pages/login.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/store.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/web/components/Sidebar.tsx",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/utils/dates.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/server.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/pages/dashboard.tsx",
+      "label": "@acme/web/pages/dashboard.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/App.tsx",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/auth/session.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/pages/billing.tsx",
+      "label": "@acme/web/pages/billing.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/store.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/billing/formatters.ts",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/api/middleware/logger.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/pages/profile.tsx",
+      "label": "@acme/web/pages/profile.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/hooks/useUser.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/routes/billing.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/hooks/useAuth.ts",
+      "label": "@acme/web/hooks/useAuth.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/App.tsx",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/models/user.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/error-handler.ts",
+          "edgeType": "type-imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/hooks/useUser.ts",
+      "label": "@acme/web/hooks/useUser.ts",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/pages/dashboard.tsx",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/web/index.tsx",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/models/account.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/formatters.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/components/Header.tsx",
+      "label": "@acme/web/components/Header.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/components/Footer.tsx",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/web/router.tsx",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/api/validation.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/utils/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/subscription.ts",
+          "edgeType": "re-exports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/components/Sidebar.tsx",
+      "label": "@acme/web/components/Sidebar.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/components/Header.tsx",
+          "edgeType": "type-imports"
+        },
+        {
+          "nodeId": "@acme/utils/debounce.ts",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/db/migrations.ts",
+          "edgeType": "imports"
+        }
+      ]
+    },
+    {
+      "id": "@acme/web/components/Footer.tsx",
+      "label": "@acme/web/components/Footer.tsx",
+      "type": "file",
+      "edges": [
+        {
+          "nodeId": "@acme/web/pages/profile.tsx",
+          "edgeType": "re-exports"
+        },
+        {
+          "nodeId": "@acme/api/validation.ts",
+          "edgeType": "imports"
+        }
+      ]
+    }
+  ]
+}

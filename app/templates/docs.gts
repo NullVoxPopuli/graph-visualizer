@@ -54,6 +54,27 @@ const WITH_EDGE_TYPES = `{
   ]
 }`;
 
+const WITH_NODE_TYPES = `{
+  "nodes": [
+    {
+      "id": "@acme/auth",
+      "type": "package",
+      "edges": ["@acme/auth/auth-service.ts", "@acme/auth/session.ts"]
+    },
+    {
+      "id": "@acme/auth/auth-service.ts",
+      "type": "file",
+      "label": "@acme/auth/auth-service.ts",
+      "edges": [
+        { "nodeId": "@acme/auth/session.ts", "edgeType": "imports" },
+        { "nodeId": "@acme/auth/types.ts",   "edgeType": "type-imports" }
+      ]
+    },
+    { "id": "@acme/auth/session.ts", "type": "file" },
+    { "id": "@acme/auth/types.ts",   "type": "file" }
+  ]
+}`;
+
 <template>
   <article class="docs">
     <h1>JSON format</h1>
@@ -71,6 +92,7 @@ const WITH_EDGE_TYPES = `{
     {{"{"}}
       "id":    string | number,   {{!-- required, must be unique --}}
       "label": string,            {{!-- optional, defaults to `id` --}}
+      "type":  string,            {{!-- optional, kind classifier (e.g. "package", "file") --}}
       "edges": Edge[],            {{!-- optional, outgoing edges (see below) --}}
       "meta":  any                {{!-- optional, opaque pass-through --}}
     {{"}"}}, ...
@@ -91,6 +113,13 @@ type Edge =
       </dd>
       <dt><code>label</code> &mdash; optional</dt>
       <dd>Display text shown in the info panel when the node is selected. Defaults to <code>id</code>.</dd>
+      <dt><code>type</code> &mdash; optional</dt>
+      <dd>
+        Free-form kind classifier &mdash; for example <code>&quot;package&quot;</code>,
+        <code>&quot;file&quot;</code>, <code>&quot;class&quot;</code>. Distinct values are
+        interned the same way edge types are, and the selected-node panel
+        surfaces the type alongside id and degree counts.
+      </dd>
       <dt><code>edges</code> &mdash; optional</dt>
       <dd>
         An array of outgoing edges. Each entry is either a bare target id
@@ -123,6 +152,9 @@ type Edge =
 
     <h3>With typed edges</h3>
     <pre class="docs__pre">{{WITH_EDGE_TYPES}}</pre>
+
+    <h3>With node types</h3>
+    <pre class="docs__pre">{{WITH_NODE_TYPES}}</pre>
 
     <h2>Notes</h2>
     <ul>

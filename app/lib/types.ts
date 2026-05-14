@@ -28,4 +28,8 @@ export interface LoadedGraph {
   edgeTypeNames: string[];
   /** Edge type id per (collapsed) edge in `edgesFlat`. Length = edgesFlat.length / 2. */
   edgeTypeIds: Int32Array;
+  /** Distinct node type names. Index 0 is always the empty string (untyped). */
+  nodeTypeNames: string[];
+  /** Node type id per node, indexed by node index. */
+  nodeTypeIds: Int32Array;
 }

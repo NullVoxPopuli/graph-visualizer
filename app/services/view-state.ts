@@ -80,29 +80,19 @@ export default class ViewStateService extends Service {
   }
 
   get hiddenEdgeTypes(): Set<number> {
-    const raw = this.#queryParams["hidden"];
-
-    if (!raw) return EMPTY_SET;
-
-    const out = new Set<number>();
-
-    for (const tok of raw.split(",")) {
-      const n = Number.parseInt(tok, 10);
-
-      if (Number.isFinite(n)) out.add(n);
-    }
-
-    return out;
+    return parseIntSet(this.#queryParams["hidden"]);
   }
 
   toggleHiddenEdgeType(id: number): void {
-    const next = new Set(this.hiddenEdgeTypes);
+    this.#setParam("hidden", serializeIntSet(toggleInSet(this.hiddenEdgeTypes, id)));
+  }
 
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    const serialized = next.size === 0 ? null : [...next].sort((a, b) => a - b).join(",");
+  get hiddenNodeTypes(): Set<number> {
+    return parseIntSet(this.#queryParams["hn"]);
+  }
 
-    this.#setParam("hidden", serialized);
+  toggleHiddenNodeType(id: number): void {
+    this.#setParam("hn", serializeIntSet(toggleInSet(this.hiddenNodeTypes, id)));
   }
 
   /** Selected node id as it appears in the input JSON (string form), or null. */
@@ -150,3 +140,31 @@ export default class ViewStateService extends Service {
 }
 
 const EMPTY_SET: Set<number> = Object.freeze(new Set<number>()) as Set<number>;
+
+function parseIntSet(raw: string | undefined | null): Set<number> {
+  if (!raw) return EMPTY_SET;
+  const out = new Set<number>();
+
+  for (const tok of raw.split(",")) {
+    const n = Number.parseInt(tok, 10);
+
+    if (Number.isFinite(n)) out.add(n);
+  }
+
+  return out;
+}
+
+function serializeIntSet(set: Set<number>): string | null {
+  if (set.size === 0) return null;
+
+  return [...set].sort((a, b) => a - b).join(",");
+}
+
+function toggleInSet(set: Set<number>, id: number): Set<number> {
+  const next = new Set(set);
+
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+
+  return next;
+}

@@ -30,6 +30,12 @@ export type InputEdge = string | number | InputEdgeObject;
 export interface InputNode {
   id: string | number;
   label?: string;
+  /**
+   * Optional kind classifier — e.g. "package", "file", "class". Interned by
+   * the parser into `nodeTypeNames` / `nodeTypeIds` on the LoadedGraph so
+   * downstream code can filter and color by type without re-parsing.
+   */
+  type?: string;
   edges?: InputEdge[];
   meta?: unknown;
 }
@@ -72,6 +78,10 @@ export function validate(input: unknown): InputGraph {
 
     if (nn["label"] !== undefined && typeof nn["label"] !== "string") {
       throw new SchemaError(`nodes[${i}].label must be a string when present.`);
+    }
+
+    if (nn["type"] !== undefined && typeof nn["type"] !== "string") {
+      throw new SchemaError(`nodes[${i}].type must be a string when present.`);
     }
 
     if (nn["edges"] !== undefined) {
