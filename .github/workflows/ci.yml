@@ -12,7 +12,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
   lint:
     name: "Lints"
     runs-on: ubuntu-latest
@@ -27,3 +26,73 @@ jobs:
       - uses: actions/checkout@v6
       - uses: wyvox/action-setup-pnpm@v3
       - run: pnpm test
+
+  build_prod:
+    name: Build for Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: wyvox/action@v2
+      - run: echo ${{ github.event.number }} > ./pr-number.txt
+      - run: pnpm build
+      - run: ls -la ./dist
+      # Used for faster deploy so we don't need to checkout the repo
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deploy-prep-dist
+          if-no-files-found: error
+          path: |
+            dist/**/*
+            !node_modules/
+            !./**/node_modules/
+
+  ##############################################################
+  ##############################################################
+  #
+  # These jobs won't run on pull requests.
+  # They would fail anyway because secrets are not exposed.
+  #
+  ##############################################################
+  ##############################################################
+
+  # NOTE: this is basically the same code as in DeployPreview
+  DeployProduction:
+    name: "Deploy: Production ${{ matrix.app.name }}"
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      # - browserstack-test
+      - build_prod
+      # Don't deploy unless we're in a good state
+      - test
+
+    strategy:
+      matrix:
+        app:
+          - {
+              path: "./",
+              cloudflareName: "graph-visualizer",
+              name: "graph-visualizer",
+            }
+
+    permissions:
+      contents: read
+      deployments: write
+    outputs:
+      limberUrl: ${{ steps.limber.outputs.url }}
+      tutorialUrl: ${{ steps.tutorial.outputs.url }}
+    steps:
+      - uses: actions/download-artifact@v8
+        name: deploy-prep-dist
+      - name: Publish ${{ matrix.app.name }}
+        working-directory: ./deploy-prep-dist/${{ matrix.app.path }}
+        run: |
+          npx wrangler pages deploy ./ \
+            --project-name=${{ matrix.app.cloudflareName }} \
+            --branch=${{ github.event.workflow_run.head_branch }} \
+            --commit-hash=${{ github.event.workflow_run.head_sha }}
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

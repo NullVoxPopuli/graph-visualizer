@@ -142,6 +142,42 @@ export default class InfoPanel extends Component {
     return cycle.map((idx) => ({ id: g.ids[idx]!, label: g.labels[idx]! }));
   }
 
+  /**
+   * The shortest cycle through the selected node on the *original* graph —
+   * no contraction. Walks past every hidden / collapsed intermediate node
+   * so the user can see what's actually in the loop, not just the bundled
+   * stops. Only meaningful when contraction is active and the original
+   * loop is longer than the bundled one; otherwise it's hidden via
+   * `showFullCycle`.
+   */
+  get fullCycleNodes(): NeighborEntry[] {
+    const info = this.info;
+    const g = this.graph.current;
+
+    if (!info || !g) return [];
+    const cycle = findShortestCycleThrough(g, info.index, null);
+
+    if (!cycle) return [];
+
+    return cycle.map((idx) => ({ id: g.ids[idx]!, label: g.labels[idx]! }));
+  }
+
+  /**
+   * Show the full-path section whenever contraction is active and the
+   * original graph has a cycle through this node. Length-equality with
+   * the bundled cycle isn't a reliable signal — the two cycles can share
+   * a length but pass through different nodes, and the user is asking
+   * specifically to see the un-bundled path when bundling is on.
+   */
+  get showFullCycle(): boolean {
+    if (this.fullCycleNodes.length === 0) return false;
+    if (this.viewState.hiddenNodeTypes.size === 0 && this.viewState.collapsedIds.size === 0) {
+      return false;
+    }
+
+    return true;
+  }
+
   get metaEntries(): { key: string; value: string }[] {
     const meta = this.info?.meta;
 
@@ -179,6 +215,10 @@ export default class InfoPanel extends Component {
 
   get cycleOpen(): boolean {
     return this.cycleNodes.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+  }
+
+  get fullCycleOpen(): boolean {
+    return this.fullCycleNodes.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
   @action
@@ -294,6 +334,29 @@ export default class InfoPanel extends Component {
             <p class="panel__empty">Not part of a cycle.</p>
           {{/if}}
         </details>
+
+        {{#if this.showFullCycle}}
+          <details class="panel__section" open={{this.fullCycleOpen}}>
+            <summary class="panel__subhead">full path ({{this.fullCycleNodes.length}})</summary>
+            <ol class="panel__neighbors panel__neighbors--ordered">
+              {{#each this.fullCycleNodes as |entry|}}
+                <li>
+                  <button
+                    type="button"
+                    class="panel__neighbor"
+                    title={{entry.id}}
+                    {{on "click" (fn this.selectNeighbor entry.id)}}
+                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                    {{on "mouseleave" this.unhoverNeighbor}}
+                  >
+                    <span class="panel__neighbor-label">{{entry.label}}</span>
+                    <code class="panel__neighbor-id">{{entry.id}}</code>
+                  </button>
+                </li>
+              {{/each}}
+            </ol>
+          </details>
+        {{/if}}
 
         {{#if this.metaEntries.length}}
           <h3 class="panel__subhead">meta</h3>
