@@ -120,6 +120,46 @@ export class Camera {
     this.behavior.transform(this.selection, this.transformFor(cx, cy, deviceZoom));
   }
 
+  /**
+   * Smoothly interpolate to (cx, cy, deviceZoom) over `durationMs`. Zoom is
+   * interpolated in log space so the animation feels even across orders of
+   * magnitude. Cancels any in-flight animation; calling `setView` (or user
+   * drag/zoom) cancels too.
+   */
+  animateTo(cx: number, cy: number, deviceZoom: number, durationMs = 350): void {
+    this.cancelAnim();
+
+    const fromX = this.x;
+    const fromY = this.y;
+    const fromZoomLog = Math.log(this.zoom);
+    const toZoomLog = Math.log(deviceZoom);
+    const t0 = performance.now();
+    const tick = (): void => {
+      const u = Math.min(1, (performance.now() - t0) / durationMs);
+      const e = 1 - Math.pow(1 - u, 3);
+      const cxNow = fromX + (cx - fromX) * e;
+      const cyNow = fromY + (cy - fromY) * e;
+      const zNow = Math.exp(fromZoomLog + (toZoomLog - fromZoomLog) * e);
+
+      this.behavior.transform(this.selection, this.transformFor(cxNow, cyNow, zNow));
+      if (u < 1) {
+        this.animFrame = requestAnimationFrame(tick);
+      } else {
+        this.animFrame = null;
+      }
+    };
+
+    this.animFrame = requestAnimationFrame(tick);
+  }
+
+  /** True if (x, y) is inside the visible world rect, with optional margin (0..1). */
+  worldPointInView(x: number, y: number, margin = 0.85): boolean {
+    const halfW = (this.width / 2 / this.zoom) * margin;
+    const halfH = (this.height / 2 / this.zoom) * margin;
+
+    return Math.abs(x - this.x) <= halfW && Math.abs(y - this.y) <= halfH;
+  }
+
   cancelAnim(): void {
     if (this.animFrame !== null) {
       cancelAnimationFrame(this.animFrame);

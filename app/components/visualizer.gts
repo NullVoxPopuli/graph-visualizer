@@ -73,6 +73,7 @@ export default class Visualizer extends Component {
   private lastHiddenNodeKey = "";
   private lastCollapsedKey = "";
   private lastSelectedId: string | null = null;
+  private lastFocusTs = 0;
 
   /**
    * Cached "hidden by node type" mask, keyed on `lastHiddenNodeKey`. `null`
@@ -216,6 +217,32 @@ export default class Visualizer extends Component {
       }
       this.dirty = true;
     }
+  }
+
+  /**
+   * Pick up a pending "focus on this id" request from the visualizer
+   * service (set by the search component) and animate the camera to the
+   * node if it's outside the current viewport. No-op when the node is
+   * already visible — don't yank the user around when they didn't need it.
+   */
+  private maybeHandleFocus(scene: ProcessedScene): void {
+    const req = this.visualizer.pendingFocus;
+
+    if (req === null) return;
+    if (req.ts === this.lastFocusTs) return;
+    this.lastFocusTs = req.ts;
+    this.visualizer.pendingFocus = null;
+
+    const idx = scene.graph.idToIndex.get(req.id);
+
+    if (idx === undefined || !this.renderer) return;
+
+    const x = scene.positions[2 * idx]!;
+    const y = scene.positions[2 * idx + 1]!;
+    const cam = this.renderer.camera;
+
+    if (cam.worldPointInView(x, y)) return;
+    cam.animateTo(x, y, cam.zoom);
   }
 
   private repackCycle(scene: ProcessedScene): void {
@@ -673,6 +700,7 @@ export default class Visualizer extends Component {
 
     if (scene) {
       this.reactToScene(scene);
+      this.maybeHandleFocus(scene);
       // Keep redrawing while a node is selected — the halo around the
       // selected node animates and would otherwise freeze the moment the
       // dirty flag clears.

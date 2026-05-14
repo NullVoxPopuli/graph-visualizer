@@ -15,10 +15,12 @@
  */
 import { Camera } from "./camera.ts";
 
-// aInstFlags is a packed bitmask so selection / hover / cycle can compose:
+// aInstFlags is a packed bitmask so selection / hover / cycle / dim can
+// compose:
 //   bit 0 (1) = selected     — animated dashed halo
 //   bit 1 (2) = hovered      — grow body radius
 //   bit 2 (4) = cycle member — red outline
+//   bit 3 (8) = dimmed       — alpha-faded with extra fade at low zoom
 const NODE_VS = /* glsl */ `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aQuad;
@@ -34,11 +36,13 @@ out vec4 vColor;
 out float vBodyPx;
 out float vQuadPx;
 out float vFlags;
+out float vAlphaScale;
 void main() {
   int flags = int(aInstFlags);
   bool sel = (flags & 1) != 0;
   bool hov = (flags & 2) != 0;
   bool cyc = (flags & 4) != 0;
+  bool dim = (flags & 8) != 0;
   // screen-space body radius floor so tiny nodes stay clickable; must
   // match the floor used in hit testing so the visual lines up with the
   // pick.
@@ -56,6 +60,10 @@ void main() {
   vBodyPx = bodyPx;
   vQuadPx = quadPx;
   vFlags = aInstFlags;
+  // Dim nodes fade further the more zoomed out we are — overlapping nodes
+  // mask the dimming when many fit in a small area. mix from 0.06 at
+  // zoom 0 up to 0.35 at zoom >= 1; non-dim nodes are fully opaque.
+  vAlphaScale = dim ? mix(0.06, 0.35, clamp(uZoom, 0.0, 1.0)) : 1.0;
 }`;
 
 const NODE_FS = /* glsl */ `#version 300 es
@@ -65,6 +73,7 @@ in vec4 vColor;
 in float vBodyPx;
 in float vQuadPx;
 in float vFlags;
+in float vAlphaScale;
 uniform float uTime;
 out vec4 fragColor;
 const float TAU = 6.2831853;
@@ -80,7 +89,7 @@ void main() {
   float body = smoothstep(1.0, 1.0 - bodyAa, r);
 
   if (body > 0.01) {
-    fragColor = vec4(vColor.rgb, vColor.a * body);
+    fragColor = vec4(vColor.rgb, vColor.a * vAlphaScale * body);
     return;
   }
 

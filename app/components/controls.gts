@@ -4,6 +4,8 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import Search from "./search.gts";
+
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 
@@ -178,6 +180,7 @@ export default class Controls extends Component<Signature> {
 
   <template>
     <div class="controls">
+      <Search />
       <div class="controls__row">
         <label>
           <input

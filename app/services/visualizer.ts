@@ -178,6 +178,23 @@ export default class VisualizerService extends Service {
   get communityCount(): number {
     return this.scene?.communityCount ?? 0;
   }
+
+  /**
+   * Cross-component pan-to request. Set by the search component (and
+   * anything else that wants to bring a node into view); polled and
+   * cleared by the Visualizer component's rAF loop. Not tracked — the
+   * polling is imperative, and we don't want every read to subscribe.
+   */
+  pendingFocus: { id: string; ts: number } | null = null;
+
+  /**
+   * Ask the renderer to bring the node with this id into view (used by
+   * search). The component reads the request next frame and pans/animates
+   * if the node is outside the current viewport.
+   */
+  focusOnId(id: string): void {
+    this.pendingFocus = { id, ts: Date.now() };
+  }
 }
 
 /**
