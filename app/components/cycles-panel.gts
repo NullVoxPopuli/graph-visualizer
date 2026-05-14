@@ -16,6 +16,7 @@ import { computeRadii } from "#lib/pack";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
+import type { LoadedGraph } from "#lib/types";
 
 interface CycleNode {
   id: string;
@@ -50,10 +51,35 @@ export default class CyclesPanel extends Component {
   @service declare graph: GraphService;
   @service declare visualizer: VisualizerService;
 
+  /**
+   * Memoize the cycle list by graph + contraction inputs. `findAllCycles`
+   * is exponential in the worst case (Johnson on a dense SCC), so we
+   * absolutely cannot run it on every render — URL changes from selection,
+   * hover, etc. would otherwise lock the main thread for seconds at a
+   * time on a large graph.
+   */
+  #lastGraph: LoadedGraph | null = null;
+  #lastCycleKey = "";
+  #lastCycles: CycleEntry[] = [];
+
   get cycles(): CycleEntry[] {
+    // Skip the expensive enumeration entirely when the panel is closed —
+    // nothing in the template renders it, and `findAllCycles` on a
+    // ~10k-node graph is enough to freeze the tab for several seconds.
+    if (!this.viewState.cyclesPanelOpen) return [];
+
     const g = this.graph.current;
 
     if (!g) return [];
+
+    const hiddenTypesKey = serializeIntSet(this.viewState.hiddenNodeTypes);
+    const collapsedKey = serializeStringSet(this.viewState.collapsedIds);
+    const hiddenIdsKey = serializeStringSet(this.viewState.hiddenNodeIds);
+    const key = `${hiddenTypesKey}|${collapsedKey}|${hiddenIdsKey}`;
+
+    if (g === this.#lastGraph && key === this.#lastCycleKey) {
+      return this.#lastCycles;
+    }
 
     const radii = computeRadii(g.inDegree, g.outDegree);
     const contraction = buildContraction(
@@ -65,8 +91,7 @@ export default class CyclesPanel extends Component {
     );
     const remap = contraction?.nodeRemap ?? null;
     const cycles = findAllCycles(g, remap);
-
-    return cycles.map((cycle) => {
+    const mapped = cycles.map((cycle) => {
       const nodes: CycleNode[] = cycle.map((idx) => ({
         id: g.ids[idx]!,
         label: g.labels[idx]!,
@@ -74,6 +99,12 @@ export default class CyclesPanel extends Component {
 
       return { nodes, key: nodes.map((n) => n.id).join("→") };
     });
+
+    this.#lastGraph = g;
+    this.#lastCycleKey = key;
+    this.#lastCycles = mapped;
+
+    return mapped;
   }
 
   get selectedId(): string | null {
@@ -183,6 +214,18 @@ export default class CyclesPanel extends Component {
       </aside>
     {{/if}}
   </template>
+}
+
+function serializeIntSet(set: Set<number>): string {
+  if (set.size === 0) return "";
+
+  return [...set].sort((a, b) => a - b).join(",");
+}
+
+function serializeStringSet(set: Set<string>): string {
+  if (set.size === 0) return "";
+
+  return [...set].sort().join(",");
 }
 
 function add(a: number, b: number): number {

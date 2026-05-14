@@ -263,15 +263,16 @@ export default class ViewStateService extends Service {
   }
 
   /**
-   * Whether the cycles panel is visible. On by default — the URL only
-   * encodes the closed state so a fresh share-link doesn't carry an
-   * implicit "and also hide the panel".
+   * Whether the cycles panel is visible. **Off** by default — opening it
+   * runs `findAllCycles` on the loaded graph, which is exponential in the
+   * worst case and easily freezes the tab when a large file is dropped.
+   * The user opts in explicitly when they want the analysis.
    */
   get cyclesPanelOpen(): boolean {
-    return this.#queryParams["cyclesPanelOpen"] !== "0";
+    return this.#queryParams["cyclesPanelOpen"] === "1";
   }
   set cyclesPanelOpen(v: boolean) {
-    this.#setParam("cyclesPanelOpen", v ? null : "0");
+    this.#setParam("cyclesPanelOpen", v ? "1" : null);
   }
 
   /**
