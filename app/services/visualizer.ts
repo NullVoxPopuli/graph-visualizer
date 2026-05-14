@@ -1,5 +1,4 @@
 import Service, { service } from "@ember/service";
-import { cached } from "@glimmer/tracking";
 import * as Comlink from "comlink";
 import { getPromiseState, type State } from "reactiveweb/get-promise-state";
 
@@ -50,14 +49,40 @@ export default class VisualizerService extends Service {
   @service declare viewState: ViewStateService;
 
   /**
-   * Community detection + radii. Depends only on the graph topology — the
-   * layout sliders shouldn't re-run Louvain.
+   * Community detection + radii. Depends on graph topology and the
+   * Louvain `resolution` slider. Manually memoized by value — `@cached`
+   * here would invalidate on every QP write (the resolution read tracks
+   * `router.currentRoute`), forcing a worker rerun per click.
    */
-  @cached
+  #lastGraph: LoadedGraph | null = null;
+  #lastClustering = Number.NaN;
+  #lastAnalysisPromise: Promise<Analysis> | null = null;
+
   get analysis(): Promise<Analysis> | null {
     const g = this.graph.current;
 
-    return g ? runAnalysis(g) : null;
+    if (!g) {
+      this.#lastGraph = null;
+      this.#lastAnalysisPromise = null;
+
+      return null;
+    }
+
+    const clustering = this.viewState.clustering;
+
+    if (
+      g === this.#lastGraph &&
+      clustering === this.#lastClustering &&
+      this.#lastAnalysisPromise !== null
+    ) {
+      return this.#lastAnalysisPromise;
+    }
+
+    this.#lastGraph = g;
+    this.#lastClustering = clustering;
+    this.#lastAnalysisPromise = runAnalysis(g, clustering);
+
+    return this.#lastAnalysisPromise;
   }
 
   /**
@@ -160,14 +185,18 @@ export default class VisualizerService extends Service {
  * and terminated as soon as the result is back — there's no long-lived
  * background work to manage.
  */
-async function runAnalyze(graph: LoadedGraph): Promise<Int32Array> {
+async function runAnalyze(graph: LoadedGraph, resolution: number): Promise<Int32Array> {
   const worker = new Worker(new URL("../lib/analyze.worker.ts", import.meta.url), {
     type: "module",
   });
   const analyze = Comlink.wrap<AnalyzeEngine>(worker);
 
   try {
-    const init: AnalyzeInit = { nodeCount: graph.ids.length, edges: graph.edgesFlat };
+    const init: AnalyzeInit = {
+      nodeCount: graph.ids.length,
+      edges: graph.edgesFlat,
+      resolution,
+    };
     const result = await analyze.run(init);
 
     return result.communities;
@@ -211,8 +240,8 @@ async function runLayout(
   }
 }
 
-async function runAnalysis(graph: LoadedGraph): Promise<Analysis> {
-  const communities = await runAnalyze(graph);
+async function runAnalysis(graph: LoadedGraph, resolution: number): Promise<Analysis> {
+  const communities = await runAnalyze(graph, resolution);
   const radii = computeRadii(graph.inDegree, graph.outDegree);
   const seen = new Set<number>();
 

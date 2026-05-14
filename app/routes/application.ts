@@ -20,5 +20,6 @@ export default class ApplicationRoute extends Route {
     repulsion: { refreshModel: false },
     nodeDistance: { refreshModel: false },
     clusterDistance: { refreshModel: false },
+    clustering: { refreshModel: false },
   };
 }

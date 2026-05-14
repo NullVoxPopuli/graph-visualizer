@@ -16,6 +16,9 @@ const NODE_DIST_STEP = 2;
 const CLUSTER_DIST_MIN = 30;
 const CLUSTER_DIST_MAX = 800;
 const CLUSTER_DIST_STEP = 10;
+const CLUSTERING_MIN = 0.3;
+const CLUSTERING_MAX = 3;
+const CLUSTERING_STEP = 0.1;
 
 interface EdgeTypeRow {
   id: number;
@@ -161,6 +164,13 @@ export default class Controls extends Component<Signature> {
     if (Number.isFinite(v)) this.viewState.clusterDistance = v;
   }
 
+  @action
+  setClustering(ev: Event): void {
+    const v = Number.parseFloat((ev.target as HTMLInputElement).value);
+
+    if (Number.isFinite(v) && v > 0) this.viewState.clustering = v;
+  }
+
   <template>
     <div class="controls">
       <div class="controls__row">
@@ -254,6 +264,21 @@ export default class Controls extends Component<Signature> {
             {{on "change" this.setRepulsion}}
           />
           <span class="controls__slider-value">{{this.viewState.repulsion}}</span>
+        </label>
+        <label
+          class="controls__slider"
+          title="Louvain resolution. Higher = more, smaller communities; lower = bigger, clingier ones."
+        >
+          <span class="controls__slider-name">clustering</span>
+          <input
+            type="range"
+            min={{CLUSTERING_MIN}}
+            max={{CLUSTERING_MAX}}
+            step={{CLUSTERING_STEP}}
+            value={{this.viewState.clustering}}
+            {{on "change" this.setClustering}}
+          />
+          <span class="controls__slider-value">{{this.viewState.clustering}}</span>
         </label>
       </div>
       <div class="controls__row">

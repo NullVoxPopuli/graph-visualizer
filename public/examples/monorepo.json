@@ -258,6 +258,10 @@
       "type": "file",
       "edges": [
         {
+          "nodeId": "@acme/db/types.ts",
+          "edgeType": "re-exports"
+        },
+        {
           "nodeId": "@acme/utils/strings.ts",
           "edgeType": "re-exports"
         },

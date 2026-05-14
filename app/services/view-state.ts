@@ -31,6 +31,7 @@ type QPs = Record<string, string | null>;
 export const DEFAULT_REPULSION = 6;
 export const DEFAULT_NODE_DISTANCE = 18;
 export const DEFAULT_CLUSTER_DISTANCE = 180;
+export const DEFAULT_CLUSTERING = 1;
 
 export default class ViewStateService extends Service {
   @service declare router: RouterService;
@@ -169,6 +170,21 @@ export default class ViewStateService extends Service {
   }
   set clusterDistance(n: number) {
     this.#setParam("clusterDistance", n === DEFAULT_CLUSTER_DISTANCE ? null : String(n));
+  }
+
+  /**
+   * Louvain resolution. Higher values produce more, smaller communities
+   * (less "clingy"); lower values merge them (more "clingy"). 1 = Louvain's
+   * default modularity weighting.
+   */
+  get clustering(): number {
+    const v = this.#queryParams["clustering"];
+    const n = v === undefined ? NaN : Number.parseFloat(v);
+
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLUSTERING;
+  }
+  set clustering(n: number) {
+    this.#setParam("clustering", n === DEFAULT_CLUSTERING ? null : String(n));
   }
 }
 

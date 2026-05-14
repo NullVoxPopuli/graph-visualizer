@@ -7,6 +7,12 @@ export interface AnalyzeInit {
   nodeCount: number;
   /** flat (from, to, from, to, ...) edge pairs */
   edges: Int32Array;
+  /**
+   * Louvain resolution. >1 produces more, smaller communities (less
+   * "clingy"); <1 merges adjacent communities into bigger ones (more
+   * "clingy"). 1 is Louvain's default modularity weighting.
+   */
+  resolution: number;
 }
 
 export interface AnalyzeResult {
@@ -17,7 +23,7 @@ export interface AnalyzeResult {
 }
 
 const analyzeEngine = {
-  run({ nodeCount, edges }: AnalyzeInit): AnalyzeResult {
+  run({ nodeCount, edges, resolution }: AnalyzeInit): AnalyzeResult {
     const g = new Graph({ type: "directed", multi: false, allowSelfLoops: false });
 
     for (let i = 0; i < nodeCount; i++) g.addNode(i);
@@ -39,7 +45,7 @@ const analyzeEngine = {
       return { communities: comms, communityCount: nodeCount };
     }
 
-    const assignments = louvain(g) as Record<string, number>;
+    const assignments = louvain(g, { resolution }) as Record<string, number>;
     const communities = new Int32Array(nodeCount);
     const seen = new Set<number>();
 
