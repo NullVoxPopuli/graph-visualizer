@@ -397,6 +397,10 @@ export default class Visualizer extends Component {
 
     if (scene) {
       this.reactToScene(scene);
+      // Keep redrawing while a node is selected — the halo around the
+      // selected node animates and would otherwise freeze the moment the
+      // dirty flag clears.
+      if (this.viewState.selectedId !== null) this.dirty = true;
       if (this.dirty && this.renderer) {
         this.renderer.draw();
         this.dirty = false;

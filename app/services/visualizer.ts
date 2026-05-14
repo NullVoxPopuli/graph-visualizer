@@ -62,19 +62,47 @@ export default class VisualizerService extends Service {
 
   /**
    * Full pipeline: analysis + layout. Recomputed when `graph.current`
-   * changes (via `@cached`) and when the layout sliders (repulsion, spring
-   * length) move — so adjusting them re-runs only the force simulation.
+   * changes (via the cached `analysis`) and when the layout sliders
+   * (repulsion, spring length) actually move.
+   *
+   * Manually memoized by value rather than `@cached`: reading
+   * `viewState.repulsion` / `viewState.springLength` tracks
+   * `router.currentRoute`, which churns on every QP write (selection, etc.).
+   * `@cached` would invalidate on that churn and hand out a fresh promise
+   * each click — the new `ProcessedScene` reference would then trip the
+   * "re-fit" path in the renderer component.
    */
-  @cached
+  #lastAnalysis: Promise<Analysis> | null = null;
+  #lastRepulsion = Number.NaN;
+  #lastSpringLength = Number.NaN;
+  #lastProcessing: Promise<ProcessedScene> | null = null;
+
   get processing(): Promise<ProcessedScene> | null {
     const a = this.analysis;
 
-    if (a === null) return null;
+    if (a === null) {
+      this.#lastAnalysis = null;
+      this.#lastProcessing = null;
+
+      return null;
+    }
 
     const repulsion = this.viewState.repulsion;
     const springLength = this.viewState.springLength;
 
-    return a.then(async (analysis) => {
+    if (
+      a === this.#lastAnalysis &&
+      repulsion === this.#lastRepulsion &&
+      springLength === this.#lastSpringLength &&
+      this.#lastProcessing !== null
+    ) {
+      return this.#lastProcessing;
+    }
+
+    this.#lastAnalysis = a;
+    this.#lastRepulsion = repulsion;
+    this.#lastSpringLength = springLength;
+    this.#lastProcessing = a.then(async (analysis) => {
       const positions = await runLayout(analysis.graph, analysis.communities, {
         repulsion,
         springLength,
@@ -88,6 +116,8 @@ export default class VisualizerService extends Service {
         radii: analysis.radii,
       };
     });
+
+    return this.#lastProcessing;
   }
 
   /** isLoading / error / resolved on the active processing promise. */

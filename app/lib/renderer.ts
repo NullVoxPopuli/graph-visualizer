@@ -27,20 +27,26 @@ uniform float uZoom;
 uniform vec2 uViewport;
 out vec2 vQuad;
 out vec4 vColor;
-out float vRadiusPx;
+out float vBodyPx;
+out float vQuadPx;
 out float vFlags;
 void main() {
-  // screen-space radius floor so tiny nodes stay clickable; must match
-  // the floor used in hit testing so the visual lines up with the pick.
-  float rPx = max(4.0, aInstRadius * uZoom);
-  if (aInstFlags > 1.5) rPx *= 1.6;
-  vec2 world = aInstPos + aQuad * (rPx / uZoom);
+  // screen-space body radius floor so tiny nodes stay clickable; must
+  // match the floor used in hit testing so the visual lines up with the
+  // pick.
+  float bodyPx = max(4.0, aInstRadius * uZoom);
+  if (aInstFlags > 1.5) bodyPx *= 1.6;          // hover: grow body
+  float quadPx = bodyPx;
+  if (aInstFlags > 0.5 && aInstFlags < 1.5)
+    quadPx = bodyPx * 1.6;                       // selected: grow quad to fit halo
+  vec2 world = aInstPos + aQuad * (quadPx / uZoom);
   vec2 screen = (world - uCamera) * uZoom;
   vec2 clip = screen / (uViewport * 0.5);
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
   vQuad = aQuad;
   vColor = aInstColor;
-  vRadiusPx = rPx;
+  vBodyPx = bodyPx;
+  vQuadPx = quadPx;
   vFlags = aInstFlags;
 }`;
 
@@ -48,20 +54,44 @@ const NODE_FS = /* glsl */ `#version 300 es
 precision highp float;
 in vec2 vQuad;
 in vec4 vColor;
-in float vRadiusPx;
+in float vBodyPx;
+in float vQuadPx;
 in float vFlags;
+uniform float uTime;
 out vec4 fragColor;
+const float TAU = 6.2831853;
 void main() {
   float d = length(vQuad);
-  float aa = max(1.0 / vRadiusPx, 0.01);
-  float body = smoothstep(1.0, 1.0 - aa, d);
-  if (body < 0.01) discard;
-  vec4 c = vColor;
-  if (vFlags > 0.5) {
-    float ring = smoothstep(0.85, 0.82, d) * smoothstep(0.95, 0.98, d);
-    c.rgb = mix(c.rgb, vec3(1.0), ring);
+  float dPx = d * vQuadPx;
+  float bodyAa = max(1.0 / vBodyPx, 0.01);
+  // 1.0 at the body edge; >1 = outside body.
+  float r = dPx / vBodyPx;
+  float body = smoothstep(1.0, 1.0 - bodyAa, r);
+
+  if (body > 0.01) {
+    fragColor = vec4(vColor.rgb, vColor.a * body);
+    return;
   }
-  fragColor = vec4(c.rgb, c.a * body);
+
+  // Selected: animated dashed halo just outside the body.
+  if (vFlags > 0.5 && vFlags < 1.5) {
+    float ringIn = smoothstep(1.10, 1.15, r);
+    float ringOut = 1.0 - smoothstep(1.35, 1.40, r);
+    float ring = ringIn * ringOut;
+    if (ring > 0.01) {
+      float angle = atan(vQuad.y, vQuad.x) + uTime * 0.8;
+      float dashes = 14.0;
+      float phase = fract(angle / TAU * dashes);
+      // AA around the dash edge (phase = 0.5).
+      float dashOn = 1.0 - smoothstep(0.48, 0.52, phase);
+      float a = ring * dashOn;
+      if (a > 0.01) {
+        fragColor = vec4(1.0, 1.0, 1.0, a * 0.9);
+        return;
+      }
+    }
+  }
+  discard;
 }`;
 
 const LINE_VS = /* glsl */ `#version 300 es
@@ -318,6 +348,10 @@ export class Renderer {
 
     if (this.nodeInstCount > 0) {
       this.setCameraUniforms(this.nodeProg);
+      gl.uniform1f(
+        gl.getUniformLocation(this.nodeProg, "uTime"),
+        (performance.now() % 1e6) / 1000,
+      );
       gl.bindVertexArray(this.nodeVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeInstCount);
     }
