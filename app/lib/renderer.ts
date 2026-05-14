@@ -161,9 +161,14 @@ void main() {
   // Mirror the node vertex shader's screen-px radius floor so the
   // arrow tip lines up just outside the visible body at any zoom.
   float srcRadiusPx = max(4.0, aInstSrcRadius * uZoom);
-  float arrowLen = 12.0;
-  float halfWidth = 6.0;
-  float gapPx = 3.0;
+  // Tie arrow size to the node's screen-px radius so it scales with zoom
+  // the same way the node does. Cap arrowLen at 1/4 of the node's
+  // visible diameter (i.e. half the radius) so the arrowhead stays
+  // subordinate to the node it points at. Floors keep the head readable
+  // when srcRadiusPx is at its own 4px floor.
+  float arrowLen = max(6.0, srcRadiusPx * 0.5);
+  float halfWidth = max(3.0, srcRadiusPx * 0.25);
+  float gapPx = max(1.5, srcRadiusPx * 0.12);
   vec2 tipScreen = srcScreen - dir * (srcRadiusPx + gapPx);
   vec2 cornerOffset = aQuad.x * dir * arrowLen + aQuad.y * perp * halfWidth;
   vec2 screen = tipScreen + cornerOffset;
