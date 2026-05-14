@@ -94,6 +94,7 @@ export function packEdges(
   edgeTypeIds: Int32Array | null = null,
   hiddenTypes: Set<number> | null = null,
   nodeRemap: Int32Array | null = null,
+  restrictToNode: number = -1,
 ): { buffer: Float32Array; vertexCount: number } {
   const E = edgesFlat.length / 2;
   const need = E * 12;
@@ -101,6 +102,7 @@ export function packEdges(
   if (out.length < need) out = new Float32Array(need);
 
   const filter = edgeTypeIds !== null && hiddenTypes !== null && hiddenTypes.size > 0;
+  const restrict = restrictToNode >= 0;
   const N = communities.length;
   const seen = nodeRemap === null ? null : new Set<number>();
   const color: [number, number, number] = [0, 0, 0];
@@ -124,6 +126,8 @@ export function packEdges(
       if (seen!.has(key)) continue;
       seen!.add(key);
     }
+
+    if (restrict && a !== restrictToNode && b !== restrictToNode) continue;
     const ca = communities[a]!;
     const cb = communities[b]!;
     const cross = ca !== cb;
@@ -172,6 +176,7 @@ export function packArrows(
   edgeTypeIds: Int32Array | null = null,
   hiddenTypes: Set<number> | null = null,
   nodeRemap: Int32Array | null = null,
+  restrictToNode: number = -1,
 ): { buffer: Float32Array; count: number } {
   const E = edgesFlat.length / 2;
   const need = E * 9;
@@ -179,6 +184,7 @@ export function packArrows(
   if (out.length < need) out = new Float32Array(need);
 
   const filter = edgeTypeIds !== null && hiddenTypes !== null && hiddenTypes.size > 0;
+  const restrict = restrictToNode >= 0;
   const N = communities.length;
   const seen = nodeRemap === null ? null : new Set<number>();
   const color: [number, number, number] = [0, 0, 0];
@@ -201,6 +207,8 @@ export function packArrows(
       if (seen!.has(key)) continue;
       seen!.add(key);
     }
+
+    if (restrict && a !== restrictToNode && b !== restrictToNode) continue;
 
     const ca = communities[a]!;
     const cb = communities[b]!;

@@ -159,8 +159,11 @@ export default class Visualizer extends Component {
 
     if (showEdges !== this.lastShowEdges) {
       this.lastShowEdges = showEdges;
-      this.renderer?.setShowEdges(showEdges);
+      // Both edges and arrows need to repack: turning edges off only leaves
+      // the selected node's edges in the buffer, and turning them back on
+      // restores the full set.
       this.repackEdges(scene);
+      this.repackArrows(scene);
       this.dirty = true;
     }
 
@@ -204,6 +207,13 @@ export default class Visualizer extends Component {
       // red outline shows up the same frame the cycle edges do.
       this.repackCycle(scene);
       this.repackNodes(scene);
+      // When the global edges toggle is off we only show the edges touching
+      // the selected node, so changing the selection swaps the visible set.
+      // Same idea for arrows.
+      if (!showEdges) {
+        this.repackEdges(scene);
+        this.repackArrows(scene);
+      }
       this.dirty = true;
     }
   }
@@ -336,10 +346,22 @@ export default class Visualizer extends Component {
     this.renderer.uploadNodeInstances(this.nodeInstanceBuf, scene.communities.length);
   }
 
+  /**
+   * When the global "edges" toggle is off, we still reveal the edges that
+   * touch the selected node (so the user can see what flows in/out without
+   * needing to flip the toggle back on). Returns `-1` when no restriction
+   * applies — pack everything matching the type filter.
+   */
+  private edgeRestriction(): number {
+    return this.viewState.showEdges ? -1 : this.selectedIdx;
+  }
+
   private repackEdges(scene: ProcessedScene): void {
     if (!this.renderer) return;
 
-    if (!this.viewState.showEdges) {
+    const restrict = this.edgeRestriction();
+
+    if (!this.viewState.showEdges && restrict < 0) {
       this.renderer.uploadLines(new Float32Array(0), 0);
 
       return;
@@ -353,6 +375,7 @@ export default class Visualizer extends Component {
       scene.graph.edgeTypeIds,
       this.viewState.hiddenEdgeTypes,
       this.nodeRemap,
+      restrict,
     );
 
     this.edgeBuf = buffer;
@@ -368,6 +391,14 @@ export default class Visualizer extends Component {
       return;
     }
 
+    const restrict = this.edgeRestriction();
+
+    if (!this.viewState.showEdges && restrict < 0) {
+      this.renderer.uploadArrows(new Float32Array(0), 0);
+
+      return;
+    }
+
     const { buffer, count } = packArrows(
       scene.graph.edgesFlat,
       scene.positions,
@@ -377,6 +408,7 @@ export default class Visualizer extends Component {
       scene.graph.edgeTypeIds,
       this.viewState.hiddenEdgeTypes,
       this.nodeRemap,
+      restrict,
     );
 
     this.arrowBuf = buffer;
@@ -621,10 +653,13 @@ export default class Visualizer extends Component {
       this.lastCollapsedKey = serializeStringSet(this.viewState.collapsedIds);
       // Sync the renderer's toggles with the URL-backed state before the
       // first draw so an `arrows=0` URL doesn't briefly render arrows.
+      // `showEdges` is no longer a renderer-side flag — the visualizer
+      // controls the line buffer's contents (with selection-only reveal
+      // when the toggle is off) and the renderer just draws whatever's
+      // there.
       this.lastShowEdges = this.viewState.showEdges;
       this.lastShowHulls = this.viewState.showHulls;
       this.lastShowArrows = this.viewState.showArrows;
-      this.renderer?.setShowEdges(this.lastShowEdges);
       this.renderer?.setShowHulls(this.lastShowHulls);
       this.renderer?.setShowArrows(this.lastShowArrows);
       this.repackCycle(scene);

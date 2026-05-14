@@ -248,7 +248,6 @@ export class Renderer {
   private arrowInstCount = 0;
   private arrowInstCapacity = 0;
 
-  private showEdges = true;
   private showHulls = false;
   private showArrows = true;
 
@@ -384,9 +383,6 @@ export class Renderer {
     this.camera.resize(c.width, c.height);
   }
 
-  setShowEdges(v: boolean): void {
-    this.showEdges = v;
-  }
   setShowHulls(v: boolean): void {
     this.showHulls = v;
   }
@@ -506,7 +502,7 @@ export class Renderer {
       gl.drawArrays(gl.TRIANGLES, 0, this.hullVertexCount);
     }
 
-    if (this.showEdges && this.lineVertexCount > 0) {
+    if (this.lineVertexCount > 0) {
       this.setCameraUniforms(this.lineProg);
       gl.bindVertexArray(this.lineVao);
       gl.drawArrays(gl.LINES, 0, this.lineVertexCount);
@@ -518,7 +514,7 @@ export class Renderer {
       gl.drawArrays(gl.LINES, 0, this.cycleVertexCount);
     }
 
-    if (this.showEdges && this.showArrows && this.arrowInstCount > 0) {
+    if (this.showArrows && this.arrowInstCount > 0) {
       this.setCameraUniforms(this.arrowProg);
       gl.bindVertexArray(this.arrowVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, this.arrowInstCount);
