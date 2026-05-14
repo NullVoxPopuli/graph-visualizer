@@ -57,6 +57,7 @@ export default class VisualizerService extends Service {
    */
   #lastGraph: LoadedGraph | null = null;
   #lastClustering = Number.NaN;
+  #lastClusterByLabel = false;
   #lastAnalysisPromise: Promise<Analysis> | null = null;
 
   get analysis(): Promise<Analysis> | null {
@@ -70,10 +71,12 @@ export default class VisualizerService extends Service {
     }
 
     const clustering = this.viewState.clustering;
+    const clusterByLabel = this.viewState.clusterByLabel;
 
     if (
       g === this.#lastGraph &&
       clustering === this.#lastClustering &&
+      clusterByLabel === this.#lastClusterByLabel &&
       this.#lastAnalysisPromise !== null
     ) {
       return this.#lastAnalysisPromise;
@@ -81,7 +84,8 @@ export default class VisualizerService extends Service {
 
     this.#lastGraph = g;
     this.#lastClustering = clustering;
-    this.#lastAnalysisPromise = runAnalysis(g, clustering);
+    this.#lastClusterByLabel = clusterByLabel;
+    this.#lastAnalysisPromise = runAnalysis(g, clustering, clusterByLabel);
 
     return this.#lastAnalysisPromise;
   }
@@ -268,8 +272,16 @@ async function runLayout(
   }
 }
 
-async function runAnalysis(graph: LoadedGraph, resolution: number): Promise<Analysis> {
-  const communities = await runAnalyze(graph, resolution);
+async function runAnalysis(
+  graph: LoadedGraph,
+  resolution: number,
+  clusterByLabel: boolean,
+): Promise<Analysis> {
+  // Label-based clustering is cheap (pure string ops) and doesn't need the
+  // worker. Louvain is the slow path, so it's the only one that goes async.
+  const communities = clusterByLabel
+    ? clusterByLabelPrefix(graph)
+    : await runAnalyze(graph, resolution);
   const radii = computeRadii(graph.inDegree, graph.outDegree);
   const seen = new Set<number>();
 
@@ -281,4 +293,46 @@ async function runAnalysis(graph: LoadedGraph, resolution: number): Promise<Anal
     communityCount: seen.size,
     radii,
   };
+}
+
+/**
+ * Group nodes by their label's parent prefix — everything before the last
+ * "/" or "." separator, whichever appears later. Falls back to the whole
+ * label when the label has no separator, so an `index.ts` and an `app.css`
+ * at the root end up in their own buckets but `src/foo/a.ts` and
+ * `src/foo/b.ts` cluster together as `src/foo`.
+ */
+function clusterByLabelPrefix(graph: LoadedGraph): Int32Array {
+  const N = graph.labels.length;
+  const communities = new Int32Array(N);
+  const bucket = new Map<string, number>();
+
+  for (let i = 0; i < N; i++) {
+    const key = labelPrefix(graph.labels[i] ?? "");
+    let id = bucket.get(key);
+
+    if (id === undefined) {
+      id = bucket.size;
+      bucket.set(key, id);
+    }
+
+    communities[i] = id;
+  }
+
+  return communities;
+}
+
+function labelPrefix(label: string): string {
+  // Prefer "/" — paths group by parent directory. Fall back to "." only when
+  // there's no slash, so dotted namespaces like `com.foo.Bar` still cluster
+  // (`com.foo`). Naively taking the rightmost "/" or "." would treat the
+  // extension as a separator and put every file in its own bucket.
+  const slash = label.lastIndexOf("/");
+
+  if (slash > 0) return label.slice(0, slash);
+  const dot = label.lastIndexOf(".");
+
+  if (dot > 0) return label.slice(0, dot);
+
+  return label;
 }

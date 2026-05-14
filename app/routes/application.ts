@@ -12,6 +12,7 @@ import Route from "@ember/routing/route";
 export default class ApplicationRoute extends Route {
   queryParams = {
     edges: { refreshModel: false },
+    arrows: { refreshModel: false },
     hulls: { refreshModel: false },
     hiddenEdgeTypes: { refreshModel: false },
     hiddenNodeTypes: { refreshModel: false },
@@ -21,5 +22,6 @@ export default class ApplicationRoute extends Route {
     nodeDistance: { refreshModel: false },
     clusterDistance: { refreshModel: false },
     clustering: { refreshModel: false },
+    labelCluster: { refreshModel: false },
   };
 }

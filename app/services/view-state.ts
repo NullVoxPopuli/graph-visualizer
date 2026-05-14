@@ -199,6 +199,19 @@ export default class ViewStateService extends Service {
   set clustering(n: number) {
     this.#setParam("clustering", n === DEFAULT_CLUSTERING ? null : String(n));
   }
+
+  /**
+   * When on, skip Louvain and bucket nodes by their label's path-style
+   * parent prefix (split on "/" or ".") — useful when the graph is
+   * organized by file path / package and topology-based communities don't
+   * line up with intuitive groupings. Off by default.
+   */
+  get clusterByLabel(): boolean {
+    return this.#queryParams["labelCluster"] === "1";
+  }
+  set clusterByLabel(v: boolean) {
+    this.#setParam("labelCluster", v ? "1" : null);
+  }
 }
 
 const EMPTY_SET: Set<number> = Object.freeze(new Set<number>());

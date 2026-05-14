@@ -132,6 +132,11 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
+  toggleClusterByLabel(): void {
+    this.viewState.clusterByLabel = !this.viewState.clusterByLabel;
+  }
+
+  @action
   toggleEdgeType(id: number): void {
     this.viewState.toggleHiddenEdgeType(id);
   }
@@ -207,6 +212,16 @@ export default class Controls extends Component<Signature> {
             {{on "change" this.toggleHulls}}
           />
           cluster hulls
+        </label>
+        <label
+          title="Group nodes by the longest common prefix of their labels (split on `/` or `.`). Useful when the graph is organized by file path or package."
+        >
+          <input
+            type="checkbox"
+            checked={{this.viewState.clusterByLabel}}
+            {{on "change" this.toggleClusterByLabel}}
+          />
+          cluster by label
         </label>
       </div>
       {{#if this.nodeTypes.length}}
