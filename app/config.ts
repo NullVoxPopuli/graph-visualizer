@@ -15,13 +15,3 @@ const ENV: Config = {
 };
 
 export default ENV;
-
-import { setTesting } from "@embroider/macros";
-
-export function enterTestMode() {
-  ENV.locationType = "none";
-  ENV.APP.rootElement = "#ember-testing";
-  ENV.APP.autoboot = false;
-
-  setTesting(true);
-}
