@@ -345,6 +345,39 @@ pre code {
   color: var(--dim);
 }
 
+.controls__details summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.controls__details summary::-webkit-details-marker {
+  display: none;
+}
+
+.controls__details summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.controls__details summary::before {
+  content: "▶";
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+
+.controls__details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.controls__details[open] {
+  gap: 4px;
+}
+
 .controls__types {
   display: flex;
   flex-direction: column;

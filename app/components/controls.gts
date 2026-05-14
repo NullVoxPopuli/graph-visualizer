@@ -227,8 +227,8 @@ export default class Controls extends Component<Signature> {
           </div>
         </div>
       {{/if}}
-      <div class="controls__section">
-        <div class="controls__section-label">layout</div>
+      <details class="controls__section controls__details">
+        <summary class="controls__section-label">layout</summary>
         <label class="controls__slider">
           <span class="controls__slider-name">node distance</span>
           <input
@@ -280,7 +280,7 @@ export default class Controls extends Component<Signature> {
           />
           <span class="controls__slider-value">{{this.viewState.clustering}}</span>
         </label>
-      </div>
+      </details>
       <div class="controls__row">
         <button type="button" {{on "click" @onResetView}}>Reset view</button>
         {{#if this.collapsedCount}}
