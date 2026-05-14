@@ -10,9 +10,12 @@ import type ViewStateService from "#services/view-state";
 const REPULSION_MIN = 1;
 const REPULSION_MAX = 30;
 const REPULSION_STEP = 0.5;
-const SPRING_MIN = 10;
-const SPRING_MAX = 300;
-const SPRING_STEP = 5;
+const NODE_DIST_MIN = 5;
+const NODE_DIST_MAX = 120;
+const NODE_DIST_STEP = 2;
+const CLUSTER_DIST_MIN = 30;
+const CLUSTER_DIST_MAX = 800;
+const CLUSTER_DIST_STEP = 10;
 
 interface EdgeTypeRow {
   id: number;
@@ -89,10 +92,17 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
-  setSpringLength(ev: Event): void {
+  setNodeDistance(ev: Event): void {
     const v = Number.parseFloat((ev.target as HTMLInputElement).value);
 
-    if (Number.isFinite(v)) this.viewState.springLength = v;
+    if (Number.isFinite(v)) this.viewState.nodeDistance = v;
+  }
+
+  @action
+  setClusterDistance(ev: Event): void {
+    const v = Number.parseFloat((ev.target as HTMLInputElement).value);
+
+    if (Number.isFinite(v)) this.viewState.clusterDistance = v;
   }
 
   <template>
@@ -136,16 +146,28 @@ export default class Controls extends Component<Signature> {
       <div class="controls__section">
         <div class="controls__section-label">layout</div>
         <label class="controls__slider">
-          <span class="controls__slider-name">edge length</span>
+          <span class="controls__slider-name">node distance</span>
           <input
             type="range"
-            min={{SPRING_MIN}}
-            max={{SPRING_MAX}}
-            step={{SPRING_STEP}}
-            value={{this.viewState.springLength}}
-            {{on "change" this.setSpringLength}}
+            min={{NODE_DIST_MIN}}
+            max={{NODE_DIST_MAX}}
+            step={{NODE_DIST_STEP}}
+            value={{this.viewState.nodeDistance}}
+            {{on "change" this.setNodeDistance}}
           />
-          <span class="controls__slider-value">{{this.viewState.springLength}}</span>
+          <span class="controls__slider-value">{{this.viewState.nodeDistance}}</span>
+        </label>
+        <label class="controls__slider">
+          <span class="controls__slider-name">cluster distance</span>
+          <input
+            type="range"
+            min={{CLUSTER_DIST_MIN}}
+            max={{CLUSTER_DIST_MAX}}
+            step={{CLUSTER_DIST_STEP}}
+            value={{this.viewState.clusterDistance}}
+            {{on "change" this.setClusterDistance}}
+          />
+          <span class="controls__slider-value">{{this.viewState.clusterDistance}}</span>
         </label>
         <label class="controls__slider">
           <span class="controls__slider-name">repulsion</span>

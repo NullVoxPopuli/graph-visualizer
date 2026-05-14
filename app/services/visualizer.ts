@@ -74,7 +74,8 @@ export default class VisualizerService extends Service {
    */
   #lastAnalysis: Promise<Analysis> | null = null;
   #lastRepulsion = Number.NaN;
-  #lastSpringLength = Number.NaN;
+  #lastNodeDistance = Number.NaN;
+  #lastClusterDistance = Number.NaN;
   #lastProcessing: Promise<ProcessedScene> | null = null;
 
   get processing(): Promise<ProcessedScene> | null {
@@ -88,12 +89,14 @@ export default class VisualizerService extends Service {
     }
 
     const repulsion = this.viewState.repulsion;
-    const springLength = this.viewState.springLength;
+    const nodeDistance = this.viewState.nodeDistance;
+    const clusterDistance = this.viewState.clusterDistance;
 
     if (
       a === this.#lastAnalysis &&
       repulsion === this.#lastRepulsion &&
-      springLength === this.#lastSpringLength &&
+      nodeDistance === this.#lastNodeDistance &&
+      clusterDistance === this.#lastClusterDistance &&
       this.#lastProcessing !== null
     ) {
       return this.#lastProcessing;
@@ -101,11 +104,13 @@ export default class VisualizerService extends Service {
 
     this.#lastAnalysis = a;
     this.#lastRepulsion = repulsion;
-    this.#lastSpringLength = springLength;
+    this.#lastNodeDistance = nodeDistance;
+    this.#lastClusterDistance = clusterDistance;
     this.#lastProcessing = a.then(async (analysis) => {
       const positions = await runLayout(analysis.graph, analysis.communities, {
         repulsion,
-        springLength,
+        nodeDistance,
+        clusterDistance,
       });
 
       return {
@@ -178,7 +183,7 @@ async function runAnalyze(graph: LoadedGraph): Promise<Int32Array> {
 async function runLayout(
   graph: LoadedGraph,
   communities: Int32Array,
-  params: { repulsion: number; springLength: number },
+  params: { repulsion: number; nodeDistance: number; clusterDistance: number },
 ): Promise<Float32Array> {
   const worker = new Worker(new URL("../lib/layout.worker.ts", import.meta.url), {
     type: "module",
@@ -190,9 +195,13 @@ async function runLayout(
       nodeCount: graph.ids.length,
       edges: graph.edgesFlat,
       communities,
-      spreadFactor: 1.2,
+      // The per-batch cluster spread used to amplify positions ~9x, which
+      // dwarfed the spring/charge forces and meant the sliders had no
+      // visible effect after auto-fit normalized the result.
+      spreadFactor: 1,
       repulsion: params.repulsion,
-      springLength: params.springLength,
+      nodeDistance: params.nodeDistance,
+      clusterDistance: params.clusterDistance,
       cohesion: 0.12,
     };
 

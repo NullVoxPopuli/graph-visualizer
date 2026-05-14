@@ -16,8 +16,9 @@ type QPs = Record<string, string | null>;
  *   h       — show cluster hulls (1/0, default 0)
  *   hidden  — comma-separated edge type ids the user has filtered out
  *   sel     — selected node id (string from the input JSON)
- *   r       — repulsion force   (number, default 6)
- *   s       — spring/edge length (number, default 60)
+ *   r       — repulsion force        (number, default 6)
+ *   nd      — node distance, intra-cluster spring length  (number, default 18)
+ *   cd      — cluster distance, inter-cluster spring length (number, default 180)
  *
  * Reads come from `router.currentRoute.queryParams`. Writes go through
  * `router.transitionTo({ queryParams })`, batched on rAF so a flurry of
@@ -26,7 +27,8 @@ type QPs = Record<string, string | null>;
  * URL ends up out of sync with what the user actually picked.
  */
 export const DEFAULT_REPULSION = 6;
-export const DEFAULT_SPRING_LENGTH = 60;
+export const DEFAULT_NODE_DISTANCE = 18;
+export const DEFAULT_CLUSTER_DISTANCE = 180;
 
 export default class ViewStateService extends Service {
   @service declare router: RouterService;
@@ -124,15 +126,26 @@ export default class ViewStateService extends Service {
     this.#setParam("r", n === DEFAULT_REPULSION ? null : String(n));
   }
 
-  /** Target edge (spring) length fed into the d3-force link force. */
-  get springLength(): number {
-    const v = this.#queryParams["s"];
+  /** Spring length for edges that stay inside a community. */
+  get nodeDistance(): number {
+    const v = this.#queryParams["nd"];
     const n = v === undefined ? NaN : Number.parseFloat(v);
 
-    return Number.isFinite(n) ? n : DEFAULT_SPRING_LENGTH;
+    return Number.isFinite(n) ? n : DEFAULT_NODE_DISTANCE;
   }
-  set springLength(n: number) {
-    this.#setParam("s", n === DEFAULT_SPRING_LENGTH ? null : String(n));
+  set nodeDistance(n: number) {
+    this.#setParam("nd", n === DEFAULT_NODE_DISTANCE ? null : String(n));
+  }
+
+  /** Spring length for edges that cross community boundaries. */
+  get clusterDistance(): number {
+    const v = this.#queryParams["cd"];
+    const n = v === undefined ? NaN : Number.parseFloat(v);
+
+    return Number.isFinite(n) ? n : DEFAULT_CLUSTER_DISTANCE;
+  }
+  set clusterDistance(n: number) {
+    this.#setParam("cd", n === DEFAULT_CLUSTER_DISTANCE ? null : String(n));
   }
 }
 

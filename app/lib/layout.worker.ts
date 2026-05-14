@@ -20,7 +20,10 @@ export interface LayoutInit {
   communities: Int32Array;
   spreadFactor: number;
   repulsion: number;
-  springLength: number;
+  /** Equilibrium distance for edges that stay inside a single community. */
+  nodeDistance: number;
+  /** Equilibrium distance for edges that cross a community boundary. */
+  clusterDistance: number;
   cohesion: number;
 }
 
@@ -32,20 +35,39 @@ const layoutEngine = {
    * `getPromiseState` instead of maintaining their own ticking state.
    */
   async run(init: LayoutInit): Promise<Float32Array> {
-    const { nodeCount, edges, communities, spreadFactor, repulsion, springLength, cohesion } =
-      init;
+    const {
+      nodeCount,
+      edges,
+      communities,
+      spreadFactor,
+      repulsion,
+      nodeDistance,
+      clusterDistance,
+      cohesion,
+    } = init;
 
     const nodes: SimNode[] = [];
 
     for (let i = 0; i < nodeCount; i++) nodes.push({ id: i });
 
-    const links: SimulationLinkDatum<SimNode>[] = [];
+    // Split links by whether they cross a community boundary. Most edges in
+    // a Louvain-clustered graph are intra-cluster — using one `link` force
+    // for both means `springLength` mostly tunes within-cluster spacing,
+    // and after the auto-fit camera normalizes the result the slider looks
+    // like a no-op. Pulling inter-cluster edges out lets `springLength`
+    // actually push communities apart.
+    const intraLinks: SimulationLinkDatum<SimNode>[] = [];
+    const interLinks: SimulationLinkDatum<SimNode>[] = [];
 
     for (let i = 0; i < edges.length; i += 2) {
       const a = edges[i]!;
       const b = edges[i + 1]!;
 
-      if (a !== b) links.push({ source: a, target: b });
+      if (a === b) continue;
+      const link: SimulationLinkDatum<SimNode> = { source: a, target: b };
+
+      if (communities[a] === communities[b]) intraLinks.push(link);
+      else interLinks.push(link);
     }
 
     seedByCommunity(nodes, communities);
@@ -58,11 +80,18 @@ const layoutEngine = {
           .theta(0.9),
       )
       .force(
-        "link",
-        forceLink<SimNode, SimulationLinkDatum<SimNode>>(links)
+        "intraLink",
+        forceLink<SimNode, SimulationLinkDatum<SimNode>>(intraLinks)
           .id((n) => n.id)
-          .distance(springLength)
-          .strength(0.02),
+          .distance(nodeDistance)
+          .strength(0.5),
+      )
+      .force(
+        "interLink",
+        forceLink<SimNode, SimulationLinkDatum<SimNode>>(interLinks)
+          .id((n) => n.id)
+          .distance(clusterDistance)
+          .strength(0.5),
       )
       .force("center", forceCenter(0, 0).strength(0.02))
       .force("cohesion", communityCohesionForce(communities, cohesion))
