@@ -39,9 +39,7 @@ export function inflate(
 }
 
 /** Convex polygon → triangle fan, returned as a flat XY Float32Array for gl.TRIANGLES. */
-export function triangulateFan(
-  poly: readonly (readonly [number, number])[],
-): Float32Array {
+export function triangulateFan(poly: readonly (readonly [number, number])[]): Float32Array {
   if (poly.length < 3) return new Float32Array(0);
 
   const out = new Float32Array((poly.length - 2) * 6);

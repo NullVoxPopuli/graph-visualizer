@@ -6,7 +6,7 @@ import { action } from "@ember/object";
 
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
-import { type Example,EXAMPLES } from "#lib/examples";
+import { type Example, EXAMPLES } from "#lib/examples";
 import { parseGraphJson } from "#lib/parser";
 
 import type { ParsedInput } from "./file-drop.gts";

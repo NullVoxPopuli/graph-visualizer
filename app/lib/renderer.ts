@@ -356,11 +356,7 @@ export class Renderer {
 
     gl.bindBuffer(gl.ARRAY_BUFFER, arrowQuadVbo);
     // tip at (0, 0); base corners along -X with ±1 in the perpendicular axis
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([0, 0, -1, 1, -1, -1]),
-      gl.STATIC_DRAW,
-    );
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, -1, 1, -1, -1]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
@@ -536,10 +532,7 @@ export class Renderer {
 
     if (this.nodeInstCount > 0) {
       this.setCameraUniforms(this.nodeProg);
-      gl.uniform1f(
-        gl.getUniformLocation(this.nodeProg, "uTime"),
-        (performance.now() % 1e6) / 1000,
-      );
+      gl.uniform1f(gl.getUniformLocation(this.nodeProg, "uTime"), (performance.now() % 1e6) / 1000);
       gl.bindVertexArray(this.nodeVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeInstCount);
     }

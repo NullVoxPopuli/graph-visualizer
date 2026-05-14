@@ -245,11 +245,7 @@ function communityCohesionForce(
   return force;
 }
 
-function applyClusterSpread(
-  nodes: SimNode[],
-  communities: Int32Array,
-  spreadFactor: number,
-): void {
+function applyClusterSpread(nodes: SimNode[], communities: Int32Array, spreadFactor: number): void {
   let maxComm = 0;
 
   for (let i = 0; i < communities.length; i++) {

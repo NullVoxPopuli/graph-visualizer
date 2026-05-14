@@ -71,11 +71,7 @@ jobs:
     strategy:
       matrix:
         app:
-          - {
-              path: "./",
-              cloudflareName: "graph-visualizer",
-              name: "graph-visualizer",
-            }
+          - { path: "./", cloudflareName: "graph-visualizer", name: "graph-visualizer" }
 
     permissions:
       contents: read

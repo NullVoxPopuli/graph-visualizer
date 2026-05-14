@@ -256,7 +256,12 @@ export default class InfoPanel extends Component {
       <aside class="panel">
         <div class="panel__head">
           <h2 class="panel__title">{{this.info.label}}</h2>
-          <button type="button" class="panel__close" {{on "click" this.close}} aria-label="Close">×</button>
+          <button
+            type="button"
+            class="panel__close"
+            {{on "click" this.close}}
+            aria-label="Close"
+          >×</button>
         </div>
         <p class="panel__id">id: <code>{{this.info.id}}</code></p>
         {{#if this.info.type}}

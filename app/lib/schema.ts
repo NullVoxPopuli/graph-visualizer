@@ -100,15 +100,11 @@ export function validate(input: unknown): InputGraph {
           const eo = e as Record<string, unknown>;
 
           if (typeof eo["nodeId"] !== "string" && typeof eo["nodeId"] !== "number") {
-            throw new SchemaError(
-              `nodes[${i}].edges[${k}].nodeId must be a string or number.`,
-            );
+            throw new SchemaError(`nodes[${i}].edges[${k}].nodeId must be a string or number.`);
           }
 
           if (typeof eo["edgeType"] !== "string") {
-            throw new SchemaError(
-              `nodes[${i}].edges[${k}].edgeType must be a string.`,
-            );
+            throw new SchemaError(`nodes[${i}].edges[${k}].edgeType must be a string.`);
           }
 
           continue;

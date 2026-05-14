@@ -23,7 +23,8 @@ export const EXAMPLES: Example[] = [
   },
   {
     label: "monorepo",
-    description: "7 packages, ~10 files each · package / file types, imports / type-imports / re-exports",
+    description:
+      "7 packages, ~10 files each · package / file types, imports / type-imports / re-exports",
     url: "/examples/monorepo.json",
   },
   {

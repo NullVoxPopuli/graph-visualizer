@@ -140,11 +140,7 @@ jobs:
     strategy:
       matrix:
         app:
-          - {
-              path: ".",
-              cloudflareName: "graph-visualizer",
-              name: "graph-visualizer",
-            }
+          - { path: ".", cloudflareName: "graph-visualizer", name: "graph-visualizer" }
     steps:
       - name: Download build artifact
         uses: actions/download-artifact@v8

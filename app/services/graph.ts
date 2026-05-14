@@ -68,7 +68,7 @@ export default class GraphService extends Service {
     } catch (err) {
       // Persistence failures shouldn't block the user from exploring the
       // graph that's already in memory.
-       
+
       console.error("Failed to persist graph to IDB:", err);
     }
   }
@@ -83,7 +83,6 @@ export default class GraphService extends Service {
       await db.delete(STORE_NAME, DATA_KEY);
       await db.delete(STORE_NAME, NAME_KEY);
     } catch (err) {
-       
       console.error("Failed to clear stored graph from IDB:", err);
     }
   }
@@ -116,7 +115,6 @@ export default class GraphService extends Service {
         this.fileName = name ?? null;
       }
     } catch (err) {
-       
       console.error("Failed to restore graph from IDB:", err);
     } finally {
       this.restoring = false;

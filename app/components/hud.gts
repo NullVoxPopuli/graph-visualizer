@@ -8,9 +8,14 @@ export default class Hud extends Component {
 
   <template>
     <div class="hud">
-      {{this.visualizer.nodeCount}} nodes · {{this.visualizer.edgeCount}} edges
+      {{this.visualizer.nodeCount}}
+      nodes ·
+      {{this.visualizer.edgeCount}}
+      edges
       {{#if this.visualizer.isReady}}
-        · {{this.visualizer.communityCount}} communities · settled
+        ·
+        {{this.visualizer.communityCount}}
+        communities · settled
       {{/if}}
     </div>
   </template>

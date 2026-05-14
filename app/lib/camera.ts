@@ -77,7 +77,7 @@ export class Camera {
     const t = this.currentTransform();
     // deltaMode 0 = pixels, 1 = lines (~16px), 2 = pages (~viewport).
     const scale = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? this.height / this.dpr() : 1;
-    const shifted = t.translate(-ev.deltaX * scale / t.k, -ev.deltaY * scale / t.k);
+    const shifted = t.translate((-ev.deltaX * scale) / t.k, (-ev.deltaY * scale) / t.k);
 
     this.behavior.transform(this.selection, shifted);
   };

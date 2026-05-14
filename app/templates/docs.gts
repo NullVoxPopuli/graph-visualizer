@@ -80,9 +80,9 @@ const WITH_NODE_TYPES = `{
     <h1>JSON format</h1>
     <p>
       The visualizer reads a single JSON document with a top-level
-      <code>nodes</code> array. Each node carries its outgoing edges as a list
-      of target node ids. The whole file is read in the browser &mdash; nothing
-      is uploaded.
+      <code>nodes</code>
+      array. Each node carries its outgoing edges as a list of target node ids. The whole file is
+      read in the browser &mdash; nothing is uploaded.
     </p>
 
     <h2>Schema</h2>
@@ -90,52 +90,58 @@ const WITH_NODE_TYPES = `{
 {{"{"}}
   "nodes": [
     {{"{"}}
-      "id":    string | number,   {{!-- required, must be unique --}}
-      "label": string,            {{!-- optional, defaults to `id` --}}
-      "type":  string,            {{!-- optional, kind classifier (e.g. "package", "file") --}}
-      "edges": Edge[],            {{!-- optional, outgoing edges (see below) --}}
-      "meta":  any                {{!-- optional, opaque pass-through --}}
+      "id":    string | number,   {{! required, must be unique }}
+      "label": string,            {{! optional, defaults to `id` }}
+      "type":  string,            {{! optional, kind classifier (e.g. "package", "file") }}
+      "edges": Edge[],            {{! optional, outgoing edges (see below) }}
+      "meta":  any                {{! optional, opaque pass-through }}
     {{"}"}}, ...
   ]
 {{"}"}}
 
 type Edge =
-  | string | number                            {{!-- bare target id --}}
+  | string | number                            {{! bare target id }}
   | {{"{"}} "nodeId": string | number,
-      "edgeType": string {{"}"}}                       {{!-- typed edge --}}</pre>
+      "edgeType": string {{"}"}}                       {{! typed edge }}</pre>
 
     <h3>Fields</h3>
     <dl class="docs__dl">
       <dt><code>id</code> &mdash; required</dt>
       <dd>
-        Unique identifier for the node. May be a string or number; numbers are
-        coerced to strings internally. Duplicate ids cause a parse error.
+        Unique identifier for the node. May be a string or number; numbers are coerced to strings
+        internally. Duplicate ids cause a parse error.
       </dd>
       <dt><code>label</code> &mdash; optional</dt>
-      <dd>Display text shown in the info panel when the node is selected. Defaults to <code>id</code>.</dd>
+      <dd>Display text shown in the info panel when the node is selected. Defaults to
+        <code>id</code>.</dd>
       <dt><code>type</code> &mdash; optional</dt>
       <dd>
-        Free-form kind classifier &mdash; for example <code>&quot;package&quot;</code>,
-        <code>&quot;file&quot;</code>, <code>&quot;class&quot;</code>. Distinct values are
-        interned the same way edge types are, and the selected-node panel
-        surfaces the type alongside id and degree counts.
+        Free-form kind classifier &mdash; for example
+        <code>&quot;package&quot;</code>,
+        <code>&quot;file&quot;</code>,
+        <code>&quot;class&quot;</code>. Distinct values are interned the same way edge types are,
+        and the selected-node panel surfaces the type alongside id and degree counts.
       </dd>
       <dt><code>edges</code> &mdash; optional</dt>
       <dd>
-        An array of outgoing edges. Each entry is either a bare target id
-        (string or number) or an object <code>{{"{ nodeId, edgeType }"}}</code>
-        where <code>nodeId</code> is the target and <code>edgeType</code> is a
-        string label classifying the relationship (<code>&quot;calls&quot;</code>,
-        <code>&quot;depends-on&quot;</code>, etc.). Both forms can be mixed in
-        the same array. Edges referencing unknown ids are dropped with a
-        console warning; duplicate <code>(from, to)</code> pairs are collapsed
-        (first edge type wins); self-loops are dropped.
+        An array of outgoing edges. Each entry is either a bare target id (string or number) or an
+        object
+        <code>{{"{ nodeId, edgeType }"}}</code>
+        where
+        <code>nodeId</code>
+        is the target and
+        <code>edgeType</code>
+        is a string label classifying the relationship (<code>&quot;calls&quot;</code>,
+        <code>&quot;depends-on&quot;</code>, etc.). Both forms can be mixed in the same array. Edges
+        referencing unknown ids are dropped with a console warning; duplicate
+        <code>(from, to)</code>
+        pairs are collapsed (first edge type wins); self-loops are dropped.
       </dd>
       <dt><code>meta</code> &mdash; optional</dt>
       <dd>
-        Any user-defined object. Rendered as a key/value list in the selected
-        node panel. Top-level keys with string/number/boolean values render as
-        text; nested objects are serialized as JSON.
+        Any user-defined object. Rendered as a key/value list in the selected node panel. Top-level
+        keys with string/number/boolean values render as text; nested objects are serialized as
+        JSON.
       </dd>
     </dl>
 
@@ -158,9 +164,14 @@ type Edge =
 
     <h2>Notes</h2>
     <ul>
-      <li>The graph is treated as <strong>directed</strong> &mdash; <code>edges</code> on node A pointing at node B means &quot;A → B&quot;.</li>
+      <li>The graph is treated as
+        <strong>directed</strong>
+        &mdash;
+        <code>edges</code>
+        on node A pointing at node B means &quot;A → B&quot;.</li>
       <li>Communities are computed automatically with Louvain modularity clustering.</li>
-      <li>Initial positions are computed with a d3-force simulation. Layout runs in a Web Worker and emits ~12 batches before settling.</li>
+      <li>Initial positions are computed with a d3-force simulation. Layout runs in a Web Worker and
+        emits ~12 batches before settling.</li>
       <li>The renderer is WebGL2-instanced; 50k+ nodes are practical on modern hardware.</li>
     </ul>
 

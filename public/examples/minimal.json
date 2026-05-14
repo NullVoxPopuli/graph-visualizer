@@ -1,14 +1,14 @@
 {
   "nodes": [
-    { "id": "a", "label": "Alpha",   "edges": ["b", "c"] },
-    { "id": "b", "label": "Beta",    "edges": ["c", "d"] },
-    { "id": "c", "label": "Gamma",   "edges": ["d"] },
-    { "id": "d", "label": "Delta",   "edges": ["e"] },
+    { "id": "a", "label": "Alpha", "edges": ["b", "c"] },
+    { "id": "b", "label": "Beta", "edges": ["c", "d"] },
+    { "id": "c", "label": "Gamma", "edges": ["d"] },
+    { "id": "d", "label": "Delta", "edges": ["e"] },
     { "id": "e", "label": "Epsilon", "edges": ["a"] },
-    { "id": "f", "label": "Zeta",    "edges": ["a", "b"] },
-    { "id": "g", "label": "Eta",     "edges": ["f"] },
-    { "id": "h", "label": "Theta",   "edges": ["g", "i"] },
-    { "id": "i", "label": "Iota",    "edges": ["j"] },
-    { "id": "j", "label": "Kappa",   "edges": ["h"] }
+    { "id": "f", "label": "Zeta", "edges": ["a", "b"] },
+    { "id": "g", "label": "Eta", "edges": ["f"] },
+    { "id": "h", "label": "Theta", "edges": ["g", "i"] },
+    { "id": "i", "label": "Iota", "edges": ["j"] },
+    { "id": "j", "label": "Kappa", "edges": ["h"] }
   ]
 }

@@ -117,4 +117,3 @@ export default class FileDrop extends Component<Signature> {
     </div>
   </template>
 }
-

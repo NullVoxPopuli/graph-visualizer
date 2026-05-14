@@ -66,7 +66,7 @@ export function buildContraction(
   const mask = new Uint8Array(N);
 
   for (let i = 0; i < N; i++) {
-    mask[i] = (typeHidden[i]! ^ invertTarget[i]!);
+    mask[i] = typeHidden[i]! ^ invertTarget[i]!;
   }
 
   // Assign each hidden node an "owner" — its nearest visible predecessor.
