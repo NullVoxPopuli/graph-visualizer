@@ -30,7 +30,7 @@
     "lint:fix": "concurrently \"pnpm:lint:*:fix\" --names \"fix:\" --prefixColors auto && pnpm format",
     "format": "prettier --write .",
     "lint:prettier": "prettier --check .",
-    "build:test": "vite build --mode development",
+    "build:test": "EMBER_ENV=test vite build --mode development",
     "test:ci": "testem ci --port 0",
     "test": "pnpm build:test && pnpm test:ci",
     "lint:types": "ember-tsc --noEmit"
