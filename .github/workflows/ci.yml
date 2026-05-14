@@ -87,7 +87,7 @@ jobs:
       - uses: actions/download-artifact@v8
         name: deploy-prep-dist
       - name: Publish ${{ matrix.app.name }}
-        working-directory: ./deploy-prep-dist/${{ matrix.app.path }}
+        working-directory: ${{ matrix.app.path }}
         run: |
           npx wrangler pages deploy ./ \
             --project-name=${{ matrix.app.cloudflareName }} \
