@@ -605,7 +605,9 @@ pre code {
 .panel__neighbors {
   list-style: none;
   margin: 0;
-  padding: 0;
+  /* Indent un-numbered lists clearly past the section heading so the
+     items read as nested under it. */
+  padding: 0 0 0 22px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -625,7 +627,7 @@ pre code {
 .panel__neighbors--ordered li::before {
   content: counter(cycle) ".";
   position: absolute;
-  left: -16px;
+  left: -18px;
   top: 4px;
   color: var(--dim);
   font-size: 11px;
@@ -634,10 +636,6 @@ pre code {
     SFMono-Regular,
     Menlo,
     monospace;
-}
-
-.panel__neighbors--ordered {
-  padding-left: 18px;
 }
 
 .panel__neighbor {

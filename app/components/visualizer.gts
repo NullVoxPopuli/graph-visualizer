@@ -55,8 +55,16 @@ export default class Visualizer extends Component {
   private picker: Flatbush | null = null;
   private pickerDirty = true;
 
-  /** Mouse hover state — transient, not URL-worthy and not tracked. */
+  /**
+   * Effective hover state used by `repackNodes`. Resolved each frame from
+   * `canvasHoveredIdx` (mouse over the canvas) and `externalHoverId` on
+   * the visualizer service (info-panel row hover, etc.) — external wins
+   * when set so panel-row hover takes precedence over a stale canvas
+   * hover sitting underneath the panel.
+   */
   private hoveredIdx = -1;
+  private canvasHoveredIdx = -1;
+  private lastExternalHoverId: string | null = null;
   private dirty = true;
   private rafHandle: number | null = null;
   private resizeHandler = (): void => this.handleResize();
@@ -602,14 +610,34 @@ export default class Visualizer extends Component {
     const sy = ev.clientY - rect.top;
     const idx = this.pickAt(sx, sy);
 
-    if (idx !== this.hoveredIdx) {
-      this.hoveredIdx = idx;
-      const scene = this.visualizer.scene;
-
-      if (scene) this.repackNodes(scene);
+    if (idx !== this.canvasHoveredIdx) {
+      this.canvasHoveredIdx = idx;
+      // Don't repack here; let `maybeReactToHover` in the rAF loop
+      // merge canvas + external hover sources and decide.
       this.dirty = true;
     }
   };
+
+  /**
+   * Per-frame: combine canvas hover and external (panel) hover into the
+   * single `hoveredIdx` the renderer uses, repacking nodes if it changed.
+   */
+  private maybeReactToHover(scene: ProcessedScene): void {
+    const externalId = this.visualizer.externalHoverId;
+    let resolved = this.canvasHoveredIdx;
+
+    if (externalId !== null) {
+      const idx = scene.graph.idToIndex.get(externalId);
+
+      if (idx !== undefined) resolved = idx;
+    }
+
+    if (resolved === this.hoveredIdx && externalId === this.lastExternalHoverId) return;
+    this.hoveredIdx = resolved;
+    this.lastExternalHoverId = externalId;
+    this.repackNodes(scene);
+    this.dirty = true;
+  }
 
   onPointerDown = (ev: PointerEvent): void => {
     if (ev.button !== 0) return;
@@ -700,6 +728,7 @@ export default class Visualizer extends Component {
 
     if (scene) {
       this.reactToScene(scene);
+      this.maybeReactToHover(scene);
       this.maybeHandleFocus(scene);
       // Keep redrawing while a node is selected — the halo around the
       // selected node animates and would otherwise freeze the moment the

@@ -10,6 +10,7 @@ import { computeRadii } from "#lib/pack";
 
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
+import type VisualizerService from "#services/visualizer";
 
 interface NeighborEntry {
   id: string;
@@ -27,6 +28,7 @@ interface SelectedInfo {
 export default class InfoPanel extends Component {
   @service declare viewState: ViewStateService;
   @service declare graph: GraphService;
+  @service declare visualizer: VisualizerService;
 
   /**
    * Resolve the URL-encoded selected id to a typed SelectedInfo from the
@@ -169,6 +171,21 @@ export default class InfoPanel extends Component {
     this.viewState.selectedId = id;
   }
 
+  /**
+   * Mirror the row's hover state into the visualizer service so the
+   * Visualizer's rAF loop can grow the corresponding node on the canvas
+   * (same flag the on-canvas mouse hover sets).
+   */
+  @action
+  hoverNeighbor(id: string): void {
+    this.visualizer.externalHoverId = id;
+  }
+
+  @action
+  unhoverNeighbor(): void {
+    this.visualizer.externalHoverId = null;
+  }
+
   <template>
     {{#if this.info}}
       <aside class="panel">
@@ -193,6 +210,8 @@ export default class InfoPanel extends Component {
                   class="panel__neighbor"
                   title={{entry.id}}
                   {{on "click" (fn this.selectNeighbor entry.id)}}
+                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                  {{on "mouseleave" this.unhoverNeighbor}}
                 >
                   <span class="panel__neighbor-label">{{entry.label}}</span>
                   <code class="panel__neighbor-id">{{entry.id}}</code>
@@ -214,6 +233,8 @@ export default class InfoPanel extends Component {
                   class="panel__neighbor"
                   title={{entry.id}}
                   {{on "click" (fn this.selectNeighbor entry.id)}}
+                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                  {{on "mouseleave" this.unhoverNeighbor}}
                 >
                   <span class="panel__neighbor-label">{{entry.label}}</span>
                   <code class="panel__neighbor-id">{{entry.id}}</code>
@@ -235,6 +256,8 @@ export default class InfoPanel extends Component {
                   class="panel__neighbor"
                   title={{entry.id}}
                   {{on "click" (fn this.selectNeighbor entry.id)}}
+                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                  {{on "mouseleave" this.unhoverNeighbor}}
                 >
                   <span class="panel__neighbor-label">{{entry.label}}</span>
                   <code class="panel__neighbor-id">{{entry.id}}</code>

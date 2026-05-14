@@ -188,6 +188,14 @@ export default class VisualizerService extends Service {
   pendingFocus: { id: string; ts: number } | null = null;
 
   /**
+   * Node id currently hovered from outside the canvas (info-panel rows,
+   * search results, etc.). Polled by the Visualizer's rAF loop and folded
+   * into the same hover-grow visual that on-canvas mouse hover uses. Not
+   * tracked.
+   */
+  externalHoverId: string | null = null;
+
+  /**
    * Ask the renderer to bring the node with this id into view (used by
    * search). The component reads the request next frame and pans/animates
    * if the node is outside the current viewport.
