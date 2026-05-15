@@ -13,6 +13,7 @@
 /.vite/
 /.pnp*
 .pnp.*
+*.yaml
 
 # ember-try
 /.node_modules.ember-try/
