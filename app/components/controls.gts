@@ -4,6 +4,8 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import { hasAnyCycle } from "#lib/cycle";
+
 import Search from "./search.gts";
 
 import type GraphService from "#services/graph";
@@ -157,11 +159,29 @@ export default class Controls extends Component<Signature> {
 
   @action
   openCyclesPanel(): void {
+    // Also drop any saved geometry: a previous session may have left
+    // the panel at coordinates that are off-screen on this viewport,
+    // in which case flipping `cyclesPanelOpen` to true would render
+    // the panel where the user can't see it — making "Show cycles"
+    // look like a dead button. Resetting to the CSS default position
+    // is harmless when geometry was already null.
+    this.viewState.cyclesPanelGeometry = null;
     this.viewState.cyclesPanelOpen = true;
   }
 
+  /**
+   * Surface the "Show cycles" button whenever the graph actually has
+   * cycles — regardless of the `cyclesPanelOpen` flag. Previously the
+   * button hid as soon as `cyclesPanelOpen` flipped to `true`, which
+   * created a dead-zone: a stale URL with `cyclesPanelOpen=1` plus a
+   * selection scoped to a node that isn't in any cycle meant the
+   * cycles panel rendered nothing *and* the button was gone, leaving
+   * no way to re-summon it. Keeping the button visible while cycles
+   * exist costs a tiny bit of redundancy when the panel is also on
+   * screen but makes the recovery path obvious.
+   */
   get showCyclesPanelButton(): boolean {
-    return this.graph.current !== null && !this.viewState.cyclesPanelOpen;
+    return this.graph.current !== null && this.hasAnyCycles;
   }
 
   /**
@@ -180,6 +200,22 @@ export default class Controls extends Component<Signature> {
 
   get showRecenterPanelsButton(): boolean {
     return this.viewState.infoPanelGeometry !== null || this.viewState.cyclesPanelGeometry !== null;
+  }
+
+  /**
+   * Whether the currently-loaded graph contains any directed cycle at
+   * all. Uses the fast `hasAnyCycle` back-edge DFS so this footer stays
+   * cheap even when the user is dragging sliders — it returns at the
+   * very first back edge rather than enumerating the whole cycle set.
+   * Returns `false` when no graph is loaded so the footer reads
+   * accurately on the initial empty state too.
+   */
+  get hasAnyCycles(): boolean {
+    const g = this.graph.current;
+
+    if (!g) return false;
+
+    return hasAnyCycle(g);
   }
 
   /**
@@ -277,7 +313,7 @@ export default class Controls extends Component<Signature> {
 
   <template>
     {{#if this.viewState.controlsOpen}}
-      <div class="controls">
+      <div class="panel controls">
         <button
           type="button"
           class="controls__toggle"
@@ -479,6 +515,15 @@ export default class Controls extends Component<Signature> {
             >Recenter panels</button>
           {{/if}}
         </div>
+        {{#if this.graph.current}}
+          <p class="controls__cycles-status">
+            {{#if this.hasAnyCycles}}
+              There is at least one cycle.
+            {{else}}
+              There are no cycles.
+            {{/if}}
+          </p>
+        {{/if}}
         <p class="controls__hint">
           drag / wheel: pan · ctrl+wheel / pinch: zoom · click: select · right-click: clear
         </p>

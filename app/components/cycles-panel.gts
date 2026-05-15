@@ -5,7 +5,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { buildContraction } from "#lib/contract";
-import { canonicalCycleKey, findBundledCyclesViaRaw } from "#lib/cycle";
+import { canonicalCycleKey, findBundledCyclesViaRaw, hasAnyCycle } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -61,6 +61,24 @@ export default class CyclesPanel extends Component {
   #lastGraph: LoadedGraph | null = null;
   #lastCycleKey = "";
   #lastCycles: CycleEntry[] = [];
+
+  /**
+   * Reason the cycles list is empty — drives the empty-state copy.
+   * `"none"` is the all-good case where there's something to show.
+   * `"graph"` means the raw graph has no cycles at all (uses the cheap
+   * back-edge DFS). `"scoped"` means cycles exist but the current view
+   * (selected-node scope, hidden nodes, type filters) hides them all —
+   * the user can recover by clearing the selection or unhiding things.
+   */
+  get emptyReason(): "none" | "graph" | "scoped" {
+    if (this.cycles.length > 0) return "none";
+
+    const g = this.graph.current;
+
+    if (!g) return "graph";
+
+    return hasAnyCycle(g) ? "scoped" : "graph";
+  }
 
   get cycles(): CycleEntry[] {
     // Skip the expensive enumeration entirely when the panel is closed —
@@ -188,9 +206,9 @@ export default class CyclesPanel extends Component {
   );
 
   <template>
-    {{#if (and this.cycles.length this.viewState.cyclesPanelOpen)}}
+    {{#if this.viewState.cyclesPanelOpen}}
       <aside
-        class="cycles-panel"
+        class="panel cycles-panel"
         aria-label="Cycle list"
         {{this.applyGeometry}}
         {{this.observePanelSize}}
@@ -208,6 +226,16 @@ export default class CyclesPanel extends Component {
             {{on "click" this.close}}
           >×</button>
         </div>
+        {{#unless this.cycles.length}}
+          <p class="cycles-panel__empty">
+            {{#if (eq this.emptyReason "scoped")}}
+              No cycles match the current view. Try clearing the selection (right-click in the
+              canvas) or unhiding nodes.
+            {{else}}
+              This graph has no cycles.
+            {{/if}}
+          </p>
+        {{/unless}}
         <ol class="cycles-panel__list">
           {{#each this.cycles key="key" as |cycle i|}}
             <li class="cycles-panel__entry">
@@ -261,10 +289,6 @@ function serializeStringSet(set: Set<string>): string {
 
 function add(a: number, b: number): number {
   return a + b;
-}
-
-function and(a: unknown, b: unknown): unknown {
-  return a && b;
 }
 
 function eq(a: unknown, b: unknown): boolean {

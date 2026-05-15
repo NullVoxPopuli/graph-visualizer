@@ -315,21 +315,14 @@ pre code {
 }
 
 .controls {
-  position: fixed;
+  /* Position + intrinsic-size only — visual treatment (bg, blur,
+   * border, radius) comes from the shared `.panel` base. */
   top: 64px;
   left: 12px;
-  z-index: 2;
-  background: var(--panel-soft);
-  backdrop-filter: blur(6px);
-  border: 1px solid var(--line);
-  border-radius: 6px;
   padding: 10px 12px;
   min-width: 240px;
   font-size: 13px;
-  display: flex;
-  flex-direction: column;
   gap: 8px;
-  pointer-events: auto;
   transform-origin: top left;
   animation: controls-pop-in 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -565,6 +558,16 @@ pre code {
   font-size: 11px;
   color: var(--dim);
   margin: 0;
+}
+
+.controls__cycles-status {
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11.5px;
+  font-style: italic;
+  text-align: center;
 }
 
 .controls__section-head {
@@ -840,26 +843,38 @@ pre code {
   text-align: right;
 }
 
+/* Shared base for every floating panel — the cycles, info, and
+ * controls panels all carry this class in addition to their own
+ * `.cycles-panel` / `.info-panel` / `.controls` modifier. The base sets
+ * the things the user wants identical across panels (background, blur,
+ * border, radius, stacking, display direction). Position, size, and
+ * internal padding live on the variant so each panel can still occupy
+ * its own corner of the viewport. */
 .panel {
   position: fixed;
-  right: 0;
+  z-index: 2;
+  background: var(--panel-soft);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+
+.info-panel {
   top: 50px;
-  /* Default fills the right column down to the viewport bottom.
-     Manual resize via the bottom-right handle overrides with an inline
-     height. */
-  height: calc(100vh - 50px);
+  right: 12px;
+  /* Default fills the right column down to the viewport bottom (with a
+     12px gap so the rounded corner is visible). Manual resize via the
+     bottom-right handle overrides with an inline height. */
+  height: calc(100vh - 62px);
   width: 340px;
   min-width: 240px;
   min-height: 160px;
   max-width: 96vw;
   max-height: 96vh;
-  background: var(--panel);
-  border-left: 1px solid var(--line);
-  padding: 0;
-  z-index: 2;
   font-size: 13px;
-  display: flex;
-  flex-direction: column;
   /* `resize: both` puts a native drag handle at the bottom-right.
      `overflow: hidden` lets the handle render; internal scrolling lives
      on a child. */
@@ -1176,16 +1191,6 @@ pre code {
   font-style: italic;
 }
 
-.panel__cycles-status {
-  margin: 12px 0 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-  color: var(--dim);
-  font-size: 11.5px;
-  font-style: italic;
-  text-align: center;
-}
-
 .panel__stats dt,
 .panel__meta dt {
   color: var(--muted);
@@ -1211,7 +1216,8 @@ pre code {
 /* ---------- cycles panel ---------- */
 
 .cycles-panel {
-  position: fixed;
+  /* Position + size only — visual treatment (bg, blur, border, radius)
+   * comes from the shared `.panel` base. */
   left: 12px;
   bottom: 12px;
   width: 280px;
@@ -1223,15 +1229,8 @@ pre code {
   min-height: 120px;
   max-width: 96vw;
   max-height: 96vh;
-  background: var(--panel-soft);
-  backdrop-filter: blur(6px);
-  border: 1px solid var(--line);
-  border-radius: 6px;
   padding: 0 0 6px;
-  display: flex;
-  flex-direction: column;
   font-size: 12px;
-  z-index: 2;
   /* `resize: both` puts a native drag handle in the bottom-right corner.
      `overflow: hidden` here is what makes the resize handle appear; the
      internal list does its own scrolling. */
@@ -1301,6 +1300,15 @@ pre code {
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+}
+
+.cycles-panel__empty {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--dim);
+  font-size: 12px;
+  font-style: italic;
+  text-align: center;
 }
 
 .cycles-panel__entry {
