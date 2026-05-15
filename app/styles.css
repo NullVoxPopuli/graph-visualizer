@@ -1133,7 +1133,11 @@ pre code {
   text-align: right;
 }
 
-.panel__cycle-hidden {
+/* Shared by both the info-panel and cycles-panel for the
+ * "… N hidden — click to expand" and "show less" affordances in their
+ * cycle node lists. Defined panel-agnostic so it carries one consistent
+ * look across both surfaces. */
+.cycle-hidden {
   display: block;
   width: 100%;
   background: transparent;
@@ -1147,7 +1151,7 @@ pre code {
   cursor: pointer;
 }
 
-.panel__cycle-hidden:hover {
+.cycle-hidden:hover {
   color: var(--accent);
   text-decoration: underline;
 }

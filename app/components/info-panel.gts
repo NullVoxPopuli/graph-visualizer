@@ -5,6 +5,7 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import { type Collapsed, collapseList, toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
 import {
   bundleRawCycles,
@@ -39,13 +40,6 @@ interface DisplayedCycleNode {
   node: NeighborEntry;
 }
 
-interface Collapsed<T> {
-  head: T[];
-  /** When > 0, render a "… N hidden …" marker between head and tail. */
-  hiddenCount: number;
-  tail: T[];
-}
-
 interface CycleEntry {
   /** Bundled cycle — the visible reps the canvas red-rings. */
   nodes: NeighborEntry[];
@@ -71,40 +65,6 @@ interface CycleEntry {
   occurrencesLength: number;
   /** stable key for `{{#each}}` — deterministic per bundled cycle. */
   key: string;
-}
-
-/**
- * Collapse `items` to `head + hidden marker + tail` so a long list
- * renders as four rows. When `expanded` is true we bypass the collapse
- * and put everything in `head` — the user clicked the marker to see
- * the full list. Lists of 5 or fewer rows are never collapsed (the
- * marker would save at most one row and just hide context).
- */
-function collapseList<T>(items: T[], expanded: boolean): Collapsed<T> {
-  if (expanded || items.length <= 5) {
-    return { head: items, hiddenCount: 0, tail: [] };
-  }
-
-  const last = items.length - 1;
-
-  return {
-    head: [items[0]!, items[1]!],
-    hiddenCount: items.length - 3,
-    tail: [items[last]!],
-  };
-}
-
-/**
- * Toggle membership of `key` in `set`, returning a fresh `Set` so the
- * `@tracked` slot detects the change.
- */
-function toggleInSet(set: Set<string>, key: string): Set<string> {
-  const next = new Set(set);
-
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-
-  return next;
 }
 
 interface SelectedInfo {
@@ -610,7 +570,7 @@ export default class InfoPanel extends Component {
                         <li>
                           <button
                             type="button"
-                            class="panel__cycle-hidden"
+                            class="cycle-hidden"
                             title="Show all {{cycle.nodes.length}} nodes"
                             {{on "click" (fn this.toggleCycleNodeList cycle.key)}}
                           >… {{cycle.cycleList.hiddenCount}} hidden — click to expand</button>
@@ -642,7 +602,7 @@ export default class InfoPanel extends Component {
                         <li>
                           <button
                             type="button"
-                            class="panel__cycle-hidden"
+                            class="cycle-hidden"
                             title="Collapse the node list"
                             {{on "click" (fn this.toggleCycleNodeList cycle.key)}}
                           >show less</button>
@@ -680,7 +640,7 @@ export default class InfoPanel extends Component {
                                 <td colspan="2">
                                   <button
                                     type="button"
-                                    class="panel__cycle-hidden"
+                                    class="cycle-hidden"
                                     title="Show all {{cycle.occurrencesLength}} occurrences"
                                     {{on "click" (fn this.toggleCycleOccList cycle.key)}}
                                   >… {{cycle.occList.hiddenCount}} hidden — click to expand</button>
@@ -712,7 +672,7 @@ export default class InfoPanel extends Component {
                                 <td colspan="2">
                                   <button
                                     type="button"
-                                    class="panel__cycle-hidden"
+                                    class="cycle-hidden"
                                     title="Collapse the occurrence list"
                                     {{on "click" (fn this.toggleCycleOccList cycle.key)}}
                                   >show less</button>
