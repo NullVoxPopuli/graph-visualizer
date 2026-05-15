@@ -517,55 +517,6 @@ export default class InfoPanel extends Component {
   </template>
 }
 
-/**
- * Map a raw cycle (node sequence over the original graph) to its
- * contracted equivalent. Collapses consecutive same-rep nodes (a chain
- * of hidden nodes that all map to the same owner becomes one stop) and
- * trims the wrap-around duplicate at the end. Returns `null` for
- * pathological cases — an orphan-after-remap node (`-1`) or a cycle
- * that contracts to a 0/1-node walk.
- */
-function contractCycle(raw: number[], remap: Int32Array | null): number[] | null {
-  if (remap === null) {
-    // No contraction — the bundled cycle is the raw cycle.
-    return raw.slice();
-  }
-
-  const out: number[] = [];
-
-  for (const idx of raw) {
-    const r = remap[idx]!;
-
-    if (r < 0) return null;
-    if (out.length > 0 && out[out.length - 1] === r) continue;
-    out.push(r);
-  }
-
-  // The raw cycle's last → first edge also collapses if the two endpoints
-  // share a rep — handle that wrap-around case here.
-  while (out.length > 1 && out[0] === out[out.length - 1]) out.pop();
-
-  return out.length >= 2 ? out : null;
-}
-
-/**
- * Rotate the cycle so the smallest node index is first, then stringify.
- * Two cycles that are rotations of each other (same nodes in the same
- * order, just starting from a different point) produce the same key.
- */
-function canonicalKey(cycle: number[]): string {
-  let minIdx = 0;
-
-  for (let i = 1; i < cycle.length; i++) {
-    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
-  }
-
-  const out: number[] = [];
-
-  for (let i = 0; i < cycle.length; i++) out.push(cycle[(minIdx + i) % cycle.length]!);
-
-  return out.join(",");
-}
 
 function add(a: number, b: number): number {
   return a + b;
