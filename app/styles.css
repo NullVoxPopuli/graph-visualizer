@@ -1055,7 +1055,10 @@ pre code {
 }
 
 .panel__occurrence-count-col {
-  width: 2.4em;
+  width: 4em;
+  white-space: nowrap;
+  word-break: keep-all;
+  padding-left: 8px !important;
   text-align: right !important;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric: tabular-nums;
@@ -1090,25 +1093,41 @@ pre code {
   gap: 2px;
 }
 
-.panel__neighbors--ordered {
-  /* Counter-style numbering for the cycle list — list-style would clip
-     against `padding: 0`. */
-  counter-reset: cycle;
-}
-
 .panel__neighbors--ordered li {
-  counter-increment: cycle;
+  /* Each row carries its own `.panel__neighbor-index` because long
+     cycles get collapsed and the rendered number isn't always
+     row-position + 1 (e.g. a 22-node cycle ends in `22.`, not `4.`). */
   position: relative;
 }
 
-.panel__neighbors--ordered li::before {
-  content: counter(cycle) ".";
+.panel__neighbor-index {
   position: absolute;
-  left: -18px;
+  left: -22px;
   top: 4px;
+  width: 20px;
   color: var(--dim);
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: right;
+}
+
+.panel__cycle-hidden {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11.5px;
+  font-style: italic;
+  text-align: left;
+  cursor: pointer;
+}
+
+.panel__cycle-hidden:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .panel__neighbor {

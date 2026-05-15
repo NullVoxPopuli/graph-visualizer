@@ -1,4 +1,5 @@
 import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
 import { fn } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
@@ -32,17 +33,78 @@ interface OccurrenceEntry extends NeighborEntry {
   count: number;
 }
 
+interface DisplayedCycleNode {
+  /** 1-based position in the bundled cycle. */
+  index: number;
+  node: NeighborEntry;
+}
+
+interface Collapsed<T> {
+  head: T[];
+  /** When > 0, render a "… N hidden …" marker between head and tail. */
+  hiddenCount: number;
+  tail: T[];
+}
+
 interface CycleEntry {
   /** Bundled cycle — the visible reps the canvas red-rings. */
   nodes: NeighborEntry[];
   /**
-   * Underlying raw nodes that participate in cycles contracting to this
-   * bundled one, with counts. Empty when no contraction is active (the
-   * bundled cycle is the raw cycle, no separate accounting is useful).
+   * Long cycles are rendered as `head … hidden … tail` so a 22-node
+   * loop doesn't take 22 rows. `head` is the first couple of nodes,
+   * `tail` is the closing node, and `hiddenCount` is the number of
+   * nodes hidden between them. When the user has expanded this cycle
+   * `head` holds the full list and `hiddenCount`/`tail` are empty.
    */
-  occurrences: OccurrenceEntry[];
+  cycleList: Collapsed<DisplayedCycleNode>;
+  /**
+   * Same `head / hiddenCount / tail` collapse applied to the per-node
+   * occurrence counts. Empty `head` (and zero `hiddenCount`) when no
+   * contraction is active.
+   */
+  occList: Collapsed<OccurrenceEntry>;
+  /**
+   * Full raw occurrence list — kept so the template can show the
+   * occurrence count in the section header even when the list is
+   * collapsed.
+   */
+  occurrencesLength: number;
   /** stable key for `{{#each}}` — deterministic per bundled cycle. */
   key: string;
+}
+
+/**
+ * Collapse `items` to `head + hidden marker + tail` so a long list
+ * renders as four rows. When `expanded` is true we bypass the collapse
+ * and put everything in `head` — the user clicked the marker to see
+ * the full list. Lists of 5 or fewer rows are never collapsed (the
+ * marker would save at most one row and just hide context).
+ */
+function collapseList<T>(items: T[], expanded: boolean): Collapsed<T> {
+  if (expanded || items.length <= 5) {
+    return { head: items, hiddenCount: 0, tail: [] };
+  }
+
+  const last = items.length - 1;
+
+  return {
+    head: [items[0]!, items[1]!],
+    hiddenCount: items.length - 3,
+    tail: [items[last]!],
+  };
+}
+
+/**
+ * Toggle membership of `key` in `set`, returning a fresh `Set` so the
+ * `@tracked` slot detects the change.
+ */
+function toggleInSet(set: Set<string>, key: string): Set<string> {
+  const next = new Set(set);
+
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+
+  return next;
 }
 
 interface SelectedInfo {
@@ -57,6 +119,26 @@ export default class InfoPanel extends Component {
   @service declare viewState: ViewStateService;
   @service declare graph: GraphService;
   @service declare visualizer: VisualizerService;
+
+  /**
+   * Set of `cycle.key`s whose node list is currently expanded. Tracked
+   * by replacing the Set so Glimmer picks up the change. State is
+   * intentionally per-component: a new selection rebuilds the cycle
+   * list with the same key set, so expansion choices persist across
+   * selections of the same node but reset when the panel is torn down.
+   */
+  @tracked private expandedNodeLists: Set<string> = new Set();
+  @tracked private expandedOccLists: Set<string> = new Set();
+
+  @action
+  toggleCycleNodeList(key: string): void {
+    this.expandedNodeLists = toggleInSet(this.expandedNodeLists, key);
+  }
+
+  @action
+  toggleCycleOccList(key: string): void {
+    this.expandedOccLists = toggleInSet(this.expandedOccLists, key);
+  }
 
   /**
    * Resolve the URL-encoded selected id to a typed SelectedInfo from the
@@ -248,9 +330,16 @@ export default class InfoPanel extends Component {
         occurrences.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
       }
 
+      const indexedNodes: DisplayedCycleNode[] = nodes.map((node, i) => ({
+        index: i + 1,
+        node,
+      }));
+
       entries.push({
         nodes,
-        occurrences,
+        cycleList: collapseList(indexedNodes, this.expandedNodeLists.has(bundledKey)),
+        occList: collapseList(occurrences, this.expandedOccLists.has(bundledKey)),
+        occurrencesLength: occurrences.length,
         key: bundledKey,
       });
     }
@@ -283,21 +372,74 @@ export default class InfoPanel extends Component {
   /**
    * Default to open when the section is short enough to scan at a glance;
    * collapse otherwise so a node with hundreds of incoming edges doesn't
-   * push the rest of the panel off-screen. The user can click to toggle
-   * either way; we only set the initial state.
+   * push the rest of the panel off-screen. Once the user manually
+   * toggles a section their explicit choice is persisted in the URL
+   * (see `viewState.infoInOpenOverride` etc.) and wins over the
+   * auto-default; toggling back to the natural state clears the URL key
+   * so the auto-default takes over again.
    */
   static readonly AUTO_OPEN_THRESHOLD = 20;
 
   get inOpen(): boolean {
+    const override = this.viewState.infoInOpenOverride;
+
+    if (override !== null) return override;
+
     return this.inNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
   get outOpen(): boolean {
+    const override = this.viewState.infoOutOpenOverride;
+
+    if (override !== null) return override;
+
     return this.outNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
   get cyclesOpen(): boolean {
+    const override = this.viewState.infoCyclesOpenOverride;
+
+    if (override !== null) return override;
+
     return this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+  }
+
+  /**
+   * `<summary>` click handler. The browser would normally toggle the
+   * parent `<details>` for us — we preventDefault and run the toggle
+   * through `viewState` instead so the new open state lands in the URL
+   * and the next page load (or shared link) picks it up. When the new
+   * state happens to match what the auto-default would have picked the
+   * override is cleared, keeping URLs free of redundant noise.
+   */
+  @action
+  toggleIn(event: MouseEvent): void {
+    event.preventDefault();
+
+    const willOpen = !this.inOpen;
+    const autoOpen = this.inNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+
+    this.viewState.infoInOpenOverride = willOpen === autoOpen ? null : willOpen;
+  }
+
+  @action
+  toggleOut(event: MouseEvent): void {
+    event.preventDefault();
+
+    const willOpen = !this.outOpen;
+    const autoOpen = this.outNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+
+    this.viewState.infoOutOpenOverride = willOpen === autoOpen ? null : willOpen;
+  }
+
+  @action
+  toggleCycles(event: MouseEvent): void {
+    event.preventDefault();
+
+    const willOpen = !this.cyclesOpen;
+    const autoOpen = this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+
+    this.viewState.infoCyclesOpenOverride = willOpen === autoOpen ? null : willOpen;
   }
 
   @action
@@ -389,7 +531,7 @@ export default class InfoPanel extends Component {
           </p>
 
           <details class="panel__section" open={{this.inOpen}}>
-            <summary class="panel__subhead">in ({{this.inNeighbors.length}})</summary>
+            <summary class="panel__subhead" {{on "click" this.toggleIn}}>in ({{this.inNeighbors.length}})</summary>
             {{#if this.inNeighbors.length}}
               <ul class="panel__neighbors">
                 {{#each this.inNeighbors as |entry|}}
@@ -414,7 +556,7 @@ export default class InfoPanel extends Component {
           </details>
 
           <details class="panel__section" open={{this.outOpen}}>
-            <summary class="panel__subhead">out ({{this.outNeighbors.length}})</summary>
+            <summary class="panel__subhead" {{on "click" this.toggleOut}}>out ({{this.outNeighbors.length}})</summary>
             {{#if this.outNeighbors.length}}
               <ul class="panel__neighbors">
                 {{#each this.outNeighbors as |entry|}}
@@ -439,32 +581,75 @@ export default class InfoPanel extends Component {
           </details>
 
           <details class="panel__section" open={{this.cyclesOpen}}>
-            <summary class="panel__subhead">cycles ({{this.cycles.length}})</summary>
+            <summary class="panel__subhead" {{on "click" this.toggleCycles}}>cycles ({{this.cycles.length}})</summary>
             {{#if this.cycles.length}}
               <ol class="panel__cycles">
                 {{#each this.cycles key="key" as |cycle i|}}
                   <li class="panel__cycle">
                     <div class="panel__cycle-head">#{{add i 1}} · {{cycle.nodes.length}} nodes</div>
                     <ol class="panel__neighbors panel__neighbors--ordered">
-                      {{#each cycle.nodes key="id" as |entry|}}
+                      {{#each cycle.cycleList.head key="@index" as |entry|}}
                         <li>
+                          <span class="panel__neighbor-index">{{entry.index}}.</span>
                           <button
                             type="button"
                             class="panel__neighbor"
-                            title={{entry.id}}
-                            {{on "click" (fn this.selectNeighbor entry.id)}}
-                            {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                            title={{entry.node.id}}
+                            {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                            {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
                             {{on "mouseleave" this.unhoverNeighbor}}
                           >
-                            <span class="panel__neighbor-label">{{entry.label}}</span>
-                            {{#if (notEq entry.id entry.label)}}
-                              <code class="panel__neighbor-id">{{entry.id}}</code>
+                            <span class="panel__neighbor-label">{{entry.node.label}}</span>
+                            {{#if (notEq entry.node.id entry.node.label)}}
+                              <code class="panel__neighbor-id">{{entry.node.id}}</code>
                             {{/if}}
                           </button>
                         </li>
                       {{/each}}
+                      {{#if cycle.cycleList.hiddenCount}}
+                        <li>
+                          <button
+                            type="button"
+                            class="panel__cycle-hidden"
+                            title="Show all {{cycle.nodes.length}} nodes"
+                            {{on "click" (fn this.toggleCycleNodeList cycle.key)}}
+                          >… {{cycle.cycleList.hiddenCount}} hidden — click to expand</button>
+                        </li>
+                      {{/if}}
+                      {{#each cycle.cycleList.tail key="@index" as |entry|}}
+                        <li>
+                          <span class="panel__neighbor-index">{{entry.index}}.</span>
+                          <button
+                            type="button"
+                            class="panel__neighbor"
+                            title={{entry.node.id}}
+                            {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                            {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
+                            {{on "mouseleave" this.unhoverNeighbor}}
+                          >
+                            <span class="panel__neighbor-label">{{entry.node.label}}</span>
+                            {{#if (notEq entry.node.id entry.node.label)}}
+                              <code class="panel__neighbor-id">{{entry.node.id}}</code>
+                            {{/if}}
+                          </button>
+                        </li>
+                      {{/each}}
+                      {{#if
+                        (and
+                          (isExpanded this.expandedNodeLists cycle.key) (gt cycle.nodes.length 5)
+                        )
+                      }}
+                        <li>
+                          <button
+                            type="button"
+                            class="panel__cycle-hidden"
+                            title="Collapse the node list"
+                            {{on "click" (fn this.toggleCycleNodeList cycle.key)}}
+                          >show less</button>
+                        </li>
+                      {{/if}}
                     </ol>
-                    {{#if cycle.occurrences.length}}
+                    {{#if cycle.occurrencesLength}}
                       <div class="panel__cycle-raws">
                         <div class="panel__cycle-raws-head">occurrences in a cycle</div>
                         <table class="panel__occurrence-table">
@@ -475,7 +660,7 @@ export default class InfoPanel extends Component {
                             </tr>
                           </thead>
                           <tbody>
-                            {{#each cycle.occurrences key="id" as |entry|}}
+                            {{#each cycle.occList.head key="id" as |entry|}}
                               <tr>
                                 <td>
                                   <button
@@ -490,6 +675,50 @@ export default class InfoPanel extends Component {
                                 <td class="panel__occurrence-count-col">{{entry.count}}</td>
                               </tr>
                             {{/each}}
+                            {{#if cycle.occList.hiddenCount}}
+                              <tr>
+                                <td colspan="2">
+                                  <button
+                                    type="button"
+                                    class="panel__cycle-hidden"
+                                    title="Show all {{cycle.occurrencesLength}} occurrences"
+                                    {{on "click" (fn this.toggleCycleOccList cycle.key)}}
+                                  >… {{cycle.occList.hiddenCount}} hidden — click to expand</button>
+                                </td>
+                              </tr>
+                            {{/if}}
+                            {{#each cycle.occList.tail key="id" as |entry|}}
+                              <tr>
+                                <td>
+                                  <button
+                                    type="button"
+                                    class="panel__occurrence-link"
+                                    title={{entry.id}}
+                                    {{on "click" (fn this.selectNeighbor entry.id)}}
+                                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                                    {{on "mouseleave" this.unhoverNeighbor}}
+                                  >{{entry.label}}</button>
+                                </td>
+                                <td class="panel__occurrence-count-col">{{entry.count}}</td>
+                              </tr>
+                            {{/each}}
+                            {{#if
+                              (and
+                                (isExpanded this.expandedOccLists cycle.key)
+                                (gt cycle.occurrencesLength 5)
+                              )
+                            }}
+                              <tr>
+                                <td colspan="2">
+                                  <button
+                                    type="button"
+                                    class="panel__cycle-hidden"
+                                    title="Collapse the occurrence list"
+                                    {{on "click" (fn this.toggleCycleOccList cycle.key)}}
+                                  >show less</button>
+                                </td>
+                              </tr>
+                            {{/if}}
                           </tbody>
                         </table>
                       </div>
@@ -522,4 +751,16 @@ function add(a: number, b: number): number {
 
 function notEq(a: unknown, b: unknown): boolean {
   return a !== b;
+}
+
+function and(a: unknown, b: unknown): unknown {
+  return a && b;
+}
+
+function gt(a: number, b: number): boolean {
+  return a > b;
+}
+
+function isExpanded(set: Set<string>, key: string): boolean {
+  return set.has(key);
 }

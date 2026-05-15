@@ -315,6 +315,35 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Per-section open/close override for the info panel's in / out /
+   * cycles details elements. `null` means "follow the auto-default"
+   * (open when the section is short, collapsed when long) so a fresh
+   * URL behaves the same as before. The override is only encoded when
+   * the user's choice *disagrees* with the auto-default — toggling a
+   * section back to its natural state clears the URL key.
+   */
+  get infoInOpenOverride(): boolean | null {
+    return parseTri(this.#queryParams["infoIn"]);
+  }
+  set infoInOpenOverride(v: boolean | null) {
+    this.#setParam("infoIn", serializeTri(v));
+  }
+
+  get infoOutOpenOverride(): boolean | null {
+    return parseTri(this.#queryParams["infoOut"]);
+  }
+  set infoOutOpenOverride(v: boolean | null) {
+    this.#setParam("infoOut", serializeTri(v));
+  }
+
+  get infoCyclesOpenOverride(): boolean | null {
+    return parseTri(this.#queryParams["infoCycles"]);
+  }
+  set infoCyclesOpenOverride(v: boolean | null) {
+    this.#setParam("infoCycles", serializeTri(v));
+  }
+
+  /**
    * Cycles panel geometry, encoded as `left,top,width,height` in CSS px.
    * `null` for any field means "use the default" (CSS-defined). The whole
    * value drops out of the URL when nothing has been moved or resized.
@@ -325,6 +354,19 @@ export default class ViewStateService extends Service {
   set cyclesPanelGeometry(g: PanelGeometry | null) {
     this.#setParam("cyclesPanel", serializePanelGeometry(g));
   }
+}
+
+function parseTri(v: string | null | undefined): boolean | null {
+  if (v === "1") return true;
+  if (v === "0") return false;
+
+  return null;
+}
+
+function serializeTri(v: boolean | null): string | null {
+  if (v === null) return null;
+
+  return v ? "1" : "0";
 }
 
 function parsePanelGeometry(raw: string | undefined | null): PanelGeometry | null {

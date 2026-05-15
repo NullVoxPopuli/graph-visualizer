@@ -315,10 +315,7 @@ export function findBundledCyclesViaRaw(
  * reuse a single `findAllCycles` pass instead of running the exponential
  * enumeration twice.
  */
-export function bundleRawCycles(
-  rawCycles: number[][],
-  nodeRemap: Int32Array | null,
-): number[][] {
+export function bundleRawCycles(rawCycles: number[][], nodeRemap: Int32Array | null): number[][] {
   const seen = new Set<string>();
   const out: number[][] = [];
 
