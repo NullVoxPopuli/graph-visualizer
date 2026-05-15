@@ -289,6 +289,7 @@ export default class Visualizer extends Component {
 
     if (cycles.length > 0) {
       cycleMask = new Uint8Array(N);
+
       // Total edge segments across every highlighted cycle. Each cycle of
       // length L contributes L edges (L-1 in-order + 1 closing), and each
       // edge is 2 vertices × 6 floats.

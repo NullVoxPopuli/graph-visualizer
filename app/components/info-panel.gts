@@ -5,7 +5,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { buildContraction } from "#lib/contract";
-import { findShortestCycleThrough } from "#lib/cycle";
+import { findAllCycles } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -16,10 +16,17 @@ import { computeRadii } from "#lib/pack";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
+import type { LoadedGraph } from "#lib/types";
 
 interface NeighborEntry {
   id: string;
   label: string;
+}
+
+interface CycleEntry {
+  nodes: NeighborEntry[];
+  /** stable key for `{{#each}}` — deterministic per cycle. */
+  key: string;
 }
 
 interface SelectedInfo {
@@ -120,13 +127,13 @@ export default class InfoPanel extends Component {
   }
 
   /**
-   * Nodes that form the shortest cycle passing through the currently
-   * selected node, in cycle order. Empty if no cycle exists. Runs on the
-   * same contracted graph the renderer uses, so what shows in this list
-   * matches the red-outlined nodes on the canvas — even when files are
-   * hidden and edges have been folded into package-level paths.
+   * Every elementary cycle the selected node sits on, computed against
+   * the same contracted graph the renderer uses. Each cycle gets a
+   * dedicated entry so the list mirrors the floating cycles panel rather
+   * than collapsing everything into one "shortest path" line — this is
+   * the bundled view the red highlights on the canvas correspond to.
    */
-  get cycleNodes(): NeighborEntry[] {
+  get cycles(): CycleEntry[] {
     const info = this.info;
     const g = this.graph.current;
 
@@ -144,43 +151,42 @@ export default class InfoPanel extends Component {
       this.viewState.hiddenNodeIds,
     );
     const remap = contraction?.nodeRemap ?? null;
-    const cycle = findShortestCycleThrough(g, info.index, remap);
+    // If the selected node was hidden by contraction, no cycle goes
+    // through *this* node in the bundled view.
+    if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    if (!cycle) return [];
+    const all = findAllCycles(g, remap);
 
-    return cycle.map((idx) => ({ id: g.ids[idx]!, label: g.labels[idx]! }));
+    return all
+      .filter((c) => c.includes(info.index))
+      .map((cycle) => cycleToEntry(cycle, g));
   }
 
   /**
-   * The shortest cycle through the selected node on the *original* graph —
-   * no contraction. Walks past every hidden / collapsed intermediate node
-   * so the user can see what's actually in the loop, not just the bundled
-   * stops. Only meaningful when contraction is active and the original
-   * loop is longer than the bundled one; otherwise it's hidden via
-   * `showFullCycle`.
+   * Same as `cycles`, but on the *original* graph with no contraction —
+   * so cycles that pass through hidden / collapsed intermediate nodes
+   * surface in full. Only meaningful when contraction is active; falls
+   * back to an empty list otherwise (see `showFullCycles`).
    */
-  get fullCycleNodes(): NeighborEntry[] {
+  get fullCycles(): CycleEntry[] {
     const info = this.info;
     const g = this.graph.current;
 
     if (!info || !g) return [];
 
-    const cycle = findShortestCycleThrough(g, info.index, null);
+    const all = findAllCycles(g, null);
 
-    if (!cycle) return [];
-
-    return cycle.map((idx) => ({ id: g.ids[idx]!, label: g.labels[idx]! }));
+    return all
+      .filter((c) => c.includes(info.index))
+      .map((cycle) => cycleToEntry(cycle, g));
   }
 
   /**
-   * Show the full-path section whenever contraction is active and the
-   * original graph has a cycle through this node. Length-equality with
-   * the bundled cycle isn't a reliable signal — the two cycles can share
-   * a length but pass through different nodes, and the user is asking
-   * specifically to see the un-bundled path when bundling is on.
+   * The fine-grained section only adds value when contraction is hiding
+   * something — otherwise it's a duplicate of the bundled list.
    */
-  get showFullCycle(): boolean {
-    if (this.fullCycleNodes.length === 0) return false;
+  get showFullCycles(): boolean {
+    if (this.fullCycles.length === 0) return false;
 
     if (
       this.viewState.hiddenNodeTypes.size === 0 &&
@@ -228,18 +234,19 @@ export default class InfoPanel extends Component {
     return this.outNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
-  get cycleOpen(): boolean {
-    return this.cycleNodes.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+  get cyclesOpen(): boolean {
+    return this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
-  get fullCycleOpen(): boolean {
-    return this.fullCycleNodes.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+  get fullCyclesOpen(): boolean {
+    return this.fullCycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
   @action
   close(): void {
     this.viewState.selectedId = null;
   }
+
 
   // ---- drag + resize ----
 
@@ -374,23 +381,32 @@ export default class InfoPanel extends Component {
           {{/if}}
         </details>
 
-        <details class="panel__section" open={{this.cycleOpen}}>
-          <summary class="panel__subhead">cycle ({{this.cycleNodes.length}})</summary>
-          {{#if this.cycleNodes.length}}
-            <ol class="panel__neighbors panel__neighbors--ordered">
-              {{#each this.cycleNodes as |entry|}}
-                <li>
-                  <button
-                    type="button"
-                    class="panel__neighbor"
-                    title={{entry.id}}
-                    {{on "click" (fn this.selectNeighbor entry.id)}}
-                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                    {{on "mouseleave" this.unhoverNeighbor}}
-                  >
-                    <span class="panel__neighbor-label">{{entry.label}}</span>
-                    <code class="panel__neighbor-id">{{entry.id}}</code>
-                  </button>
+        <details class="panel__section" open={{this.cyclesOpen}}>
+          <summary class="panel__subhead">cycles ({{this.cycles.length}})</summary>
+          {{#if this.cycles.length}}
+            <ol class="panel__cycles">
+              {{#each this.cycles key="key" as |cycle i|}}
+                <li class="panel__cycle">
+                  <div class="panel__cycle-head">#{{add i 1}} · {{cycle.nodes.length}} nodes</div>
+                  <ol class="panel__neighbors panel__neighbors--ordered">
+                    {{#each cycle.nodes key="id" as |entry|}}
+                      <li>
+                        <button
+                          type="button"
+                          class="panel__neighbor"
+                          title={{entry.id}}
+                          {{on "click" (fn this.selectNeighbor entry.id)}}
+                          {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                          {{on "mouseleave" this.unhoverNeighbor}}
+                        >
+                          <span class="panel__neighbor-label">{{entry.label}}</span>
+                          {{#if (notEq entry.id entry.label)}}
+                            <code class="panel__neighbor-id">{{entry.id}}</code>
+                          {{/if}}
+                        </button>
+                      </li>
+                    {{/each}}
+                  </ol>
                 </li>
               {{/each}}
             </ol>
@@ -399,23 +415,32 @@ export default class InfoPanel extends Component {
           {{/if}}
         </details>
 
-        {{#if this.showFullCycle}}
-          <details class="panel__section" open={{this.fullCycleOpen}}>
-            <summary class="panel__subhead">full path ({{this.fullCycleNodes.length}})</summary>
-            <ol class="panel__neighbors panel__neighbors--ordered">
-              {{#each this.fullCycleNodes as |entry|}}
-                <li>
-                  <button
-                    type="button"
-                    class="panel__neighbor"
-                    title={{entry.id}}
-                    {{on "click" (fn this.selectNeighbor entry.id)}}
-                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                    {{on "mouseleave" this.unhoverNeighbor}}
-                  >
-                    <span class="panel__neighbor-label">{{entry.label}}</span>
-                    <code class="panel__neighbor-id">{{entry.id}}</code>
-                  </button>
+        {{#if this.showFullCycles}}
+          <details class="panel__section" open={{this.fullCyclesOpen}}>
+            <summary class="panel__subhead">cycles · fine-grained ({{this.fullCycles.length}})</summary>
+            <ol class="panel__cycles">
+              {{#each this.fullCycles key="key" as |cycle i|}}
+                <li class="panel__cycle">
+                  <div class="panel__cycle-head">#{{add i 1}} · {{cycle.nodes.length}} nodes</div>
+                  <ol class="panel__neighbors panel__neighbors--ordered">
+                    {{#each cycle.nodes key="id" as |entry|}}
+                      <li>
+                        <button
+                          type="button"
+                          class="panel__neighbor"
+                          title={{entry.id}}
+                          {{on "click" (fn this.selectNeighbor entry.id)}}
+                          {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                          {{on "mouseleave" this.unhoverNeighbor}}
+                        >
+                          <span class="panel__neighbor-label">{{entry.label}}</span>
+                          {{#if (notEq entry.id entry.label)}}
+                            <code class="panel__neighbor-id">{{entry.id}}</code>
+                          {{/if}}
+                        </button>
+                      </li>
+                    {{/each}}
+                  </ol>
                 </li>
               {{/each}}
             </ol>
@@ -434,4 +459,21 @@ export default class InfoPanel extends Component {
       </aside>
     {{/if}}
   </template>
+}
+
+function cycleToEntry(cycle: number[], g: LoadedGraph): CycleEntry {
+  const nodes = cycle.map((idx) => ({
+    id: g.ids[idx]!,
+    label: g.labels[idx]!,
+  }));
+
+  return { nodes, key: nodes.map((n) => n.id).join("→") };
+}
+
+function add(a: number, b: number): number {
+  return a + b;
+}
+
+function notEq(a: unknown, b: unknown): boolean {
+  return a !== b;
 }

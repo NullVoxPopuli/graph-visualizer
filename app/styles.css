@@ -744,6 +744,32 @@ pre code {
   font-size: 11px;
 }
 
+.panel__cycles {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel__cycle {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 4px 6px 6px;
+}
+
+.panel__cycle-head {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 2px 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
 .panel__neighbors {
   list-style: none;
   margin: 0;
