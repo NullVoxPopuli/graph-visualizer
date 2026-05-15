@@ -4,12 +4,14 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import { buildContraction } from "#lib/contract";
 import { findAllCycles } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
   createSizeObserverModifier,
 } from "#lib/floating-panel";
+import { computeRadii } from "#lib/pack";
 
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
@@ -21,9 +23,21 @@ interface NeighborEntry {
   label: string;
 }
 
+interface OccurrenceEntry extends NeighborEntry {
+  /** How many of this bundled cycle's underlying raw cycles include this node. */
+  count: number;
+}
+
 interface CycleEntry {
+  /** Bundled cycle — the visible reps the canvas red-rings. */
   nodes: NeighborEntry[];
-  /** stable key for `{{#each}}` — deterministic per cycle. */
+  /**
+   * Underlying raw nodes that participate in cycles contracting to this
+   * bundled one, with counts. Empty when no contraction is active (the
+   * bundled cycle is the raw cycle, no separate accounting is useful).
+   */
+  occurrences: OccurrenceEntry[];
+  /** stable key for `{{#each}}` — deterministic per bundled cycle. */
   key: string;
 }
 
@@ -125,13 +139,15 @@ export default class InfoPanel extends Component {
   }
 
   /**
-   * Every elementary cycle the selected node sits on, computed against
-   * the *raw* graph. Intentionally ignores `hiddenNodeTypes`,
-   * `collapsedIds`, and `hiddenNodeIds`: the info panel is the place to
-   * see what's actually in the underlying loop, and that shouldn't move
-   * around as the user toggles type filters. The contracted view of
-   * cycles lives in the floating cycles panel, where the renderer's red
-   * highlights match.
+   * Cycles the selected node sits on. The top-level entries are the
+   * bundled cycles (the same loops the renderer red-rings). Each one
+   * also carries the underlying raw cycles that contract to it — handy
+   * when packages are connected by lots of file-level imports and you
+   * want to see which files actually closed the loop.
+   *
+   * Bundled cycles are deduped by canonical node sequence so parallel
+   * raw edges (many `file → file` imports between two packages) don't
+   * produce one bundled cycle per edge.
    */
   get cycles(): CycleEntry[] {
     const info = this.info;
@@ -139,11 +155,97 @@ export default class InfoPanel extends Component {
 
     if (!info || !g) return [];
 
-    const all = findAllCycles(g, null);
+    const radii = computeRadii(g.inDegree, g.outDegree);
+    const contraction = buildContraction(
+      g,
+      radii,
+      this.viewState.hiddenNodeTypes,
+      this.viewState.collapsedIds,
+      this.viewState.hiddenNodeIds,
+    );
+    const remap = contraction?.nodeRemap ?? null;
+    // Selected node is hidden — no bundled cycle goes through *this* node
+    // (its loops are absorbed into the owner). Bail.
+    if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    return all
-      .filter((c) => c.includes(info.index))
-      .map((cycle) => cycleToEntry(cycle, g));
+    // Group raw cycles through this node by their bundled (contracted) form.
+    // Without contraction, the bundled cycle is identical to the raw one,
+    // so the per-bundled-entry's `rawCycles` ends up empty (avoiding the
+    // duplicate display).
+    const buckets = new Map<string, { bundled: number[]; raws: number[][] }>();
+    const raw = findAllCycles(g, null);
+
+    for (const r of raw) {
+      const bundled = contractCycle(r, remap);
+
+      if (bundled === null) continue;
+      if (!bundled.includes(info.index)) continue;
+
+      const key = canonicalKey(bundled);
+      let bucket = buckets.get(key);
+
+      if (!bucket) {
+        bucket = { bundled, raws: [] };
+        buckets.set(key, bucket);
+      }
+      bucket.raws.push(r);
+    }
+
+    const entries: CycleEntry[] = [];
+
+    for (const { bundled, raws } of buckets.values()) {
+      const nodes = bundled.map((idx) => ({
+        id: g.ids[idx]!,
+        label: g.labels[idx]!,
+      }));
+      // Aggregate raw node participation across every raw cycle that
+      // contracts to this bundled one. Skip when nothing is hidden —
+      // the bundled list already shows the same nodes.
+      const occurrences: OccurrenceEntry[] = [];
+
+      if (remap !== null) {
+        const counts = new Map<number, number>();
+
+        for (const rc of raws) {
+          // Each node in a raw cycle is counted at most once per raw
+          // cycle — we want "this raw node appears in N of the
+          // underlying loops," not "this raw node is visited N times
+          // across all loops."
+          const seenInThisCycle = new Set<number>();
+
+          for (const idx of rc) {
+            if (seenInThisCycle.has(idx)) continue;
+            seenInThisCycle.add(idx);
+            counts.set(idx, (counts.get(idx) ?? 0) + 1);
+          }
+        }
+
+        for (const [idx, count] of counts) {
+          occurrences.push({
+            id: g.ids[idx]!,
+            label: g.labels[idx]!,
+            count,
+          });
+        }
+
+        // High-count first; ties broken alphabetically so the list is
+        // stable across renders.
+        occurrences.sort(
+          (a, b) => b.count - a.count || a.label.localeCompare(b.label),
+        );
+      }
+
+      entries.push({
+        nodes,
+        occurrences,
+        key: bundled.join(","),
+      });
+    }
+
+    // Shortest bundled cycles first (matches the floating panel's order).
+    entries.sort((a, b) => a.nodes.length - b.nodes.length);
+
+    return entries;
   }
 
   get metaEntries(): { key: string; value: string }[] {
@@ -350,6 +452,36 @@ export default class InfoPanel extends Component {
                       </li>
                     {{/each}}
                   </ol>
+                  {{#if cycle.occurrences.length}}
+                    <div class="panel__cycle-raws">
+                      <div class="panel__cycle-raws-head">occurrences in a cycle</div>
+                      <table class="panel__occurrence-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">node</th>
+                            <th scope="col" class="panel__occurrence-count-col">in</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {{#each cycle.occurrences key="id" as |entry|}}
+                            <tr>
+                              <td>
+                                <button
+                                  type="button"
+                                  class="panel__occurrence-link"
+                                  title={{entry.id}}
+                                  {{on "click" (fn this.selectNeighbor entry.id)}}
+                                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                                  {{on "mouseleave" this.unhoverNeighbor}}
+                                >{{entry.label}}</button>
+                              </td>
+                              <td class="panel__occurrence-count-col">{{entry.count}}</td>
+                            </tr>
+                          {{/each}}
+                        </tbody>
+                      </table>
+                    </div>
+                  {{/if}}
                 </li>
               {{/each}}
             </ol>
@@ -357,7 +489,6 @@ export default class InfoPanel extends Component {
             <p class="panel__empty">Not part of a cycle.</p>
           {{/if}}
         </details>
-
 
         {{#if this.metaEntries.length}}
           <h3 class="panel__subhead">meta</h3>
@@ -373,13 +504,54 @@ export default class InfoPanel extends Component {
   </template>
 }
 
-function cycleToEntry(cycle: number[], g: LoadedGraph): CycleEntry {
-  const nodes = cycle.map((idx) => ({
-    id: g.ids[idx]!,
-    label: g.labels[idx]!,
-  }));
+/**
+ * Map a raw cycle (node sequence over the original graph) to its
+ * contracted equivalent. Collapses consecutive same-rep nodes (a chain
+ * of hidden nodes that all map to the same owner becomes one stop) and
+ * trims the wrap-around duplicate at the end. Returns `null` for
+ * pathological cases — an orphan-after-remap node (`-1`) or a cycle
+ * that contracts to a 0/1-node walk.
+ */
+function contractCycle(raw: number[], remap: Int32Array | null): number[] | null {
+  if (remap === null) {
+    // No contraction — the bundled cycle is the raw cycle.
+    return raw.slice();
+  }
 
-  return { nodes, key: nodes.map((n) => n.id).join("→") };
+  const out: number[] = [];
+
+  for (const idx of raw) {
+    const r = remap[idx]!;
+
+    if (r < 0) return null;
+    if (out.length > 0 && out[out.length - 1] === r) continue;
+    out.push(r);
+  }
+
+  // The raw cycle's last → first edge also collapses if the two endpoints
+  // share a rep — handle that wrap-around case here.
+  while (out.length > 1 && out[0] === out[out.length - 1]) out.pop();
+
+  return out.length >= 2 ? out : null;
+}
+
+/**
+ * Rotate the cycle so the smallest node index is first, then stringify.
+ * Two cycles that are rotations of each other (same nodes in the same
+ * order, just starting from a different point) produce the same key.
+ */
+function canonicalKey(cycle: number[]): string {
+  let minIdx = 0;
+
+  for (let i = 1; i < cycle.length; i++) {
+    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
+  }
+
+  const out: number[] = [];
+
+  for (let i = 0; i < cycle.length; i++) out.push(cycle[(minIdx + i) % cycle.length]!);
+
+  return out.join(",");
 }
 
 function add(a: number, b: number): number {
