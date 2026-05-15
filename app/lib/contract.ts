@@ -139,8 +139,9 @@ export function buildContraction(
       eff[i] = 0;
     } else {
       const own = radii[i]!;
+      const absorbed = absorbedArea[i]!;
 
-      eff[i] = absorbedArea[i] > 0 ? Math.sqrt(own * own + absorbedArea[i]!) : own;
+      eff[i] = absorbed > 0 ? Math.sqrt(own * own + absorbed) : own;
     }
   }
 

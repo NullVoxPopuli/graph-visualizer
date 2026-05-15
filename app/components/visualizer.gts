@@ -837,10 +837,7 @@ export default class Visualizer extends Component {
             aria-valuemax="100"
             aria-valuenow={{this.layoutProgressPercent}}
           >
-            <div
-              class="visualizer__progress-fill"
-              style={{this.layoutProgressBarStyle}}
-            ></div>
+            <div class="visualizer__progress-fill" style={{this.layoutProgressBarStyle}}></div>
           </div>
           <span class="visualizer__progress-text">
             {{this.layoutProgressPercent}}%

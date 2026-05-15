@@ -204,7 +204,7 @@ export default class ViewStateService extends Service {
   /** Repulsion force fed into the d3-force charge body. */
   get repulsion(): number {
     const v = this.#queryParams["repulsion"];
-    const n = v === undefined ? NaN : Number.parseFloat(v);
+    const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) ? n : DEFAULT_REPULSION;
   }
@@ -215,7 +215,7 @@ export default class ViewStateService extends Service {
   /** Spring length for edges that stay inside a community. */
   get nodeDistance(): number {
     const v = this.#queryParams["nodeDistance"];
-    const n = v === undefined ? NaN : Number.parseFloat(v);
+    const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) ? n : DEFAULT_NODE_DISTANCE;
   }
@@ -226,7 +226,7 @@ export default class ViewStateService extends Service {
   /** Spring length for edges that cross community boundaries. */
   get clusterDistance(): number {
     const v = this.#queryParams["clusterDistance"];
-    const n = v === undefined ? NaN : Number.parseFloat(v);
+    const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) ? n : DEFAULT_CLUSTER_DISTANCE;
   }
@@ -241,7 +241,7 @@ export default class ViewStateService extends Service {
    */
   get clustering(): number {
     const v = this.#queryParams["clustering"];
-    const n = v === undefined ? NaN : Number.parseFloat(v);
+    const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLUSTERING;
   }
@@ -273,6 +273,17 @@ export default class ViewStateService extends Service {
   }
   set cyclesPanelOpen(v: boolean) {
     this.#setParam("cyclesPanelOpen", v ? "1" : null);
+  }
+
+  /**
+   * Whether the top-left controls panel is expanded. On by default — only
+   * the collapsed state is encoded so a fresh URL still shows the panel.
+   */
+  get controlsOpen(): boolean {
+    return this.#queryParams["controls"] !== "0";
+  }
+  set controlsOpen(v: boolean) {
+    this.#setParam("controls", v ? null : "0");
   }
 
   /**

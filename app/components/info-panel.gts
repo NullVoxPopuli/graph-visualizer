@@ -21,7 +21,6 @@ import { computeRadii } from "#lib/pack";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
-import type { LoadedGraph } from "#lib/types";
 
 interface NeighborEntry {
   id: string;
@@ -169,6 +168,7 @@ export default class InfoPanel extends Component {
       this.viewState.hiddenNodeIds,
     );
     const remap = contraction?.nodeRemap ?? null;
+
     // Selected node is hidden — no bundled cycle goes through *this* node
     // (its loops are absorbed into the owner). Bail.
     if (remap !== null && remap[info.index]! !== info.index) return [];
@@ -177,9 +177,7 @@ export default class InfoPanel extends Component {
     // backed by an actual raw elementary cycle qualify. This is the same
     // source the renderer uses to draw red rings, so the info-panel list
     // and the canvas can't disagree.
-    const bundledCycles = findBundledCyclesViaRaw(g, remap).filter((c) =>
-      c.includes(info.index),
-    );
+    const bundledCycles = findBundledCyclesViaRaw(g, remap).filter((c) => c.includes(info.index));
 
     // Pre-index raw cycles by their bundled canonical key so each
     // bundled cycle can grab its matching raw cycles in one lookup. We
@@ -199,6 +197,7 @@ export default class InfoPanel extends Component {
         arr = [];
         rawsByBundle.set(key, arr);
       }
+
       arr.push(r);
     }
 
@@ -243,9 +242,7 @@ export default class InfoPanel extends Component {
 
         // High-count first; ties broken alphabetically so the list is
         // stable across renders.
-        occurrences.sort(
-          (a, b) => b.count - a.count || a.label.localeCompare(b.label),
-        );
+        occurrences.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
       }
 
       entries.push({
@@ -304,7 +301,6 @@ export default class InfoPanel extends Component {
   close(): void {
     this.viewState.selectedId = null;
   }
-
 
   // ---- drag + resize ----
 
@@ -373,150 +369,149 @@ export default class InfoPanel extends Component {
           >×</button>
         </div>
         <div class="panel__body">
-        <p class="panel__id">id: <code>{{this.info.id}}</code></p>
-        {{#if this.info.type}}
-          <dl class="panel__stats">
-            <dt>type</dt><dd>{{this.info.type}}</dd>
-          </dl>
-        {{/if}}
-
-        <p class="panel__actions">
-          <button
-            type="button"
-            class="panel__action"
-            {{on "click" this.hideSelected}}
-            title="Drop this node from the graph and cycle detection. Show it again from the controls panel."
-          >Hide node</button>
-        </p>
-
-        <details class="panel__section" open={{this.inOpen}}>
-          <summary class="panel__subhead">in ({{this.inNeighbors.length}})</summary>
-          {{#if this.inNeighbors.length}}
-            <ul class="panel__neighbors">
-              {{#each this.inNeighbors as |entry|}}
-                <li>
-                  <button
-                    type="button"
-                    class="panel__neighbor"
-                    title={{entry.id}}
-                    {{on "click" (fn this.selectNeighbor entry.id)}}
-                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                    {{on "mouseleave" this.unhoverNeighbor}}
-                  >
-                    <span class="panel__neighbor-label">{{entry.label}}</span>
-                    <code class="panel__neighbor-id">{{entry.id}}</code>
-                  </button>
-                </li>
-              {{/each}}
-            </ul>
-          {{else}}
-            <p class="panel__empty">No incoming edges.</p>
+          <p class="panel__id">id: <code>{{this.info.id}}</code></p>
+          {{#if this.info.type}}
+            <dl class="panel__stats">
+              <dt>type</dt><dd>{{this.info.type}}</dd>
+            </dl>
           {{/if}}
-        </details>
 
-        <details class="panel__section" open={{this.outOpen}}>
-          <summary class="panel__subhead">out ({{this.outNeighbors.length}})</summary>
-          {{#if this.outNeighbors.length}}
-            <ul class="panel__neighbors">
-              {{#each this.outNeighbors as |entry|}}
-                <li>
-                  <button
-                    type="button"
-                    class="panel__neighbor"
-                    title={{entry.id}}
-                    {{on "click" (fn this.selectNeighbor entry.id)}}
-                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                    {{on "mouseleave" this.unhoverNeighbor}}
-                  >
-                    <span class="panel__neighbor-label">{{entry.label}}</span>
-                    <code class="panel__neighbor-id">{{entry.id}}</code>
-                  </button>
-                </li>
-              {{/each}}
-            </ul>
-          {{else}}
-            <p class="panel__empty">No outgoing edges.</p>
-          {{/if}}
-        </details>
+          <p class="panel__actions">
+            <button
+              type="button"
+              class="panel__action"
+              {{on "click" this.hideSelected}}
+              title="Drop this node from the graph and cycle detection. Show it again from the controls panel."
+            >Hide node</button>
+          </p>
 
-        <details class="panel__section" open={{this.cyclesOpen}}>
-          <summary class="panel__subhead">cycles ({{this.cycles.length}})</summary>
-          {{#if this.cycles.length}}
-            <ol class="panel__cycles">
-              {{#each this.cycles key="key" as |cycle i|}}
-                <li class="panel__cycle">
-                  <div class="panel__cycle-head">#{{add i 1}} · {{cycle.nodes.length}} nodes</div>
-                  <ol class="panel__neighbors panel__neighbors--ordered">
-                    {{#each cycle.nodes key="id" as |entry|}}
-                      <li>
-                        <button
-                          type="button"
-                          class="panel__neighbor"
-                          title={{entry.id}}
-                          {{on "click" (fn this.selectNeighbor entry.id)}}
-                          {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                          {{on "mouseleave" this.unhoverNeighbor}}
-                        >
-                          <span class="panel__neighbor-label">{{entry.label}}</span>
-                          {{#if (notEq entry.id entry.label)}}
-                            <code class="panel__neighbor-id">{{entry.id}}</code>
-                          {{/if}}
-                        </button>
-                      </li>
-                    {{/each}}
-                  </ol>
-                  {{#if cycle.occurrences.length}}
-                    <div class="panel__cycle-raws">
-                      <div class="panel__cycle-raws-head">occurrences in a cycle</div>
-                      <table class="panel__occurrence-table">
-                        <thead>
-                          <tr>
-                            <th scope="col">node</th>
-                            <th scope="col" class="panel__occurrence-count-col">in</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {{#each cycle.occurrences key="id" as |entry|}}
+          <details class="panel__section" open={{this.inOpen}}>
+            <summary class="panel__subhead">in ({{this.inNeighbors.length}})</summary>
+            {{#if this.inNeighbors.length}}
+              <ul class="panel__neighbors">
+                {{#each this.inNeighbors as |entry|}}
+                  <li>
+                    <button
+                      type="button"
+                      class="panel__neighbor"
+                      title={{entry.id}}
+                      {{on "click" (fn this.selectNeighbor entry.id)}}
+                      {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                      {{on "mouseleave" this.unhoverNeighbor}}
+                    >
+                      <span class="panel__neighbor-label">{{entry.label}}</span>
+                      <code class="panel__neighbor-id">{{entry.id}}</code>
+                    </button>
+                  </li>
+                {{/each}}
+              </ul>
+            {{else}}
+              <p class="panel__empty">No incoming edges.</p>
+            {{/if}}
+          </details>
+
+          <details class="panel__section" open={{this.outOpen}}>
+            <summary class="panel__subhead">out ({{this.outNeighbors.length}})</summary>
+            {{#if this.outNeighbors.length}}
+              <ul class="panel__neighbors">
+                {{#each this.outNeighbors as |entry|}}
+                  <li>
+                    <button
+                      type="button"
+                      class="panel__neighbor"
+                      title={{entry.id}}
+                      {{on "click" (fn this.selectNeighbor entry.id)}}
+                      {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                      {{on "mouseleave" this.unhoverNeighbor}}
+                    >
+                      <span class="panel__neighbor-label">{{entry.label}}</span>
+                      <code class="panel__neighbor-id">{{entry.id}}</code>
+                    </button>
+                  </li>
+                {{/each}}
+              </ul>
+            {{else}}
+              <p class="panel__empty">No outgoing edges.</p>
+            {{/if}}
+          </details>
+
+          <details class="panel__section" open={{this.cyclesOpen}}>
+            <summary class="panel__subhead">cycles ({{this.cycles.length}})</summary>
+            {{#if this.cycles.length}}
+              <ol class="panel__cycles">
+                {{#each this.cycles key="key" as |cycle i|}}
+                  <li class="panel__cycle">
+                    <div class="panel__cycle-head">#{{add i 1}} · {{cycle.nodes.length}} nodes</div>
+                    <ol class="panel__neighbors panel__neighbors--ordered">
+                      {{#each cycle.nodes key="id" as |entry|}}
+                        <li>
+                          <button
+                            type="button"
+                            class="panel__neighbor"
+                            title={{entry.id}}
+                            {{on "click" (fn this.selectNeighbor entry.id)}}
+                            {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                            {{on "mouseleave" this.unhoverNeighbor}}
+                          >
+                            <span class="panel__neighbor-label">{{entry.label}}</span>
+                            {{#if (notEq entry.id entry.label)}}
+                              <code class="panel__neighbor-id">{{entry.id}}</code>
+                            {{/if}}
+                          </button>
+                        </li>
+                      {{/each}}
+                    </ol>
+                    {{#if cycle.occurrences.length}}
+                      <div class="panel__cycle-raws">
+                        <div class="panel__cycle-raws-head">occurrences in a cycle</div>
+                        <table class="panel__occurrence-table">
+                          <thead>
                             <tr>
-                              <td>
-                                <button
-                                  type="button"
-                                  class="panel__occurrence-link"
-                                  title={{entry.id}}
-                                  {{on "click" (fn this.selectNeighbor entry.id)}}
-                                  {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                                  {{on "mouseleave" this.unhoverNeighbor}}
-                                >{{entry.label}}</button>
-                              </td>
-                              <td class="panel__occurrence-count-col">{{entry.count}}</td>
+                              <th scope="col">node</th>
+                              <th scope="col" class="panel__occurrence-count-col">in</th>
                             </tr>
-                          {{/each}}
-                        </tbody>
-                      </table>
-                    </div>
-                  {{/if}}
-                </li>
-              {{/each}}
-            </ol>
-          {{else}}
-            <p class="panel__empty">Not part of a cycle.</p>
-          {{/if}}
-        </details>
+                          </thead>
+                          <tbody>
+                            {{#each cycle.occurrences key="id" as |entry|}}
+                              <tr>
+                                <td>
+                                  <button
+                                    type="button"
+                                    class="panel__occurrence-link"
+                                    title={{entry.id}}
+                                    {{on "click" (fn this.selectNeighbor entry.id)}}
+                                    {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                                    {{on "mouseleave" this.unhoverNeighbor}}
+                                  >{{entry.label}}</button>
+                                </td>
+                                <td class="panel__occurrence-count-col">{{entry.count}}</td>
+                              </tr>
+                            {{/each}}
+                          </tbody>
+                        </table>
+                      </div>
+                    {{/if}}
+                  </li>
+                {{/each}}
+              </ol>
+            {{else}}
+              <p class="panel__empty">Not part of a cycle.</p>
+            {{/if}}
+          </details>
 
-        {{#if this.metaEntries.length}}
-          <h3 class="panel__subhead">meta</h3>
-          <dl class="panel__meta">
-            {{#each this.metaEntries as |entry|}}
-              <dt>{{entry.key}}</dt><dd>{{entry.value}}</dd>
-            {{/each}}
-          </dl>
-        {{/if}}
+          {{#if this.metaEntries.length}}
+            <h3 class="panel__subhead">meta</h3>
+            <dl class="panel__meta">
+              {{#each this.metaEntries as |entry|}}
+                <dt>{{entry.key}}</dt><dd>{{entry.value}}</dd>
+              {{/each}}
+            </dl>
+          {{/if}}
         </div>
       </aside>
     {{/if}}
   </template>
 }
-
 
 function add(a: number, b: number): number {
   return a + b;

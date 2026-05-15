@@ -1,5 +1,5 @@
-import Service, { service } from "@ember/service";
 import { tracked } from "@glimmer/tracking";
+import Service, { service } from "@ember/service";
 
 import * as Comlink from "comlink";
 import { getPromiseState, type State } from "reactiveweb/get-promise-state";

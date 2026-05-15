@@ -214,7 +214,7 @@ export default class CyclesPanel extends Component {
               <button
                 type="button"
                 class="cycles-panel__header"
-                {{on "click" (fn this.selectNode cycle.nodes.0.id)}}
+                {{on "click" (fn this.selectNode cycle.nodes.[0].id)}}
                 title="Select the first node in this cycle"
               >
                 <span class="cycles-panel__entry-index">#{{add i 1}}</span>
@@ -274,4 +274,3 @@ function eq(a: unknown, b: unknown): boolean {
 function notEq(a: unknown, b: unknown): boolean {
   return a !== b;
 }
-

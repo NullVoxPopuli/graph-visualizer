@@ -28,7 +28,7 @@ interface DragOptions {
  * use the captured panel rect as the drag origin so the panel can switch
  * from `bottom`/`right` to `top`/`left` anchoring without a jump.
  */
-export function createDragModifier(opts: DragOptions): ReturnType<typeof modifier> {
+export function createDragModifier(opts: DragOptions) {
   return modifier((handle: HTMLElement) => {
     let dragging: {
       pointerId: number;
@@ -40,8 +40,7 @@ export function createDragModifier(opts: DragOptions): ReturnType<typeof modifie
       panelHeight: number;
     } | null = null;
 
-    const panelEl = (): HTMLElement | null =>
-      handle.closest(opts.panelSelector);
+    const panelEl = (): HTMLElement | null => handle.closest(opts.panelSelector);
 
     const onPointerDown = (ev: PointerEvent): void => {
       if (ev.button !== 0) return;
@@ -116,9 +115,7 @@ export function createDragModifier(opts: DragOptions): ReturnType<typeof modifie
  * re-applies the styles. Clearing geometry resets the styles to "" so
  * the CSS defaults take over.
  */
-export function createApplyGeometryModifier(
-  get: () => PanelGeometry | null,
-): ReturnType<typeof modifier> {
+export function createApplyGeometryModifier(get: () => PanelGeometry | null) {
   return modifier((el: HTMLElement) => {
     const g = get();
 
@@ -153,7 +150,7 @@ export function createApplyGeometryModifier(
 export function createSizeObserverModifier(
   get: () => PanelGeometry | null,
   set: (g: PanelGeometry) => void,
-): ReturnType<typeof modifier> {
+) {
   return modifier((el: HTMLElement) => {
     let lastW = 0;
     let lastH = 0;

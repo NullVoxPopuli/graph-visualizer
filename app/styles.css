@@ -86,6 +86,7 @@ pre code {
 
 .app-header__nav {
   display: flex;
+  align-items: center;
   gap: 16px;
 }
 
@@ -96,6 +97,15 @@ pre code {
 }
 .app-header__nav a:hover {
   color: var(--fg);
+}
+
+.app-header__github {
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-header__github-icon {
+  display: block;
 }
 
 .app-main {
@@ -320,6 +330,34 @@ pre code {
   flex-direction: column;
   gap: 8px;
   pointer-events: auto;
+}
+
+.controls[data-open="false"] {
+  min-width: 0;
+  padding: 4px;
+  gap: 0;
+}
+
+.controls__toggle {
+  align-self: flex-end;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.controls__toggle:hover {
+  color: var(--fg);
+  background: var(--input-bg);
+}
+
+.controls[data-open="false"] .controls__toggle {
+  align-self: stretch;
 }
 
 .controls__title {

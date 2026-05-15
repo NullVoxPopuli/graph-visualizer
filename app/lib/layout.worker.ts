@@ -84,7 +84,19 @@ const layoutEngine = {
       else interLinks.push(link);
     }
 
-    seedByCommunity(nodes, communities);
+    // Inter-cluster springs are the dominant attractive force at scale —
+    // a 12k-node graph can have tens of thousands of cross-community
+    // edges, each acting as a Hooke spring. With the slider's literal
+    // value (e.g. 180), the equilibrium length is far shorter than the
+    // natural spread of seeded centroids, so the net effect collapses
+    // every cluster into one ball regardless of seeding. Scale the
+    // effective distance up with the node count so the equilibrium
+    // matches the rough scale of the seeded layout. The slider still
+    // controls relative spacing.
+    const interDistanceScale = Math.max(1, Math.sqrt(nodeCount / 200));
+    const effectiveClusterDistance = clusterDistance * interDistanceScale;
+
+    seedByCommunity(nodes, communities, radii);
 
     const sim: Simulation<SimNode, SimulationLinkDatum<SimNode>> = forceSimulation(nodes)
       .force(
@@ -117,34 +129,60 @@ const layoutEngine = {
         "interLink",
         forceLink<SimNode, SimulationLinkDatum<SimNode>>(interLinks)
           .id((n) => n.id)
-          .distance(clusterDistance)
-          .strength(0.5),
+          .distance(effectiveClusterDistance)
+          // Weaker than intra-cluster: at scale, the count of cross-cluster
+          // edges easily exceeds intra-cluster ones, and at full strength
+          // their cumulative pull dominates the layout and collapses
+          // everything to a single ball.
+          .strength(0.12),
       )
-      .force("center", forceCenter(0, 0).strength(0.02))
+      .force("center", forceCenter(0, 0).strength(0.005))
       .force("cohesion", communityCohesionForce(communities, cohesion))
       .alpha(1)
-      .alphaDecay(0.05)
+      // Slower than d3's default (0.0228) so the same per-tick work
+      // delivers more useful motion. Convergence (alpha ≤ alphaMin) lands
+      // around tick 340 instead of 135.
+      .alphaDecay(0.02)
       .velocityDecay(0.35)
       .stop();
 
-    const TOTAL = 180;
-    const BATCH = 15;
+    // Run until the simulation has settled (alpha ≤ alphaMin) or we hit
+    // the hard cap. With alphaDecay=0.02 alpha hits alphaMin at ~tick 342,
+    // so 500 is a comfortable safety margin. The cap is there so a
+    // pathological graph doesn't spin forever. BATCH is small so the
+    // worker yields back to the event loop often — when the graph is big
+    // each tick can take 30–80ms, and we want progress messages and any
+    // pending `terminate` to land between batches.
+    const MAX_TICKS = 500;
+    const BATCH = 8;
+    const alphaMin = sim.alphaMin();
+    const logAlphaMin = Math.log(alphaMin);
     let it = 0;
 
-    while (it < TOTAL) {
-      const end = Math.min(TOTAL, it + BATCH);
+    while (it < MAX_TICKS) {
+      const end = Math.min(MAX_TICKS, it + BATCH);
 
       for (; it < end; it++) sim.tick();
       if (spreadFactor !== 1) applyClusterSpread(nodes, communities, spreadFactor);
+
+      const alpha = sim.alpha();
+      // Progress is the further-along of two signals: alpha decay (the
+      // intended convergence path) and iteration cap (so the bar can't
+      // stall if alpha plateaus above alphaMin somehow).
+      const progressByAlpha = alpha <= alphaMin ? 1 : Math.max(0, Math.log(alpha) / logAlphaMin);
+      const progressByIter = it / MAX_TICKS;
+      const progress = Math.min(1, Math.max(progressByAlpha, progressByIter));
+
       // Yield between batches so the worker can GC and accept any
       // incoming messages (terminate, etc.). The progress callback fires
       // on the same boundary — it's the main reason to yield at all on
       // small graphs.
-      onProgress?.(it, TOTAL);
-      if (it < TOTAL) await new Promise((resolve) => setTimeout(resolve, 0));
+      onProgress?.(Math.round(progress * 1000), 1000);
+      if (alpha <= alphaMin) break;
+      if (it < MAX_TICKS) await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    onProgress?.(TOTAL, TOTAL);
+    onProgress?.(1000, 1000);
 
     const positions = new Float32Array(nodeCount * 2);
 
@@ -163,37 +201,76 @@ export type LayoutEngine = typeof layoutEngine;
 
 Comlink.expose(layoutEngine);
 
-function seedByCommunity(nodes: SimNode[], communities: Int32Array): void {
+function seedByCommunity(nodes: SimNode[], communities: Int32Array, radii: Float32Array): void {
   const counts = new Map<number, number>();
+  const radiiSum = new Map<number, number>();
 
   for (let i = 0; i < nodes.length; i++) {
     const c = communities[i]!;
 
     counts.set(c, (counts.get(c) ?? 0) + 1);
+    radiiSum.set(c, (radiiSum.get(c) ?? 0) + radii[i]!);
   }
 
   const keys = [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!);
   const centroids = new Map<number, [number, number]>();
+  const seedRadii = new Map<number, number>();
   let acc = 0;
   const total = nodes.length;
-  const R = Math.sqrt(total) * 18;
+  const GOLDEN_ANGLE = 137.508 * (Math.PI / 180);
+
+  // Per-community seed disk size: enough room for `count` nodes at their
+  // collide radius without overlap. Without this, every node in a
+  // community started at the centroid ± 6 units and forceCollide had to
+  // do all the dispersion from a single point — fine for small graphs,
+  // hopeless at 10k+ nodes within a tight iteration budget.
+  for (const c of keys) {
+    const count = counts.get(c)!;
+    const avgR = radiiSum.get(c)! / count;
+
+    seedRadii.set(c, Math.sqrt(count) * (avgR * 1.5 + 2));
+  }
+
+  // Inter-community placement: sunflower spiral, scaled by the sum of
+  // per-community seed radii so neighboring clusters don't start
+  // overlapping. The old `sqrt(total) * 18` formula assumed everyone
+  // started at a point, which is no longer true.
+  let seedRadiiTotal = 0;
+
+  for (const r of seedRadii.values()) seedRadiiTotal += r;
+
+  const R = Math.max(Math.sqrt(total) * 18, seedRadiiTotal * 0.8);
 
   for (let k = 0; k < keys.length; k++) {
     const c = keys[k]!;
     const t = acc / total;
-    const angle = k * 137.508 * (Math.PI / 180);
+    const angle = k * GOLDEN_ANGLE;
     const radius = R * Math.sqrt(t + 0.02);
 
     centroids.set(c, [Math.cos(angle) * radius, Math.sin(angle) * radius]);
     acc += counts.get(c)!;
   }
 
+  // Intra-community placement: sunflower pattern inside each cluster so
+  // every node lands at a distinct point. Per-community indexing.
+  const indexInCommunity = new Map<number, number>();
+
   for (let i = 0; i < nodes.length; i++) {
     const c = communities[i]!;
     const [cx, cy] = centroids.get(c)!;
+    const count = counts.get(c)!;
+    const seedR = seedRadii.get(c)!;
+    const k = indexInCommunity.get(c) ?? 0;
 
-    nodes[i]!.x = cx + (Math.random() - 0.5) * 12;
-    nodes[i]!.y = cy + (Math.random() - 0.5) * 12;
+    indexInCommunity.set(c, k + 1);
+
+    // Sunflower (Vogel) layout — even areal density inside the disk.
+    const t = (k + 0.5) / count;
+    const localR = seedR * Math.sqrt(t);
+    const localAngle = k * GOLDEN_ANGLE;
+
+    nodes[i]!.x = cx + Math.cos(localAngle) * localR;
+    nodes[i]!.y = cy + Math.sin(localAngle) * localR;
   }
 }
 

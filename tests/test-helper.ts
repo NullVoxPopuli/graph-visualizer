@@ -45,7 +45,13 @@ export function start() {
   config.APP.autoboot = false;
   setTesting(true);
 
-  const theMacrosGlobal = getGlobalConfig();
+  // The deep-import from `@embroider/macros/src/addon/runtime` is
+  // intentionally untyped (see the `@ts-expect-error` on the import); we
+  // know the runtime shape so we type it locally and walk the rest of
+  // this block normally.
+  const theMacrosGlobal = (
+    getGlobalConfig as () => Record<string, { isTesting?: boolean } | undefined>
+  )();
 
   /**
    * Caveats:

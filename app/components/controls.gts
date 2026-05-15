@@ -227,185 +227,202 @@ export default class Controls extends Component<Signature> {
     if (Number.isFinite(v) && v > 0) this.viewState.clustering = v;
   }
 
+  @action
+  toggleControls(): void {
+    this.viewState.controlsOpen = !this.viewState.controlsOpen;
+  }
+
   <template>
-    <div class="controls">
-      <Search />
-      <div class="controls__row">
-        <label>
-          <input
-            type="checkbox"
-            checked={{this.viewState.showEdges}}
-            {{on "change" this.toggleEdges}}
-          />
-          edges
-        </label>
-        <label
-          title="Arrowhead at the source end of each edge — the node that listed the edge in its outgoing list. Off keeps the graph less busy."
-        >
-          <input
-            type="checkbox"
-            checked={{this.viewState.showArrows}}
-            {{on "change" this.toggleArrows}}
-          />
-          arrows
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={{this.viewState.showHulls}}
-            {{on "change" this.toggleHulls}}
-          />
-          cluster hulls
-        </label>
-        <label
-          title="Group nodes by the longest common prefix of their labels (split on `/` or `.`). Useful when the graph is organized by file path or package."
-        >
-          <input
-            type="checkbox"
-            checked={{this.viewState.clusterByLabel}}
-            {{on "change" this.toggleClusterByLabel}}
-          />
-          cluster by label
-        </label>
-      </div>
-      {{#if this.nodeTypes.length}}
-        <div class="controls__section">
-          <div class="controls__section-label">node types</div>
-          <div class="controls__types">
-            {{#each this.nodeTypes as |t|}}
-              <label class="controls__type">
-                <input
-                  type="checkbox"
-                  checked={{not t.hidden}}
-                  {{on "change" (fn this.toggleNodeType t.id)}}
-                />
-                <span class="controls__type-name">{{t.name}}</span>
-                <span class="controls__type-count">{{t.count}}</span>
-              </label>
-            {{/each}}
-          </div>
+    <div class="controls" data-open={{this.viewState.controlsOpen}}>
+      <button
+        type="button"
+        class="controls__toggle"
+        {{on "click" this.toggleControls}}
+        title={{if this.viewState.controlsOpen "Hide controls" "Show controls"}}
+        aria-expanded={{this.viewState.controlsOpen}}
+        aria-label={{if this.viewState.controlsOpen "Hide controls" "Show controls"}}
+      >
+        {{if this.viewState.controlsOpen "«" "»"}}
+      </button>
+      {{#if this.viewState.controlsOpen}}
+        <Search />
+        <div class="controls__row">
+          <label>
+            <input
+              type="checkbox"
+              checked={{this.viewState.showEdges}}
+              {{on "change" this.toggleEdges}}
+            />
+            edges
+          </label>
+          <label
+            title="Arrowhead at the source end of each edge — the node that listed the edge in its outgoing list. Off keeps the graph less busy."
+          >
+            <input
+              type="checkbox"
+              checked={{this.viewState.showArrows}}
+              {{on "change" this.toggleArrows}}
+            />
+            arrows
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={{this.viewState.showHulls}}
+              {{on "change" this.toggleHulls}}
+            />
+            cluster hulls
+          </label>
+          <label
+            title="Group nodes by the longest common prefix of their labels (split on `/` or `.`). Useful when the graph is organized by file path or package."
+          >
+            <input
+              type="checkbox"
+              checked={{this.viewState.clusterByLabel}}
+              {{on "change" this.toggleClusterByLabel}}
+            />
+            cluster by label
+          </label>
         </div>
-      {{/if}}
-      {{#if this.edgeTypes.length}}
-        <div class="controls__section">
-          <div class="controls__section-label">edge types</div>
-          <div class="controls__types">
-            {{#each this.edgeTypes as |t|}}
-              <label class="controls__type">
-                <input
-                  type="checkbox"
-                  checked={{not t.hidden}}
-                  {{on "change" (fn this.toggleEdgeType t.id)}}
-                />
-                <span class="controls__type-name">{{t.name}}</span>
-                <span class="controls__type-count">{{t.count}}</span>
-              </label>
-            {{/each}}
+        {{#if this.nodeTypes.length}}
+          <div class="controls__section">
+            <div class="controls__section-label">node types</div>
+            <div class="controls__types">
+              {{#each this.nodeTypes as |t|}}
+                <label class="controls__type">
+                  <input
+                    type="checkbox"
+                    checked={{not t.hidden}}
+                    {{on "change" (fn this.toggleNodeType t.id)}}
+                  />
+                  <span class="controls__type-name">{{t.name}}</span>
+                  <span class="controls__type-count">{{t.count}}</span>
+                </label>
+              {{/each}}
+            </div>
           </div>
-        </div>
-      {{/if}}
-      {{#if this.hiddenNodes.length}}
-        <div class="controls__section">
-          <div class="controls__section-head">
-            <span class="controls__section-label">hidden nodes ({{this.hiddenNodes.length}})</span>
+        {{/if}}
+        {{#if this.edgeTypes.length}}
+          <div class="controls__section">
+            <div class="controls__section-label">edge types</div>
+            <div class="controls__types">
+              {{#each this.edgeTypes as |t|}}
+                <label class="controls__type">
+                  <input
+                    type="checkbox"
+                    checked={{not t.hidden}}
+                    {{on "change" (fn this.toggleEdgeType t.id)}}
+                  />
+                  <span class="controls__type-name">{{t.name}}</span>
+                  <span class="controls__type-count">{{t.count}}</span>
+                </label>
+              {{/each}}
+            </div>
+          </div>
+        {{/if}}
+        {{#if this.hiddenNodes.length}}
+          <div class="controls__section">
+            <div class="controls__section-head">
+              <span class="controls__section-label">hidden nodes ({{this.hiddenNodes.length}})</span>
+              <button
+                type="button"
+                class="controls__section-action"
+                {{on "click" this.clearHiddenNodes}}
+                title="Show all hidden nodes again"
+              >show all</button>
+            </div>
+            <ul class="controls__hidden-list">
+              {{#each this.hiddenNodes as |h|}}
+                <li class="controls__hidden">
+                  <button
+                    type="button"
+                    class="controls__hidden-row"
+                    title="Show {{h.label}}"
+                    {{on "click" (fn this.unhideNode h.id)}}
+                  >
+                    <span class="controls__hidden-label">{{h.label}}</span>
+                    <code class="controls__hidden-id">{{h.id}}</code>
+                  </button>
+                </li>
+              {{/each}}
+            </ul>
+          </div>
+        {{/if}}
+        <details class="controls__section controls__details">
+          <summary class="controls__section-label">layout</summary>
+          <label class="controls__slider">
+            <span class="controls__slider-name">node distance</span>
+            <input
+              type="range"
+              min={{NODE_DIST_MIN}}
+              max={{NODE_DIST_MAX}}
+              step={{NODE_DIST_STEP}}
+              value={{this.viewState.nodeDistance}}
+              {{on "change" this.setNodeDistance}}
+            />
+            <span class="controls__slider-value">{{this.viewState.nodeDistance}}</span>
+          </label>
+          <label class="controls__slider">
+            <span class="controls__slider-name">cluster distance</span>
+            <input
+              type="range"
+              min={{CLUSTER_DIST_MIN}}
+              max={{CLUSTER_DIST_MAX}}
+              step={{CLUSTER_DIST_STEP}}
+              value={{this.viewState.clusterDistance}}
+              {{on "change" this.setClusterDistance}}
+            />
+            <span class="controls__slider-value">{{this.viewState.clusterDistance}}</span>
+          </label>
+          <label class="controls__slider">
+            <span class="controls__slider-name">repulsion</span>
+            <input
+              type="range"
+              min={{REPULSION_MIN}}
+              max={{REPULSION_MAX}}
+              step={{REPULSION_STEP}}
+              value={{this.viewState.repulsion}}
+              {{on "change" this.setRepulsion}}
+            />
+            <span class="controls__slider-value">{{this.viewState.repulsion}}</span>
+          </label>
+          <label
+            class="controls__slider"
+            title="Louvain resolution. Higher = more, smaller communities; lower = bigger, clingier ones."
+          >
+            <span class="controls__slider-name">clustering</span>
+            <input
+              type="range"
+              min={{CLUSTERING_MIN}}
+              max={{CLUSTERING_MAX}}
+              step={{CLUSTERING_STEP}}
+              value={{this.viewState.clustering}}
+              {{on "change" this.setClustering}}
+            />
+            <span class="controls__slider-value">{{this.viewState.clustering}}</span>
+          </label>
+        </details>
+        <div class="controls__row">
+          <button type="button" {{on "click" @onResetView}}>Reset view</button>
+          {{#if this.collapsedCount}}
             <button
               type="button"
-              class="controls__section-action"
-              {{on "click" this.clearHiddenNodes}}
-              title="Show all hidden nodes again"
-            >show all</button>
-          </div>
-          <ul class="controls__hidden-list">
-            {{#each this.hiddenNodes as |h|}}
-              <li class="controls__hidden">
-                <button
-                  type="button"
-                  class="controls__hidden-row"
-                  title="Show {{h.label}}"
-                  {{on "click" (fn this.unhideNode h.id)}}
-                >
-                  <span class="controls__hidden-label">{{h.label}}</span>
-                  <code class="controls__hidden-id">{{h.id}}</code>
-                </button>
-              </li>
-            {{/each}}
-          </ul>
+              {{on "click" this.clearCollapsed}}
+              title="Reset all node-level expand / collapse toggles"
+            >Clear toggles ({{this.collapsedCount}})</button>
+          {{/if}}
+          {{#if this.showCyclesPanelButton}}
+            <button
+              type="button"
+              {{on "click" this.openCyclesPanel}}
+              title="Open the cycle list panel"
+            >Show cycles</button>
+          {{/if}}
         </div>
+        <p class="controls__hint">
+          drag / wheel: pan · ctrl+wheel / pinch: zoom · click: select · right-click: clear
+        </p>
       {{/if}}
-      <details class="controls__section controls__details">
-        <summary class="controls__section-label">layout</summary>
-        <label class="controls__slider">
-          <span class="controls__slider-name">node distance</span>
-          <input
-            type="range"
-            min={{NODE_DIST_MIN}}
-            max={{NODE_DIST_MAX}}
-            step={{NODE_DIST_STEP}}
-            value={{this.viewState.nodeDistance}}
-            {{on "change" this.setNodeDistance}}
-          />
-          <span class="controls__slider-value">{{this.viewState.nodeDistance}}</span>
-        </label>
-        <label class="controls__slider">
-          <span class="controls__slider-name">cluster distance</span>
-          <input
-            type="range"
-            min={{CLUSTER_DIST_MIN}}
-            max={{CLUSTER_DIST_MAX}}
-            step={{CLUSTER_DIST_STEP}}
-            value={{this.viewState.clusterDistance}}
-            {{on "change" this.setClusterDistance}}
-          />
-          <span class="controls__slider-value">{{this.viewState.clusterDistance}}</span>
-        </label>
-        <label class="controls__slider">
-          <span class="controls__slider-name">repulsion</span>
-          <input
-            type="range"
-            min={{REPULSION_MIN}}
-            max={{REPULSION_MAX}}
-            step={{REPULSION_STEP}}
-            value={{this.viewState.repulsion}}
-            {{on "change" this.setRepulsion}}
-          />
-          <span class="controls__slider-value">{{this.viewState.repulsion}}</span>
-        </label>
-        <label
-          class="controls__slider"
-          title="Louvain resolution. Higher = more, smaller communities; lower = bigger, clingier ones."
-        >
-          <span class="controls__slider-name">clustering</span>
-          <input
-            type="range"
-            min={{CLUSTERING_MIN}}
-            max={{CLUSTERING_MAX}}
-            step={{CLUSTERING_STEP}}
-            value={{this.viewState.clustering}}
-            {{on "change" this.setClustering}}
-          />
-          <span class="controls__slider-value">{{this.viewState.clustering}}</span>
-        </label>
-      </details>
-      <div class="controls__row">
-        <button type="button" {{on "click" @onResetView}}>Reset view</button>
-        {{#if this.collapsedCount}}
-          <button
-            type="button"
-            {{on "click" this.clearCollapsed}}
-            title="Reset all node-level expand / collapse toggles"
-          >Clear toggles ({{this.collapsedCount}})</button>
-        {{/if}}
-        {{#if this.showCyclesPanelButton}}
-          <button
-            type="button"
-            {{on "click" this.openCyclesPanel}}
-            title="Open the cycle list panel"
-          >Show cycles</button>
-        {{/if}}
-      </div>
-      <p class="controls__hint">
-        drag / wheel: pan · ctrl+wheel / pinch: zoom · click: select · right-click: clear
-      </p>
     </div>
   </template>
 }
