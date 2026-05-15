@@ -1,6 +1,7 @@
 import Component from "@glimmer/component";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
+import { htmlSafe, type SafeString } from "@ember/template";
 
 import { modifier } from "ember-modifier";
 import Flatbush from "flatbush";
@@ -163,9 +164,13 @@ export default class Visualizer extends Component {
     return Math.min(100, Math.floor((p.tick / p.total) * 100));
   }
 
-  /** Inline style string for the progress bar's fill width. */
-  get layoutProgressBarStyle(): string {
-    return `width: ${this.layoutProgressPercent}%`;
+  /**
+   * Inline style for the progress bar's fill width. Wrapped in
+   * `htmlSafe` so Glimmer doesn't warn about XSS-bound style attrs — the
+   * value is a single integer percentage so there's no escape concern.
+   */
+  get layoutProgressBarStyle(): SafeString {
+    return htmlSafe(`width: ${this.layoutProgressPercent}%`);
   }
 
   /**
