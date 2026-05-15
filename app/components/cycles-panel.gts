@@ -72,10 +72,11 @@ export default class CyclesPanel extends Component {
 
     if (!g) return [];
 
+    const selectedId = this.viewState.selectedId;
     const hiddenTypesKey = serializeIntSet(this.viewState.hiddenNodeTypes);
     const collapsedKey = serializeStringSet(this.viewState.collapsedIds);
     const hiddenIdsKey = serializeStringSet(this.viewState.hiddenNodeIds);
-    const key = `${hiddenTypesKey}|${collapsedKey}|${hiddenIdsKey}`;
+    const key = `${hiddenTypesKey}|${collapsedKey}|${hiddenIdsKey}|${selectedId ?? ""}`;
 
     if (g === this.#lastGraph && key === this.#lastCycleKey) {
       return this.#lastCycles;
@@ -90,6 +91,22 @@ export default class CyclesPanel extends Component {
       this.viewState.hiddenNodeIds,
     );
     const remap = contraction?.nodeRemap ?? null;
+    // When a node is selected, scope the list to cycles whose bundled
+    // form involves the selection (or its visible owner, when the
+    // selection is a hidden file folded into a package). Without this,
+    // selecting `@acme/billing` would also surface `utils → db` cycles
+    // that have nothing to do with billing — accurate for the whole
+    // graph but noise for someone investigating one node.
+    let scopeIdx = -1;
+
+    if (selectedId !== null) {
+      const idx = g.idToIndex.get(selectedId);
+
+      if (idx !== undefined) {
+        scopeIdx = remap === null ? idx : remap[idx]!;
+      }
+    }
+
     const cycles = findAllCycles(g, remap);
     // Dedupe by canonical node sequence — parallel raw edges between two
     // packages (e.g. lots of `file → file` imports) all contract to the
@@ -99,17 +116,19 @@ export default class CyclesPanel extends Component {
     const mapped: CycleEntry[] = [];
 
     for (const cycle of cycles) {
-      const key = canonicalKey(cycle);
+      if (scopeIdx >= 0 && !cycle.includes(scopeIdx)) continue;
 
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const ck = canonicalKey(cycle);
+
+      if (seen.has(ck)) continue;
+      seen.add(ck);
 
       const nodes: CycleNode[] = cycle.map((idx) => ({
         id: g.ids[idx]!,
         label: g.labels[idx]!,
       }));
 
-      mapped.push({ nodes, key });
+      mapped.push({ nodes, key: ck });
     }
 
     this.#lastGraph = g;
