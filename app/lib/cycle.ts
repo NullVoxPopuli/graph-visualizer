@@ -1,6 +1,54 @@
 import type { LoadedGraph } from "./types.ts";
 
 /**
+ * Map a raw cycle (node sequence over the original graph) to its
+ * contracted equivalent. Collapses consecutive same-rep nodes (a chain
+ * of hidden nodes that all map to the same owner becomes one stop) and
+ * trims the wrap-around duplicate at the end. Returns `null` for
+ * pathological cases — an orphan-after-remap node (`-1`) or a cycle
+ * that contracts to a 0/1-node walk.
+ */
+export function contractCycle(raw: number[], nodeRemap: Int32Array | null): number[] | null {
+  if (nodeRemap === null) {
+    return raw.slice();
+  }
+
+  const out: number[] = [];
+
+  for (const idx of raw) {
+    const r = nodeRemap[idx]!;
+
+    if (r < 0) return null;
+    if (out.length > 0 && out[out.length - 1] === r) continue;
+    out.push(r);
+  }
+
+  while (out.length > 1 && out[0] === out[out.length - 1]) out.pop();
+
+  return out.length >= 2 ? out : null;
+}
+
+/**
+ * Rotate the cycle so the smallest node index is first, then stringify.
+ * Two cycles that are rotations of each other (same nodes in the same
+ * cyclic order) produce the same key — useful for deduping bundled
+ * cycles that came from different raw cycles.
+ */
+export function canonicalCycleKey(cycle: number[]): string {
+  let minIdx = 0;
+
+  for (let i = 1; i < cycle.length; i++) {
+    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
+  }
+
+  const out: number[] = [];
+
+  for (let i = 0; i < cycle.length; i++) out.push(cycle[(minIdx + i) % cycle.length]!);
+
+  return out.join(",");
+}
+
+/**
  * CSR (compressed sparse row) outgoing adjacency built once for both
  * cycle detection passes. Endpoints are remapped through `nodeRemap` when
  * provided so traversal matches the rendered (contracted) graph.
@@ -236,6 +284,44 @@ function tarjanScc(
   }
 
   return sccs;
+}
+
+/**
+ * Find the bundled cycles that are *backed by an actual raw elementary
+ * cycle*. The contracted graph (`findAllCycles(g, remap)`) can have
+ * structural cycles that don't correspond to any closed walk in the raw
+ * graph — two unrelated raw edges crossing the same package pair will
+ * fold into a contracted `P → Q → P` even though no single raw cycle
+ * exists. Drawing those as red cycle highlights misleads the user, so we
+ * derive the bundled list from the raw cycles instead: contract each raw
+ * cycle, dedupe by canonical key.
+ *
+ * `null` remap returns the raw cycles unchanged.
+ */
+export function findBundledCyclesViaRaw(
+  graph: LoadedGraph,
+  nodeRemap: Int32Array | null,
+  maxCycles = 1000,
+): number[][] {
+  const raw = findAllCycles(graph, null, maxCycles);
+  const seen = new Set<string>();
+  const out: number[][] = [];
+
+  for (const r of raw) {
+    const bundled = contractCycle(r, nodeRemap);
+
+    if (bundled === null) continue;
+
+    const key = canonicalCycleKey(bundled);
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(bundled);
+  }
+
+  out.sort((a, b) => a.length - b.length);
+
+  return out;
 }
 
 /**

@@ -7,7 +7,7 @@ import Flatbush from "flatbush";
 
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
-import { findAllCycles } from "#lib/cycle";
+import { findBundledCyclesViaRaw } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { Renderer } from "#lib/renderer";
@@ -292,12 +292,12 @@ export default class Visualizer extends Component {
     }
 
     const N = scene.communities.length;
-    // All elementary cycles the selected node sits on. `findAllCycles` is
-    // SCC-bounded, so for a node outside any SCC this returns []; for a
-    // node inside one we get every cycle that passes through it, not just
-    // the shortest. Highlighting only the first cycle hid related loops
-    // the user actually wanted to see.
-    const allCycles = findAllCycles(scene.graph, this.nodeRemap);
+    // Bundled cycles that are *backed by a raw elementary cycle*. Pure
+    // contracted-graph cycles (two unrelated cross-package edges that
+    // happen to close a loop after contraction) used to render as
+    // misleading red rings on packages whose files have no actual
+    // circular dependency. `findBundledCyclesViaRaw` filters those out.
+    const allCycles = findBundledCyclesViaRaw(scene.graph, this.nodeRemap);
     const cycles = allCycles.filter((c) => c.includes(selected));
     let cycleMask: Uint8Array | null = null;
 

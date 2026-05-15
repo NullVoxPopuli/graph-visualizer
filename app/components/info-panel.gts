@@ -5,7 +5,12 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { buildContraction } from "#lib/contract";
-import { findAllCycles } from "#lib/cycle";
+import {
+  canonicalCycleKey,
+  contractCycle as sharedContractCycle,
+  findAllCycles,
+  findBundledCyclesViaRaw,
+} from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -168,26 +173,26 @@ export default class InfoPanel extends Component {
     // (its loops are absorbed into the owner). Bail.
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    // The list is driven by the *bundled* cycles — the same enumeration
-    // the renderer uses for the red rings. Raw cycles get attached only
-    // as occurrences (counts), because not every bundled cycle has an
-    // underlying raw elementary cycle (two separate raw paths can close a
-    // loop in the contracted graph without any single raw cycle existing).
-    const bundledCycles = findAllCycles(g, remap).filter((c) =>
+    // Bundled cycles come from `findBundledCyclesViaRaw` — only cycles
+    // backed by an actual raw elementary cycle qualify. This is the same
+    // source the renderer uses to draw red rings, so the info-panel list
+    // and the canvas can't disagree.
+    const bundledCycles = findBundledCyclesViaRaw(g, remap).filter((c) =>
       c.includes(info.index),
     );
 
-    // Pre-index raw cycles by their bundled canonical key, so each
-    // bundled cycle can grab its matching raw cycles in one lookup.
+    // Pre-index raw cycles by their bundled canonical key so each
+    // bundled cycle can grab its matching raw cycles in one lookup. We
+    // need raw cycles for the occurrence counts.
     const rawsByBundle = new Map<string, number[][]>();
     const rawCycles = findAllCycles(g, null);
 
     for (const r of rawCycles) {
-      const bundled = contractCycle(r, remap);
+      const bundled = sharedContractCycle(r, remap);
 
       if (bundled === null) continue;
 
-      const key = canonicalKey(bundled);
+      const key = canonicalCycleKey(bundled);
       let arr = rawsByBundle.get(key);
 
       if (!arr) {
@@ -198,14 +203,9 @@ export default class InfoPanel extends Component {
     }
 
     const entries: CycleEntry[] = [];
-    const seenBundled = new Set<string>();
 
     for (const bundled of bundledCycles) {
-      const bundledKey = canonicalKey(bundled);
-
-      if (seenBundled.has(bundledKey)) continue;
-      seenBundled.add(bundledKey);
-
+      const bundledKey = canonicalCycleKey(bundled);
       const raws = rawsByBundle.get(bundledKey) ?? [];
       const nodes = bundled.map((idx) => ({
         id: g.ids[idx]!,

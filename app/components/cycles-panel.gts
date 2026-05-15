@@ -5,7 +5,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { buildContraction } from "#lib/contract";
-import { findAllCycles } from "#lib/cycle";
+import { canonicalCycleKey, findBundledCyclesViaRaw } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -107,7 +107,7 @@ export default class CyclesPanel extends Component {
       }
     }
 
-    const cycles = findAllCycles(g, remap);
+    const cycles = findBundledCyclesViaRaw(g, remap);
     // Dedupe by canonical node sequence — parallel raw edges between two
     // packages (e.g. lots of `file → file` imports) all contract to the
     // same bundled cycle, and listing the same `pkgA → pkgB` 13 times is
@@ -118,7 +118,7 @@ export default class CyclesPanel extends Component {
     for (const cycle of cycles) {
       if (scopeIdx >= 0 && !cycle.includes(scopeIdx)) continue;
 
-      const ck = canonicalKey(cycle);
+      const ck = canonicalCycleKey(cycle);
 
       if (seen.has(ck)) continue;
       seen.add(ck);
@@ -275,23 +275,3 @@ function notEq(a: unknown, b: unknown): boolean {
   return a !== b;
 }
 
-/**
- * Rotate the cycle so the smallest node index is first, then stringify.
- * Two cycles that are rotations of each other (same nodes in the same
- * cyclic order) collapse to the same key — and parallel raw edges that
- * contract to the same bundled cycle stop showing up as duplicate
- * entries.
- */
-function canonicalKey(cycle: number[]): string {
-  let minIdx = 0;
-
-  for (let i = 1; i < cycle.length; i++) {
-    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
-  }
-
-  const out: number[] = [];
-
-  for (let i = 0; i < cycle.length; i++) out.push(cycle[(minIdx + i) % cycle.length]!);
-
-  return out.join(",");
-}
