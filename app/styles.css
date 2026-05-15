@@ -865,15 +865,16 @@ pre code {
 .info-panel {
   top: 50px;
   right: 12px;
-  /* Default fills the right column down to the viewport bottom (with a
-     12px gap so the rounded corner is visible). Manual resize via the
-     bottom-right handle overrides with an inline height. */
-  height: calc(100vh - 62px);
   width: 340px;
   min-width: 240px;
-  min-height: 160px;
   max-width: 96vw;
-  max-height: 96vh;
+  /* Size to content — most selections fill far less than the full
+     right column and the trailing empty space underneath was just
+     visual noise. No `min-height`: a node with one neighbor and no
+     cycles deserves a short panel. Cap at half the viewport but never
+     less than 500px (clamped to 96vh on very short screens) so a node
+     with hundreds of neighbors can't push the panel off-screen. */
+  max-height: min(96vh, max(50dvh, 500px));
   font-size: 13px;
   /* `resize: both` puts a native drag handle at the bottom-right.
      `overflow: hidden` lets the handle render; internal scrolling lives
@@ -1221,14 +1222,14 @@ pre code {
   left: 12px;
   bottom: 12px;
   width: 280px;
-  /* Default to roughly half-screen — gets out of the way of everything
-     else until the user drags it. Manual resize (via the bottom-right
-     handle) overrides this with an inline height. */
-  height: 50vh;
   min-width: 220px;
-  min-height: 120px;
   max-width: 96vw;
-  max-height: 96vh;
+  /* Size to content with no `min-height`: a graph with two cycles
+     shouldn't reserve half the screen for empty space. Cap at half
+     the viewport but never less than 500px (clamped to 96vh on very
+     short screens); the resize handle is still there if the user
+     wants more. */
+  max-height: min(96vh, max(50dvh, 500px));
   padding: 0 0 6px;
   font-size: 12px;
   /* `resize: both` puts a native drag handle in the bottom-right corner.
