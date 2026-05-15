@@ -55,16 +55,25 @@ export default class VisualizerService extends Service {
    * Louvain `resolution` slider. Manually memoized by value — `@cached`
    * here would invalidate on every QP write (the resolution read tracks
    * `router.currentRoute`), forcing a worker rerun per click.
+   *
+   * When the inputs change we `terminate()` any still-running analysis
+   * worker (and downstream layout worker) before starting the new run.
+   * The orphaned promises never resolve — Comlink's call hangs once the
+   * worker is gone — but the new promise has replaced them in
+   * `#lastAnalysisPromise` / `#lastProcessing` so nothing observes them.
    */
   #lastGraph: LoadedGraph | null = null;
   #lastClustering = Number.NaN;
   #lastClusterByLabel = false;
   #lastAnalysisPromise: Promise<Analysis> | null = null;
+  #analysisWorker: Worker | null = null;
 
   get analysis(): Promise<Analysis> | null {
     const g = this.graph.current;
 
     if (!g) {
+      this.#cancelAnalysis();
+      this.#cancelLayout();
       this.#lastGraph = null;
       this.#lastAnalysisPromise = null;
 
@@ -83,12 +92,32 @@ export default class VisualizerService extends Service {
       return this.#lastAnalysisPromise;
     }
 
+    // Inputs changed — cancel both stages. The layout depends on
+    // analysis output, so a new analysis necessarily invalidates the
+    // current layout too.
+    this.#cancelAnalysis();
+    this.#cancelLayout();
+
     this.#lastGraph = g;
     this.#lastClustering = clustering;
     this.#lastClusterByLabel = clusterByLabel;
-    this.#lastAnalysisPromise = runAnalysis(g, clustering, clusterByLabel);
+
+    const { worker, result } = startAnalysis(g, clustering, clusterByLabel);
+
+    this.#analysisWorker = worker;
+    this.#lastAnalysisPromise = result;
 
     return this.#lastAnalysisPromise;
+  }
+
+  #cancelAnalysis(): void {
+    this.#analysisWorker?.terminate();
+    this.#analysisWorker = null;
+  }
+
+  #cancelLayout(): void {
+    this.#layoutWorker?.terminate();
+    this.#layoutWorker = null;
   }
 
   /**
@@ -108,6 +137,7 @@ export default class VisualizerService extends Service {
   #lastNodeDistance = Number.NaN;
   #lastClusterDistance = Number.NaN;
   #lastProcessing: Promise<ProcessedScene> | null = null;
+  #layoutWorker: Worker | null = null;
 
   get processing(): Promise<ProcessedScene> | null {
     const a = this.analysis;
@@ -133,27 +163,46 @@ export default class VisualizerService extends Service {
       return this.#lastProcessing;
     }
 
+    // A layout slider moved (or analysis just produced a new result) —
+    // kill the previous layout worker before spawning the new one so we
+    // don't end up with two d3-force simulations fighting for CPU.
+    this.#cancelLayout();
+
     this.#lastAnalysis = a;
     this.#lastRepulsion = repulsion;
     this.#lastNodeDistance = nodeDistance;
     this.#lastClusterDistance = clusterDistance;
     this.layoutProgress = { tick: 0, total: 1 };
     this.#lastProcessing = a.then(async (analysis) => {
-      const positions = await runLayout(
+      // Safety: another invalidation may have raced in between the getter
+      // call and the analysis promise resolving (e.g. clustering slider
+      // moved while Louvain was still running). Terminate whatever's left
+      // before spawning so we never have two layout workers alive at once.
+      this.#cancelLayout();
+
+      const { worker, result } = startLayout(
         analysis.graph,
         analysis.communities,
         analysis.radii,
-        {
-          repulsion,
-          nodeDistance,
-          clusterDistance,
-        },
+        { repulsion, nodeDistance, clusterDistance },
         (tick, total) => {
-          this.layoutProgress = { tick, total };
+          // Don't smear a dead worker's last tick over the new run's
+          // progress bar — only the currently-tracked worker writes
+          // here.
+          if (this.#layoutWorker === worker) {
+            this.layoutProgress = { tick, total };
+          }
         },
       );
 
-      this.layoutProgress = null;
+      this.#layoutWorker = worker;
+
+      const positions = await result;
+
+      if (this.#layoutWorker === worker) {
+        this.#layoutWorker = null;
+        this.layoutProgress = null;
+      }
 
       return {
         graph: analysis.graph,
@@ -230,91 +279,128 @@ export default class VisualizerService extends Service {
 }
 
 /**
- * Run the analyze worker on the given graph. The worker is spawned per call
- * and terminated as soon as the result is back — there's no long-lived
- * background work to manage.
+ * Spawn the analyze worker for a single Louvain run. Returns the worker so
+ * the caller can `terminate()` it if a newer slider value invalidates the
+ * in-flight run; the result promise self-terminates on success so callers
+ * who only care about the answer don't have to.
  */
-async function runAnalyze(graph: LoadedGraph, resolution: number): Promise<Int32Array> {
+function startAnalyze(
+  graph: LoadedGraph,
+  resolution: number,
+): { worker: Worker; result: Promise<Int32Array> } {
   const worker = new Worker(new URL("../lib/analyze.worker.ts", import.meta.url), {
     type: "module",
   });
   const analyze = Comlink.wrap<AnalyzeEngine>(worker);
+  const result = (async () => {
+    try {
+      const init: AnalyzeInit = {
+        nodeCount: graph.ids.length,
+        edges: graph.edgesFlat,
+        resolution,
+      };
+      const { communities } = await analyze.run(init);
 
-  try {
-    const init: AnalyzeInit = {
-      nodeCount: graph.ids.length,
-      edges: graph.edgesFlat,
-      resolution,
-    };
-    const result = await analyze.run(init);
+      return communities;
+    } finally {
+      // Idempotent — already a no-op if the service terminated us first.
+      worker.terminate();
+    }
+  })();
 
-    return result.communities;
-  } finally {
-    worker.terminate();
-  }
+  return { worker, result };
 }
 
 /**
- * Run the d3-force layout worker to completion. Returns the final positions
- * buffer; intermediate ticks are no longer surfaced.
+ * Spawn the d3-force layout worker. Same cancellation contract as
+ * `startAnalyze` — the returned worker is the handle the service uses to
+ * `terminate()` a still-running layout when a new slider value arrives,
+ * so we don't burn CPU on results nobody is going to see.
  */
-async function runLayout(
+function startLayout(
   graph: LoadedGraph,
   communities: Int32Array,
   radii: Float32Array,
   params: { repulsion: number; nodeDistance: number; clusterDistance: number },
   onProgress?: (tick: number, total: number) => void,
-): Promise<Float32Array> {
+): { worker: Worker; result: Promise<Float32Array> } {
   const worker = new Worker(new URL("../lib/layout.worker.ts", import.meta.url), {
     type: "module",
   });
   const layout = Comlink.wrap<LayoutEngine>(worker);
+  const init: LayoutInit = {
+    nodeCount: graph.ids.length,
+    edges: graph.edgesFlat,
+    communities,
+    radii,
+    // The per-batch cluster spread used to amplify positions ~9x, which
+    // dwarfed the spring/charge forces and meant the sliders had no
+    // visible effect after auto-fit normalized the result.
+    spreadFactor: 1,
+    repulsion: params.repulsion,
+    nodeDistance: params.nodeDistance,
+    clusterDistance: params.clusterDistance,
+    cohesion: 0.12,
+  };
+  const result = (async () => {
+    try {
+      // Comlink.proxy gives the worker a callable handle into the main
+      // thread; without the wrap it'd try to clone the function and throw.
+      return await layout.run(init, onProgress ? Comlink.proxy(onProgress) : null);
+    } finally {
+      worker.terminate();
+    }
+  })();
 
-  try {
-    const init: LayoutInit = {
-      nodeCount: graph.ids.length,
-      edges: graph.edgesFlat,
-      communities,
-      radii,
-      // The per-batch cluster spread used to amplify positions ~9x, which
-      // dwarfed the spring/charge forces and meant the sliders had no
-      // visible effect after auto-fit normalized the result.
-      spreadFactor: 1,
-      repulsion: params.repulsion,
-      nodeDistance: params.nodeDistance,
-      clusterDistance: params.clusterDistance,
-      cohesion: 0.12,
-    };
-
-    // Comlink.proxy gives the worker a callable handle into the main
-    // thread; without the wrap it'd try to clone the function and throw.
-    return await layout.run(init, onProgress ? Comlink.proxy(onProgress) : null);
-  } finally {
-    worker.terminate();
-  }
+  return { worker, result };
 }
 
-async function runAnalysis(
+/**
+ * Run analysis (label-prefix grouping when `clusterByLabel`, Louvain
+ * otherwise) and stamp on the precomputed radii. Returns a `worker`
+ * handle (or `null` for the sync path) so the service can terminate the
+ * in-flight Louvain run when the clustering slider moves again.
+ */
+function startAnalysis(
   graph: LoadedGraph,
   resolution: number,
   clusterByLabel: boolean,
-): Promise<Analysis> {
-  // Label-based clustering is cheap (pure string ops) and doesn't need the
-  // worker. Louvain is the slow path, so it's the only one that goes async.
-  const communities = clusterByLabel
-    ? clusterByLabelPrefix(graph)
-    : await runAnalyze(graph, resolution);
+): { worker: Worker | null; result: Promise<Analysis> } {
   const radii = computeRadii(graph.inDegree, graph.outDegree);
+
+  if (clusterByLabel) {
+    // Label-based clustering is cheap (pure string ops) and doesn't need
+    // the worker — finalize synchronously and return a resolved promise.
+    const communities = clusterByLabelPrefix(graph);
+
+    return {
+      worker: null,
+      result: Promise.resolve({
+        graph,
+        communities,
+        communityCount: countDistinct(communities),
+        radii,
+      }),
+    };
+  }
+
+  const { worker, result: communitiesP } = startAnalyze(graph, resolution);
+  const result = communitiesP.then((communities) => ({
+    graph,
+    communities,
+    communityCount: countDistinct(communities),
+    radii,
+  }));
+
+  return { worker, result };
+}
+
+function countDistinct(communities: Int32Array): number {
   const seen = new Set<number>();
 
   for (let i = 0; i < communities.length; i++) seen.add(communities[i]!);
 
-  return {
-    graph,
-    communities,
-    communityCount: seen.size,
-    radii,
-  };
+  return seen.size;
 }
 
 /**

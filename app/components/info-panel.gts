@@ -11,6 +11,7 @@ import {
   canonicalCycleKey,
   contractCycle as sharedContractCycle,
   findAllCycles,
+  hasAnyCycle,
 } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
@@ -367,6 +368,23 @@ export default class InfoPanel extends Component {
     }
 
     return out;
+  }
+
+  /**
+   * Whether the *graph as a whole* contains any cycle. Uses the fast
+   * back-edge DFS in `hasAnyCycle` — it returns at the very first back
+   * edge rather than building CSR + running full Tarjan the way
+   * `findAllCycles` does. Drives the "There are no cycles" / "There is
+   * at least one cycle" footer line; the existing per-node cycles list
+   * only describes the selected node, which can read "no cycles" even
+   * when the rest of the graph has plenty.
+   */
+  get hasAnyCycles(): boolean {
+    const g = this.graph.current;
+
+    if (!g) return false;
+
+    return hasAnyCycle(g);
   }
 
   /**
@@ -739,6 +757,14 @@ export default class InfoPanel extends Component {
               {{/each}}
             </dl>
           {{/if}}
+
+          <p class="panel__cycles-status">
+            {{#if this.hasAnyCycles}}
+              There is at least one cycle.
+            {{else}}
+              There are no cycles.
+            {{/if}}
+          </p>
         </div>
       </aside>
     {{/if}}

@@ -100,6 +100,94 @@ function buildCsr(graph: LoadedGraph, nodeRemap: Int32Array | null): CsrOut {
 }
 
 /**
+ * Cheap "does the graph contain any directed cycle?" answer. A 3-color
+ * iterative DFS that returns as soon as it sees a back edge — so a
+ * mostly-DAG resolves in roughly O(depth-to-first-cycle) rather than
+ * the full O(N + E) that even an early-terminating `findAllCycles`
+ * pays (it still builds CSR + runs Tarjan before short-circuiting).
+ *
+ * Self-loops are ignored to match `findAllCycles`'s semantics — that
+ * function skips length-1 cycles, so a UI showing "There are no
+ * cycles" alongside the full enumeration agrees with itself.
+ */
+export function hasAnyCycle(graph: LoadedGraph): boolean {
+  const N = graph.ids.length;
+
+  if (N === 0) return false;
+
+  // Inline CSR build (mirrors `buildCsr` but skips the remap branch
+  // we don't need here — this function only ever runs on the raw
+  // graph). Kept here so the fast-path can't be slowed down by
+  // refactoring the more-general helper.
+  const { edgesFlat } = graph;
+  const E = edgesFlat.length / 2;
+  const outIdx = new Int32Array(N + 1);
+
+  for (let i = 0; i < E; i++) outIdx[edgesFlat[2 * i]! + 1]!++;
+  for (let i = 0; i < N; i++) outIdx[i + 1]! += outIdx[i]!;
+
+  const outAdj = new Int32Array(E);
+  const filled = new Int32Array(N);
+
+  for (let i = 0; i < E; i++) {
+    const a = edgesFlat[2 * i]!;
+    const b = edgesFlat[2 * i + 1]!;
+
+    outAdj[outIdx[a]! + filled[a]!] = b;
+    filled[a]!++;
+  }
+
+  // 0 = unseen, 1 = on the current DFS stack, 2 = fully explored.
+  const color = new Uint8Array(N);
+  const stack = new Int32Array(N);
+  const cursor = new Int32Array(N);
+
+  for (let start = 0; start < N; start++) {
+    if (color[start]! !== 0) continue;
+
+    let depth = 0;
+
+    stack[depth] = start;
+    cursor[depth] = outIdx[start]!;
+    color[start] = 1;
+
+    while (depth >= 0) {
+      const v = stack[depth]!;
+      const end = outIdx[v + 1]!;
+
+      if (cursor[depth]! >= end) {
+        color[v] = 2;
+        depth--;
+        continue;
+      }
+
+      const j = cursor[depth]!;
+      const w = outAdj[j]!;
+
+      cursor[depth] = j + 1;
+
+      // Self-loops aren't cycles in this codebase (see header note).
+      if (w === v) continue;
+
+      // The only edge into a node still on the DFS stack is a back
+      // edge, which means a cycle.
+      if (color[w]! === 1) return true;
+
+      if (color[w]! === 0) {
+        depth++;
+        stack[depth] = w;
+        cursor[depth] = outIdx[w]!;
+        color[w] = 1;
+      }
+      // color[w] === 2: cross/forward edge into an already-finished
+      // subtree, no new cycle reachable through w.
+    }
+  }
+
+  return false;
+}
+
+/**
  * Find the shortest directed cycle passing through `source` and return the
  * cycle's nodes in order, starting at `source` (the closing edge back to
  * `source` is implied — `source` is not duplicated at the end). `null` if

@@ -165,6 +165,24 @@ export default class Controls extends Component<Signature> {
   }
 
   /**
+   * Drop the persisted info/cycles panel geometries so they re-render at
+   * their CSS default positions, which sit inside the viewport. Useful
+   * when a saved URL has a panel positioned off-screen — e.g. dragged
+   * to the right edge on a wide monitor, then opened on a smaller one.
+   * Only offered when at least one panel actually has a custom position
+   * stored; otherwise the button does nothing visible.
+   */
+  @action
+  recenterPanels(): void {
+    this.viewState.infoPanelGeometry = null;
+    this.viewState.cyclesPanelGeometry = null;
+  }
+
+  get showRecenterPanelsButton(): boolean {
+    return this.viewState.infoPanelGeometry !== null || this.viewState.cyclesPanelGeometry !== null;
+  }
+
+  /**
    * Hidden nodes (set via the info panel's "Hide node" button). Each
    * entry pairs the id with its current label so the controls panel can
    * show something readable; if the id no longer resolves (different
@@ -195,7 +213,12 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
-  clearHiddenNodes(): void {
+  clearHiddenNodes(event: MouseEvent): void {
+    // The button lives inside the section's `<summary>`, where a click
+    // would otherwise bubble up and toggle the parent `<details>` open
+    // or closed as a side-effect of restoring nodes. Stop the bubble so
+    // "show all" only does its one job.
+    event.stopPropagation();
     this.viewState.clearHiddenNodes();
   }
 
@@ -351,8 +374,8 @@ export default class Controls extends Component<Signature> {
           </div>
         {{/if}}
         {{#if this.hiddenNodes.length}}
-          <div class="controls__section">
-            <div class="controls__section-head">
+          <details class="controls__section controls__details">
+            <summary class="controls__section-head">
               <span class="controls__section-label">hidden nodes ({{this.hiddenNodes.length}})</span>
               <button
                 type="button"
@@ -360,7 +383,7 @@ export default class Controls extends Component<Signature> {
                 {{on "click" this.clearHiddenNodes}}
                 title="Show all hidden nodes again"
               >show all</button>
-            </div>
+            </summary>
             <ul class="controls__hidden-list">
               {{#each this.hiddenNodes as |h|}}
                 <li class="controls__hidden">
@@ -376,7 +399,7 @@ export default class Controls extends Component<Signature> {
                 </li>
               {{/each}}
             </ul>
-          </div>
+          </details>
         {{/if}}
         <details class="controls__section controls__details">
           <summary class="controls__section-label">layout</summary>
@@ -447,6 +470,13 @@ export default class Controls extends Component<Signature> {
               {{on "click" this.openCyclesPanel}}
               title="Open the cycle list panel"
             >Show cycles</button>
+          {{/if}}
+          {{#if this.showRecenterPanelsButton}}
+            <button
+              type="button"
+              {{on "click" this.recenterPanels}}
+              title="Bring floating panels back into the viewport at their default positions"
+            >Recenter panels</button>
           {{/if}}
         </div>
         <p class="controls__hint">
