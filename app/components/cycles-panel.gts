@@ -91,14 +91,26 @@ export default class CyclesPanel extends Component {
     );
     const remap = contraction?.nodeRemap ?? null;
     const cycles = findAllCycles(g, remap);
-    const mapped = cycles.map((cycle) => {
+    // Dedupe by canonical node sequence — parallel raw edges between two
+    // packages (e.g. lots of `file → file` imports) all contract to the
+    // same bundled cycle, and listing the same `pkgA → pkgB` 13 times is
+    // just noise.
+    const seen = new Set<string>();
+    const mapped: CycleEntry[] = [];
+
+    for (const cycle of cycles) {
+      const key = canonicalKey(cycle);
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+
       const nodes: CycleNode[] = cycle.map((idx) => ({
         id: g.ids[idx]!,
         label: g.labels[idx]!,
       }));
 
-      return { nodes, key: nodes.map((n) => n.id).join("→") };
-    });
+      mapped.push({ nodes, key });
+    }
 
     this.#lastGraph = g;
     this.#lastCycleKey = key;
@@ -242,4 +254,25 @@ function eq(a: unknown, b: unknown): boolean {
 
 function notEq(a: unknown, b: unknown): boolean {
   return a !== b;
+}
+
+/**
+ * Rotate the cycle so the smallest node index is first, then stringify.
+ * Two cycles that are rotations of each other (same nodes in the same
+ * cyclic order) collapse to the same key — and parallel raw edges that
+ * contract to the same bundled cycle stop showing up as duplicate
+ * entries.
+ */
+function canonicalKey(cycle: number[]): string {
+  let minIdx = 0;
+
+  for (let i = 1; i < cycle.length; i++) {
+    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
+  }
+
+  const out: number[] = [];
+
+  for (let i = 0; i < cycle.length; i++) out.push(cycle[(minIdx + i) % cycle.length]!);
+
+  return out.join(",");
 }

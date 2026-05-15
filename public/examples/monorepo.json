@@ -317,6 +317,10 @@
         {
           "nodeId": "@acme/utils/types.ts",
           "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/session.ts",
+          "edgeType": "imports"
         }
       ]
     },
@@ -455,6 +459,10 @@
         {
           "nodeId": "@acme/db/index.ts",
           "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/billing/payment.ts",
+          "edgeType": "imports"
         }
       ]
     },
@@ -522,6 +530,10 @@
         },
         {
           "nodeId": "@acme/utils/strings.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/db/migrations.ts",
           "edgeType": "imports"
         }
       ]
@@ -625,6 +637,10 @@
         },
         {
           "nodeId": "@acme/utils/index.ts",
+          "edgeType": "imports"
+        },
+        {
+          "nodeId": "@acme/auth/auth-service.ts",
           "edgeType": "imports"
         }
       ]
