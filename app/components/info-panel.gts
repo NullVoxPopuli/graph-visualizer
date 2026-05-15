@@ -4,14 +4,12 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
-import { buildContraction } from "#lib/contract";
 import { findAllCycles } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
   createSizeObserverModifier,
 } from "#lib/floating-panel";
-import { computeRadii } from "#lib/pack";
 
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
@@ -128,47 +126,14 @@ export default class InfoPanel extends Component {
 
   /**
    * Every elementary cycle the selected node sits on, computed against
-   * the same contracted graph the renderer uses. Each cycle gets a
-   * dedicated entry so the list mirrors the floating cycles panel rather
-   * than collapsing everything into one "shortest path" line — this is
-   * the bundled view the red highlights on the canvas correspond to.
+   * the *raw* graph. Intentionally ignores `hiddenNodeTypes`,
+   * `collapsedIds`, and `hiddenNodeIds`: the info panel is the place to
+   * see what's actually in the underlying loop, and that shouldn't move
+   * around as the user toggles type filters. The contracted view of
+   * cycles lives in the floating cycles panel, where the renderer's red
+   * highlights match.
    */
   get cycles(): CycleEntry[] {
-    const info = this.info;
-    const g = this.graph.current;
-
-    if (!info || !g) return [];
-
-    // Radii from `computeRadii` mirror what the visualizer service builds.
-    // We don't read the resolved scene here — the cycle is purely a
-    // topology question and shouldn't wait on the force layout.
-    const radii = computeRadii(g.inDegree, g.outDegree);
-    const contraction = buildContraction(
-      g,
-      radii,
-      this.viewState.hiddenNodeTypes,
-      this.viewState.collapsedIds,
-      this.viewState.hiddenNodeIds,
-    );
-    const remap = contraction?.nodeRemap ?? null;
-    // If the selected node was hidden by contraction, no cycle goes
-    // through *this* node in the bundled view.
-    if (remap !== null && remap[info.index]! !== info.index) return [];
-
-    const all = findAllCycles(g, remap);
-
-    return all
-      .filter((c) => c.includes(info.index))
-      .map((cycle) => cycleToEntry(cycle, g));
-  }
-
-  /**
-   * Same as `cycles`, but on the *original* graph with no contraction —
-   * so cycles that pass through hidden / collapsed intermediate nodes
-   * surface in full. Only meaningful when contraction is active; falls
-   * back to an empty list otherwise (see `showFullCycles`).
-   */
-  get fullCycles(): CycleEntry[] {
     const info = this.info;
     const g = this.graph.current;
 
@@ -179,24 +144,6 @@ export default class InfoPanel extends Component {
     return all
       .filter((c) => c.includes(info.index))
       .map((cycle) => cycleToEntry(cycle, g));
-  }
-
-  /**
-   * The fine-grained section only adds value when contraction is hiding
-   * something — otherwise it's a duplicate of the bundled list.
-   */
-  get showFullCycles(): boolean {
-    if (this.fullCycles.length === 0) return false;
-
-    if (
-      this.viewState.hiddenNodeTypes.size === 0 &&
-      this.viewState.collapsedIds.size === 0 &&
-      this.viewState.hiddenNodeIds.size === 0
-    ) {
-      return false;
-    }
-
-    return true;
   }
 
   get metaEntries(): { key: string; value: string }[] {
@@ -236,10 +183,6 @@ export default class InfoPanel extends Component {
 
   get cyclesOpen(): boolean {
     return this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
-  }
-
-  get fullCyclesOpen(): boolean {
-    return this.fullCycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
   @action
@@ -415,37 +358,6 @@ export default class InfoPanel extends Component {
           {{/if}}
         </details>
 
-        {{#if this.showFullCycles}}
-          <details class="panel__section" open={{this.fullCyclesOpen}}>
-            <summary class="panel__subhead">cycles · fine-grained ({{this.fullCycles.length}})</summary>
-            <ol class="panel__cycles">
-              {{#each this.fullCycles key="key" as |cycle i|}}
-                <li class="panel__cycle">
-                  <div class="panel__cycle-head">#{{add i 1}} · {{cycle.nodes.length}} nodes</div>
-                  <ol class="panel__neighbors panel__neighbors--ordered">
-                    {{#each cycle.nodes key="id" as |entry|}}
-                      <li>
-                        <button
-                          type="button"
-                          class="panel__neighbor"
-                          title={{entry.id}}
-                          {{on "click" (fn this.selectNeighbor entry.id)}}
-                          {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                          {{on "mouseleave" this.unhoverNeighbor}}
-                        >
-                          <span class="panel__neighbor-label">{{entry.label}}</span>
-                          {{#if (notEq entry.id entry.label)}}
-                            <code class="panel__neighbor-id">{{entry.id}}</code>
-                          {{/if}}
-                        </button>
-                      </li>
-                    {{/each}}
-                  </ol>
-                </li>
-              {{/each}}
-            </ol>
-          </details>
-        {{/if}}
 
         {{#if this.metaEntries.length}}
           <h3 class="panel__subhead">meta</h3>
