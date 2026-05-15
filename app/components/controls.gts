@@ -158,13 +158,21 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
-  openCyclesPanel(): void {
-    // Also drop any saved geometry: a previous session may have left
-    // the panel at coordinates that are off-screen on this viewport,
-    // in which case flipping `cyclesPanelOpen` to true would render
-    // the panel where the user can't see it — making "Show cycles"
-    // look like a dead button. Resetting to the CSS default position
-    // is harmless when geometry was already null.
+  toggleCyclesPanel(): void {
+    if (this.viewState.cyclesPanelOpen) {
+      // Close — leave any saved geometry alone so a re-open lands the
+      // panel back where the user last placed it.
+      this.viewState.cyclesPanelOpen = false;
+
+      return;
+    }
+
+    // Open — drop any saved geometry first. A previous session may
+    // have left the panel at coordinates that are off-screen on this
+    // viewport; flipping `cyclesPanelOpen` to true alone would render
+    // the panel where the user can't see it and make the button look
+    // dead. Resetting to the CSS default position is harmless when
+    // geometry was already null.
     this.viewState.cyclesPanelGeometry = null;
     this.viewState.cyclesPanelOpen = true;
   }
@@ -503,9 +511,13 @@ export default class Controls extends Component<Signature> {
           {{#if this.showCyclesPanelButton}}
             <button
               type="button"
-              {{on "click" this.openCyclesPanel}}
-              title="Open the cycle list panel"
-            >Show cycles</button>
+              {{on "click" this.toggleCyclesPanel}}
+              title={{if
+                this.viewState.cyclesPanelOpen
+                "Close the cycle list panel"
+                "Open the cycle list panel"
+              }}
+            >{{if this.viewState.cyclesPanelOpen "Hide cycles" "Show cycles"}}</button>
           {{/if}}
           {{#if this.showRecenterPanelsButton}}
             <button
