@@ -7,7 +7,7 @@ import Flatbush from "flatbush";
 
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
-import { findShortestCycleThrough } from "#lib/cycle";
+import { findAllCycles } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { Renderer } from "#lib/renderer";
@@ -278,15 +278,25 @@ export default class Visualizer extends Component {
     }
 
     const N = scene.communities.length;
-    const cycle = findShortestCycleThrough(scene.graph, selected, this.nodeRemap);
+    // All elementary cycles the selected node sits on. `findAllCycles` is
+    // SCC-bounded, so for a node outside any SCC this returns []; for a
+    // node inside one we get every cycle that passes through it, not just
+    // the shortest. Highlighting only the first cycle hid related loops
+    // the user actually wanted to see.
+    const allCycles = findAllCycles(scene.graph, this.nodeRemap);
+    const cycles = allCycles.filter((c) => c.includes(selected));
     let cycleMask: Uint8Array | null = null;
 
-    if (cycle !== null && cycle.length >= 2) {
+    if (cycles.length > 0) {
       cycleMask = new Uint8Array(N);
-      for (const i of cycle) cycleMask[i] = 1;
+      // Total edge segments across every highlighted cycle. Each cycle of
+      // length L contributes L edges (L-1 in-order + 1 closing), and each
+      // edge is 2 vertices × 6 floats.
+      let totalEdges = 0;
 
-      // Each cycle edge: 2 vertices × 6 floats (x, y, r, g, b, a).
-      const need = cycle.length * 12;
+      for (const cycle of cycles) totalEdges += cycle.length;
+
+      const need = totalEdges * 12;
 
       if (this.cycleBuf.length < need) this.cycleBuf = new Float32Array(need);
 
@@ -313,11 +323,28 @@ export default class Visualizer extends Component {
         buf[k++] = A;
       };
 
-      for (let i = 0; i < cycle.length - 1; i++) emit(cycle[i]!, cycle[i + 1]!);
-      // Closing edge: last node → first.
-      emit(cycle[cycle.length - 1]!, cycle[0]!);
+      // Dedupe edges across cycles — overlapping segments are drawn once
+      // instead of stacked, otherwise the line alpha compounds and the
+      // shared edges read brighter than the others.
+      const seenEdges = new Set<number>();
+      let drawnEdges = 0;
 
-      this.renderer.uploadCycleEdges(buf, cycle.length * 2);
+      for (const cycle of cycles) {
+        for (const idx of cycle) cycleMask[idx] = 1;
+
+        for (let i = 0; i < cycle.length; i++) {
+          const a = cycle[i]!;
+          const b = cycle[(i + 1) % cycle.length]!;
+          const key = a * N + b;
+
+          if (seenEdges.has(key)) continue;
+          seenEdges.add(key);
+          emit(a, b);
+          drawnEdges++;
+        }
+      }
+
+      this.renderer.uploadCycleEdges(buf, drawnEdges * 2);
     } else {
       this.renderer.uploadCycleEdges(new Float32Array(0), 0);
     }
