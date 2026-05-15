@@ -334,26 +334,37 @@ pre code {
   animation: controls-pop-in 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Detached from the panel's flex flow and parked just outside the
+ * right edge so the panel doesn't carry a top-row of empty space for
+ * a button most users only touch once per session. Still a DOM child
+ * of `.controls` so it gets snapshotted with the panel during the
+ * view transition. */
 .controls__toggle {
-  align-self: flex-end;
+  position: absolute;
+  top: 4px;
+  left: calc(100% + 6px);
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: transparent;
-  border: none;
+  width: 26px;
+  height: 26px;
+  background: var(--panel-soft);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
   color: var(--muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 50%;
   padding: 0;
   transition:
     color 120ms ease,
-    background 120ms ease;
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 .controls__toggle:hover {
   color: var(--fg);
+  border-color: #3e4a5e;
   background: var(--input-bg);
 }
 
@@ -402,6 +413,112 @@ pre code {
 }
 
 @keyframes controls-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* View Transitions hand the panel↔gear swap to the browser without
+ * the CSS pop-in below. Each shell gets its OWN view-transition-name
+ * (not a shared one): a shared name makes the browser morph the
+ * snapshot from one shape to the other by stretching/squishing it
+ * to fit the interpolated box, which looks awful when the two shapes
+ * are this different (a 36px circle vs a 260×~600 panel). With
+ * separate names the browser captures each as an independent
+ * unmatched-side snapshot — the panel gets only an old/new exit/enter
+ * animation, the gear gets its own — both animating concurrently at
+ * the same screen anchor (top:64px left:12px). No snapshot is ever
+ * stretched to a size that isn't its natural one.
+ *
+ * The implicit `root` transition is suppressed so the rest of the
+ * page (canvas, header) doesn't cross-fade. */
+@supports (view-transition-name: x) {
+  .controls {
+    animation: none;
+    view-transition-name: controls-panel-shell;
+  }
+
+  .controls__open {
+    animation: none;
+    view-transition-name: controls-gear-shell;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+
+  /* Panel exits/enters with a scale anchored at top-left (which is
+   * exactly where the gear is/will be), so it collapses into the
+   * gear's corner / emerges from it. Quick fade keeps it from
+   * lingering at a tiny size that would look like a squished mini-
+   * panel. */
+  ::view-transition-old(controls-panel-shell) {
+    animation: 100ms cubic-bezier(0.4, 0, 1, 1) both controls-panel-shrink;
+    transform-origin: top left;
+    mix-blend-mode: normal;
+  }
+
+  ::view-transition-new(controls-panel-shell) {
+    animation: 100ms cubic-bezier(0, 0, 0.2, 1) both controls-panel-grow;
+    transform-origin: top left;
+    mix-blend-mode: normal;
+  }
+
+  /* Gear is small enough that a fade alone reads cleanly; a slight
+   * scale-from-center on entry gives a subtle "pop" without needing
+   * the snapshot to land at a different size. */
+  ::view-transition-old(controls-gear-shell) {
+    animation: 100ms cubic-bezier(0.4, 0, 1, 1) both controls-gear-out;
+    mix-blend-mode: normal;
+  }
+
+  ::view-transition-new(controls-gear-shell) {
+    animation: 100ms cubic-bezier(0.22, 1, 0.36, 1) both controls-gear-in;
+    mix-blend-mode: normal;
+  }
+}
+
+@keyframes controls-panel-shrink {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.15);
+  }
+}
+
+@keyframes controls-panel-grow {
+  from {
+    opacity: 0;
+    transform: scale(0.15);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes controls-gear-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@keyframes controls-gear-in {
   from {
     opacity: 0;
     transform: scale(0.6);

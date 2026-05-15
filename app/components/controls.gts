@@ -229,7 +229,27 @@ export default class Controls extends Component<Signature> {
 
   @action
   toggleControls(): void {
-    this.viewState.controlsOpen = !this.viewState.controlsOpen;
+    const next = !this.viewState.controlsOpen;
+    // View Transitions handle the swap if available. Inside the
+    // callback rAFs are paused, so the setter's rAF-batched router
+    // transition would deadlock — `flushPending` forces it through
+    // synchronously so the browser captures the post-mutation DOM
+    // for the "new" snapshot. Each shell carries its own
+    // view-transition-name in styles.css, so the panel and gear get
+    // independent enter/exit animations (no shared-name snapshot
+    // stretching) — nothing extra to inject here.
+    const doc = document as Document & {
+      startViewTransition?: (cb: () => Promise<void> | void) => unknown;
+    };
+
+    if (typeof doc.startViewTransition === "function") {
+      doc.startViewTransition(async () => {
+        this.viewState.controlsOpen = next;
+        await this.viewState.flushPending();
+      });
+    } else {
+      this.viewState.controlsOpen = next;
+    }
   }
 
   <template>

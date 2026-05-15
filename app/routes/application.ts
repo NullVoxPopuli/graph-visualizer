@@ -27,5 +27,6 @@ export default class ApplicationRoute extends Route {
     cyclesPanel: { refreshModel: false },
     cyclesPanelOpen: { refreshModel: false },
     infoPanel: { refreshModel: false },
+    controls: { refreshModel: false },
   };
 }

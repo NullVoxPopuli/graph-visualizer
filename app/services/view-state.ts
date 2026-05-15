@@ -66,6 +66,24 @@ export default class ViewStateService extends Service {
     });
   }
 
+  /**
+   * Run any pending rAF-batched QP transition immediately and return its
+   * promise. Needed for callers that have to observe the URL/DOM update
+   * synchronously with their own work — notably the View Transition
+   * callback, where rAFs are suspended until the callback resolves, so
+   * the normal batching deadlocks the toggle.
+   */
+  async flushPending(): Promise<void> {
+    if (this.#frame === null) return;
+    cancelAnimationFrame(this.#frame);
+    this.#frame = null;
+
+    const qps = this.#pending ?? {};
+
+    this.#pending = null;
+    await this.router.transitionTo({ queryParams: qps });
+  }
+
   // ---- typed aliases
 
   get showEdges(): boolean {
