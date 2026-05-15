@@ -168,32 +168,45 @@ export default class InfoPanel extends Component {
     // (its loops are absorbed into the owner). Bail.
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    // Group raw cycles through this node by their bundled (contracted) form.
-    // Without contraction, the bundled cycle is identical to the raw one,
-    // so the per-bundled-entry's `rawCycles` ends up empty (avoiding the
-    // duplicate display).
-    const buckets = new Map<string, { bundled: number[]; raws: number[][] }>();
-    const raw = findAllCycles(g, null);
+    // The list is driven by the *bundled* cycles — the same enumeration
+    // the renderer uses for the red rings. Raw cycles get attached only
+    // as occurrences (counts), because not every bundled cycle has an
+    // underlying raw elementary cycle (two separate raw paths can close a
+    // loop in the contracted graph without any single raw cycle existing).
+    const bundledCycles = findAllCycles(g, remap).filter((c) =>
+      c.includes(info.index),
+    );
 
-    for (const r of raw) {
+    // Pre-index raw cycles by their bundled canonical key, so each
+    // bundled cycle can grab its matching raw cycles in one lookup.
+    const rawsByBundle = new Map<string, number[][]>();
+    const rawCycles = findAllCycles(g, null);
+
+    for (const r of rawCycles) {
       const bundled = contractCycle(r, remap);
 
       if (bundled === null) continue;
-      if (!bundled.includes(info.index)) continue;
 
       const key = canonicalKey(bundled);
-      let bucket = buckets.get(key);
+      let arr = rawsByBundle.get(key);
 
-      if (!bucket) {
-        bucket = { bundled, raws: [] };
-        buckets.set(key, bucket);
+      if (!arr) {
+        arr = [];
+        rawsByBundle.set(key, arr);
       }
-      bucket.raws.push(r);
+      arr.push(r);
     }
 
     const entries: CycleEntry[] = [];
+    const seenBundled = new Set<string>();
 
-    for (const { bundled, raws } of buckets.values()) {
+    for (const bundled of bundledCycles) {
+      const bundledKey = canonicalKey(bundled);
+
+      if (seenBundled.has(bundledKey)) continue;
+      seenBundled.add(bundledKey);
+
+      const raws = rawsByBundle.get(bundledKey) ?? [];
       const nodes = bundled.map((idx) => ({
         id: g.ids[idx]!,
         label: g.labels[idx]!,
@@ -238,7 +251,7 @@ export default class InfoPanel extends Component {
       entries.push({
         nodes,
         occurrences,
-        key: bundled.join(","),
+        key: bundledKey,
       });
     }
 

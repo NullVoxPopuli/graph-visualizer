@@ -154,6 +154,20 @@ export default class Visualizer extends Component {
     return idx ?? -1;
   }
 
+  /** Integer percent (0–100) of the in-flight layout simulation. */
+  get layoutProgressPercent(): number {
+    const p = this.visualizer.layoutProgress;
+
+    if (p === null || p.total <= 0) return 0;
+
+    return Math.min(100, Math.floor((p.tick / p.total) * 100));
+  }
+
+  /** Inline style string for the progress bar's fill width. */
+  get layoutProgressBarStyle(): string {
+    return `width: ${this.layoutProgressPercent}%`;
+  }
+
   /**
    * Per-frame: detect transitions (new scene, view-state changes) and do
    * the side-effecty repack/upload work. Reads service getters directly,
@@ -809,7 +823,24 @@ export default class Visualizer extends Component {
     <canvas class="visualizer__canvas" {{this.setupCanvas}}></canvas>
     {{#if this.visualizer.state.isLoading}}
       <div class="visualizer__loading" role="status">
-        Computing layout&hellip;
+        <span class="visualizer__loading-label">Computing layout&hellip;</span>
+        {{#if this.visualizer.layoutProgress}}
+          <div
+            class="visualizer__progress"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={{this.layoutProgressPercent}}
+          >
+            <div
+              class="visualizer__progress-fill"
+              style={{this.layoutProgressBarStyle}}
+            ></div>
+          </div>
+          <span class="visualizer__progress-text">
+            {{this.layoutProgressPercent}}%
+          </span>
+        {{/if}}
       </div>
     {{/if}}
     {{#if this.visualizer.state.error}}

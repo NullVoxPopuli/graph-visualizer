@@ -1,4 +1,5 @@
 import Service, { service } from "@ember/service";
+import { tracked } from "@glimmer/tracking";
 
 import * as Comlink from "comlink";
 import { getPromiseState, type State } from "reactiveweb/get-promise-state";
@@ -136,12 +137,23 @@ export default class VisualizerService extends Service {
     this.#lastRepulsion = repulsion;
     this.#lastNodeDistance = nodeDistance;
     this.#lastClusterDistance = clusterDistance;
+    this.layoutProgress = { tick: 0, total: 1 };
     this.#lastProcessing = a.then(async (analysis) => {
-      const positions = await runLayout(analysis.graph, analysis.communities, analysis.radii, {
-        repulsion,
-        nodeDistance,
-        clusterDistance,
-      });
+      const positions = await runLayout(
+        analysis.graph,
+        analysis.communities,
+        analysis.radii,
+        {
+          repulsion,
+          nodeDistance,
+          clusterDistance,
+        },
+        (tick, total) => {
+          this.layoutProgress = { tick, total };
+        },
+      );
+
+      this.layoutProgress = null;
 
       return {
         graph: analysis.graph,
@@ -154,6 +166,13 @@ export default class VisualizerService extends Service {
 
     return this.#lastProcessing;
   }
+
+  /**
+   * Progress feedback for the in-flight layout simulation. `null` when no
+   * layout is running (either nothing's loaded or the last run finished).
+   * Tracked so the loading overlay re-renders as new ticks arrive.
+   */
+  @tracked layoutProgress: { tick: number; total: number } | null = null;
 
   /** isLoading / error / resolved on the active processing promise. */
   get state(): State<ProcessedScene> | null {
@@ -244,6 +263,7 @@ async function runLayout(
   communities: Int32Array,
   radii: Float32Array,
   params: { repulsion: number; nodeDistance: number; clusterDistance: number },
+  onProgress?: (tick: number, total: number) => void,
 ): Promise<Float32Array> {
   const worker = new Worker(new URL("../lib/layout.worker.ts", import.meta.url), {
     type: "module",
@@ -266,7 +286,9 @@ async function runLayout(
       cohesion: 0.12,
     };
 
-    return await layout.run(init);
+    // Comlink.proxy gives the worker a callable handle into the main
+    // thread; without the wrap it'd try to clone the function and throw.
+    return await layout.run(init, onProgress ? Comlink.proxy(onProgress) : null);
   } finally {
     worker.terminate();
   }

@@ -31,14 +31,22 @@ export interface LayoutInit {
   cohesion: number;
 }
 
+/**
+ * Optional progress hook the worker calls between simulation batches. The
+ * caller passes a `Comlink.proxy(...)`-wrapped function from the main
+ * thread so each invocation marshals back through the worker boundary.
+ * `null` is fine — no overhead when no listener cares.
+ */
+export type LayoutProgress = (tick: number, total: number) => void;
+
 const layoutEngine = {
   /**
    * Run the force-directed simulation to completion and return the final
-   * positions buffer. The previous streaming-callback API was dropped in
-   * favor of a single promise so callers can drive the loading state with
-   * `getPromiseState` instead of maintaining their own ticking state.
+   * positions buffer. Reports a tick/total pair to `onProgress` between
+   * each batch so a long-running layout (several seconds on a 10k-node
+   * graph) can drive a progress bar.
    */
-  async run(init: LayoutInit): Promise<Float32Array> {
+  async run(init: LayoutInit, onProgress: LayoutProgress | null = null): Promise<Float32Array> {
     const {
       nodeCount,
       edges,
@@ -128,11 +136,15 @@ const layoutEngine = {
 
       for (; it < end; it++) sim.tick();
       if (spreadFactor !== 1) applyClusterSpread(nodes, communities, spreadFactor);
-      // Yield between batches so the worker has a chance to GC and accept
-      // any incoming messages (terminate, etc.). We no longer emit anything
-      // mid-flight — callers see only the final result.
+      // Yield between batches so the worker can GC and accept any
+      // incoming messages (terminate, etc.). The progress callback fires
+      // on the same boundary — it's the main reason to yield at all on
+      // small graphs.
+      onProgress?.(it, TOTAL);
       if (it < TOTAL) await new Promise((resolve) => setTimeout(resolve, 0));
     }
+
+    onProgress?.(TOTAL, TOTAL);
 
     const positions = new Float32Array(nodeCount * 2);
 
