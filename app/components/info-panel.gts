@@ -6,10 +6,10 @@ import { service } from "@ember/service";
 
 import { buildContraction } from "#lib/contract";
 import {
+  bundleRawCycles,
   canonicalCycleKey,
   contractCycle as sharedContractCycle,
   findAllCycles,
-  findBundledCyclesViaRaw,
 } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
@@ -173,17 +173,20 @@ export default class InfoPanel extends Component {
     // (its loops are absorbed into the owner). Bail.
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    // Bundled cycles come from `findBundledCyclesViaRaw` — only cycles
-    // backed by an actual raw elementary cycle qualify. This is the same
-    // source the renderer uses to draw red rings, so the info-panel list
+    // Raw cycles power both the bundled list (after contraction +
+    // dedupe) and the per-node occurrence counts, so we enumerate them
+    // once and reuse — `findAllCycles` is the exponential step and
+    // running it twice on a large graph is what previously made
+    // selecting a node feel slow.
+    const rawCycles = findAllCycles(g, null);
+    // Bundled cycles: contracted, deduped by canonical sequence. Same
+    // source the renderer uses for red rings, so the info-panel list
     // and the canvas can't disagree.
-    const bundledCycles = findBundledCyclesViaRaw(g, remap).filter((c) => c.includes(info.index));
+    const bundledCycles = bundleRawCycles(rawCycles, remap).filter((c) => c.includes(info.index));
 
     // Pre-index raw cycles by their bundled canonical key so each
-    // bundled cycle can grab its matching raw cycles in one lookup. We
-    // need raw cycles for the occurrence counts.
+    // bundled cycle can grab its matching raw cycles in one lookup.
     const rawsByBundle = new Map<string, number[][]>();
-    const rawCycles = findAllCycles(g, null);
 
     for (const r of rawCycles) {
       const bundled = sharedContractCycle(r, remap);

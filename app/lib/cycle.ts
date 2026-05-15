@@ -304,10 +304,25 @@ export function findBundledCyclesViaRaw(
   maxCycles = 1000,
 ): number[][] {
   const raw = findAllCycles(graph, null, maxCycles);
+
+  return bundleRawCycles(raw, nodeRemap);
+}
+
+/**
+ * Contract every raw cycle through `nodeRemap`, dedupe by canonical key,
+ * and return shortest-first. Split out from `findBundledCyclesViaRaw` so
+ * callers that need both the raw and bundled lists (the info panel) can
+ * reuse a single `findAllCycles` pass instead of running the exponential
+ * enumeration twice.
+ */
+export function bundleRawCycles(
+  rawCycles: number[][],
+  nodeRemap: Int32Array | null,
+): number[][] {
   const seen = new Set<string>();
   const out: number[][] = [];
 
-  for (const r of raw) {
+  for (const r of rawCycles) {
     const bundled = contractCycle(r, nodeRemap);
 
     if (bundled === null) continue;
@@ -330,16 +345,19 @@ export function findBundledCyclesViaRaw(
  * SCC can contain many overlapping cycles, and surfacing them all is the
  * whole point of the panel.
  *
- * Strategy: compute SCCs once, then for each non-trivial SCC walk each
- * node `s` in ascending order and emit every elementary cycle whose
- * minimum vertex is `s`. The `w < start` filter inside
- * `enumerateElementaryCycles` is what makes the "min-vertex-first"
- * invariant hold, so each cycle is emitted exactly once across the
- * outer pass.
+ * Strategy: compute SCCs once, then for each non-trivial SCC run
+ * Johnson's algorithm — for each node `s` (ascending), enumerate every
+ * elementary cycle whose minimum vertex is `s`. The `w < start` filter
+ * makes the "min-vertex-first" invariant hold so each cycle is emitted
+ * exactly once across the outer pass. Critically, the inner DFS uses
+ * Johnson's blocking (`blocked` + `B`) so that a node which fails to
+ * reach `start` from one path is not re-explored when a sibling path
+ * descends into it — without that, repeated work on dense SCCs is
+ * what dominates the cost on large graphs.
  *
- * Worst case is exponential in the SCC size — `maxCycles` is the safety
- * valve so a clique doesn't lock the worker forever. The output is
- * sorted by length so the UI's first entries are the smallest loops
+ * Worst case is still exponential in the SCC size — `maxCycles` is the
+ * safety valve so a clique doesn't lock the worker forever. The output
+ * is sorted by length so the UI's first entries are the smallest loops
  * (usually the most actionable).
  */
 export function findAllCycles(
@@ -365,10 +383,7 @@ export function findAllCycles(
 
     for (const v of scc) inScc[v] = 1;
 
-    for (const start of scc) {
-      if (cycles.length >= maxCycles) break;
-      enumerateElementaryCycles(start, N, outIdx, outAdj, inScc, cycles, maxCycles);
-    }
+    enumerateElementaryCyclesInScc(scc, N, outIdx, outAdj, inScc, cycles, maxCycles);
   }
 
   cycles.sort((a, b) => a.length - b.length);
@@ -377,15 +392,24 @@ export function findAllCycles(
 }
 
 /**
- * Iterative DFS from `start` that emits every elementary cycle whose
- * minimum node is `start`. The restriction to `inScc` keeps the DFS
- * inside one SCC, and the `start`-is-the-minimum invariant (enforced by
- * `w >= start` filtering) makes sure each cycle is emitted exactly once
- * across the outer Johnson loop. Reuses a per-call `onPath` mask plus a
- * single `path` array as the open scratch space.
+ * Johnson's algorithm over a single SCC. For each `start` in the SCC
+ * (ascending), CIRCUIT-walks the subgraph induced by `{ w | w >= start
+ * and w in scc }` and emits every elementary cycle whose minimum vertex
+ * is `start`.
+ *
+ * `blocked` + `B` are the work-saving piece: once a node `v` is fully
+ * explored *without* completing a cycle back to `start`, it stays
+ * blocked so that other paths reaching `v` don't re-explore its
+ * subtree. `v` only gets unblocked when something that *can* close a
+ * cycle reaches it — propagated transitively through `B`, where `B[w]`
+ * holds nodes that gave up on traversing into `w`.
+ *
+ * The DFS is iterative (explicit `path` / `cursor` stacks) so deep
+ * cycles don't blow the JS stack on large graphs. The unblock recursion
+ * is also iterative for the same reason.
  */
-function enumerateElementaryCycles(
-  start: number,
+function enumerateElementaryCyclesInScc(
+  scc: number[],
   N: number,
   outIdx: Int32Array,
   outAdj: Int32Array,
@@ -393,43 +417,166 @@ function enumerateElementaryCycles(
   out: number[][],
   maxCycles: number,
 ): void {
-  const onPath = new Uint8Array(N);
-  const path: number[] = [start];
-  const cursor: number[] = [outIdx[start]!];
+  const blocked = new Uint8Array(N);
+  // `B[v]` is the set of nodes that are currently blocked *because* they
+  // tried to reach `start` through `v` and failed. Stored as a singly-
+  // linked list whose nodes live in two parallel growable Int32Arrays
+  // (`bNode` + `bNext`) — avoids the per-edge `Set` allocations that
+  // dominated the original `Set<number>[]` version on dense SCCs.
+  const bHead = new Int32Array(N).fill(-1);
+  let bNode = new Int32Array(64);
+  let bNext = new Int32Array(64);
+  let bAlloc = 0;
+  const grow = (need: number): void => {
+    if (need <= bNode.length) return;
 
-  onPath[start] = 1;
+    let cap = bNode.length;
 
-  while (path.length > 0 && out.length < maxCycles) {
-    const depth = path.length - 1;
-    const v = path[depth]!;
-    const end = outIdx[v + 1]!;
+    while (cap < need) cap *= 2;
 
-    if (cursor[depth]! >= end) {
-      onPath[v] = 0;
+    const nn = new Int32Array(cap);
+    const nx = new Int32Array(cap);
+
+    nn.set(bNode);
+    nx.set(bNext);
+    bNode = nn;
+    bNext = nx;
+  };
+
+  const path: number[] = [];
+  const cursor: number[] = [];
+  // Per-frame flag: did the subtree rooted at `path[depth]` find a
+  // cycle back to `start`? Drives the unblock-vs-extend-B decision when
+  // the frame is popped. Sized to the SCC since `path.length` is bounded
+  // by the SCC size (every entry is distinct and blocked).
+  const foundAtDepth = new Uint8Array(scc.length);
+  const unblockStack: number[] = [];
+
+  const unblock = (u: number): void => {
+    // Fast path: nothing waiting on `u`. By far the common case in
+    // dense SCCs where almost every recursion finds a cycle and B[]
+    // stays empty.
+    if (bHead[u]! === -1) {
+      blocked[u] = 0;
+
+      return;
+    }
+
+    unblockStack.length = 0;
+    unblockStack.push(u);
+
+    while (unblockStack.length > 0) {
+      const node = unblockStack.pop()!;
+
+      if (blocked[node]! === 0) continue;
+      blocked[node] = 0;
+
+      let entry = bHead[node]!;
+
+      bHead[node] = -1;
+
+      while (entry !== -1) {
+        const w = bNode[entry]!;
+        const next = bNext[entry]!;
+
+        if (blocked[w]! === 1) unblockStack.push(w);
+        entry = next;
+      }
+    }
+  };
+
+  for (const start of scc) {
+    if (out.length >= maxCycles) break;
+
+    // Reset blocked/B for this start. Only touch SCC nodes — everything
+    // else is already at its zero state from prior resets or initial
+    // construction. We reuse the bNode/bNext buffers across starts by
+    // resetting `bAlloc` to 0 and clearing only the heads we touched.
+    for (const v of scc) {
+      blocked[v] = 0;
+      bHead[v] = -1;
+    }
+
+    bAlloc = 0;
+
+    path.length = 0;
+    cursor.length = 0;
+    path.push(start);
+    cursor.push(outIdx[start]!);
+    foundAtDepth[0] = 0;
+    blocked[start] = 1;
+
+    while (path.length > 0) {
+      if (out.length >= maxCycles) break;
+
+      const depth = path.length - 1;
+      const v = path[depth]!;
+      const end = outIdx[v + 1]!;
+      let recursed = false;
+
+      while (cursor[depth]! < end) {
+        const j = cursor[depth]!;
+        const w = outAdj[j]!;
+
+        cursor[depth] = j + 1;
+
+        if (inScc[w] === 0) continue;
+        // Smaller nodes' cycles will be (or were) enumerated at their
+        // own pass — skip them here to avoid duplicates.
+        if (w < start) continue;
+
+        if (w === start) {
+          out.push(path.slice());
+          foundAtDepth[depth] = 1;
+          if (out.length >= maxCycles) break;
+          continue;
+        }
+
+        if (blocked[w]! === 0) {
+          path.push(w);
+          cursor.push(outIdx[w]!);
+          foundAtDepth[path.length - 1] = 0;
+          blocked[w] = 1;
+          recursed = true;
+
+          break;
+        }
+      }
+
+      if (recursed) continue;
+
+      const vFound = foundAtDepth[depth]! === 1;
+
+      if (vFound) {
+        unblock(v);
+      } else {
+        // No cycle through `v` this time. Record `v` as waiting on each
+        // of its (currently blocked) out-neighbors so that if one of them
+        // is later unblocked, `v` is too — that's the only signal that
+        // `v` might newly be able to reach `start`. Duplicates are
+        // allowed (cheaper than membership checks); `unblock` no-ops on
+        // already-unblocked nodes so the extra entries are harmless.
+        for (let j = outIdx[v]!; j < end; j++) {
+          const w = outAdj[j]!;
+
+          if (inScc[w] === 0) continue;
+          if (w < start) continue;
+          if (w === v) continue;
+
+          grow(bAlloc + 1);
+          bNode[bAlloc] = v;
+          bNext[bAlloc] = bHead[w]!;
+          bHead[w] = bAlloc;
+          bAlloc++;
+        }
+      }
+
       path.pop();
       cursor.pop();
-      continue;
+
+      if (vFound && path.length > 0) {
+        foundAtDepth[path.length - 1] = 1;
+      }
     }
-
-    const j = cursor[depth]!;
-    const w = outAdj[j]!;
-
-    cursor[depth] = j + 1;
-
-    if (inScc[w] === 0) continue;
-    // Smaller nodes' cycles will be (or were) enumerated at their own
-    // pass — skip them here to avoid duplicates.
-    if (w < start) continue;
-
-    if (w === start) {
-      out.push(path.slice());
-      continue;
-    }
-
-    if (onPath[w] === 1) continue;
-
-    onPath[w] = 1;
-    path.push(w);
-    cursor.push(outIdx[w]!);
   }
 }
