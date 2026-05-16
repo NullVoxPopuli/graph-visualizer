@@ -80,6 +80,18 @@ interface SelectedInfo {
   meta: unknown;
 }
 
+/**
+ * Row in the "Most referenced" summary at the top of the cycles
+ * section. `entry` is the underlying CycleEntry (so the template can
+ * reuse the same segment rendering); `count` is the number of distinct
+ * cycles in the displayed list that ref this one. Sorted descending,
+ * capped at 3.
+ */
+interface TopReferencedEntry {
+  entry: CycleEntry;
+  count: number;
+}
+
 export default class InfoPanel extends Component {
   @service declare viewState: ViewStateService;
   @service declare graph: GraphService;
@@ -100,6 +112,17 @@ export default class InfoPanel extends Component {
   #lastEntries: CycleEntry[] = [];
 
   /**
+   * Cached top-3 most-referenced cycles, keyed off the `#lastEntries`
+   * reference. Cheap to recompute (O(entries × ref segments)) but
+   * recomputing on every read would still allocate, and the result
+   * never changes unless `entries` does — so memoizing keeps the
+   * "Most referenced" section's render path entirely allocation-free
+   * during collapse/expand toggles.
+   */
+  #lastTopSource: CycleEntry[] | null = null;
+  #lastTop: TopReferencedEntry[] = [];
+
+  /**
    * Cycle keys whose body (node list + occurrences table) the user has
    * collapsed. Cycle bodies render by default; clicking the header
    * adds the cycle here and the row becomes just its `cycle#N` label.
@@ -116,6 +139,15 @@ export default class InfoPanel extends Component {
    */
   @tracked private expandedRefs: Set<string> = new Set();
 
+  /**
+   * Cycle ids the user has expanded in the "Most referenced" summary
+   * at the top of the cycles section. Lives in its own set so the
+   * summary defaults to *collapsed* (absent = collapsed) without
+   * fighting the main list's "expanded unless in collapsedHeaders"
+   * convention.
+   */
+  @tracked private expandedTopHeaders: Set<string> = new Set();
+
   @action
   toggleCycleHeader(key: string): void {
     this.collapsedHeaders = toggleInSet(this.collapsedHeaders, key);
@@ -124,6 +156,72 @@ export default class InfoPanel extends Component {
   @action
   toggleCycleRef(segKey: string): void {
     this.expandedRefs = toggleInSet(this.expandedRefs, segKey);
+  }
+
+  @action
+  toggleTopHeader(key: string): void {
+    this.expandedTopHeaders = toggleInSet(this.expandedTopHeaders, key);
+  }
+
+  /**
+   * The three most-referenced cycles inside the currently displayed
+   * list — cycles whose id appears as a `cycle#…` ref segment inside
+   * the body of other cycles. The count is the number of *distinct
+   * containing cycles* (each container only votes once, even when it
+   * happens to mention the same ref id in two non-adjacent segment
+   * groups). Sorted descending, capped at 3; returns an empty array
+   * when no cycle is referenced by any other. Cached off the
+   * `this.cycles` reference — toggling collapse/expand state never
+   * recomputes this.
+   */
+  get topReferencedCycles(): TopReferencedEntry[] {
+    const entries = this.cycles;
+
+    if (this.#lastTopSource === entries) return this.#lastTop;
+
+    const refCounts = new Map<string, number>();
+
+    for (const entry of entries) {
+      // Walk this entry's segments once and collect the distinct ref
+      // cycle ids. A container counts as "referencing" a smaller
+      // cycle once regardless of how many segment groups mention it.
+      const seen = new Set<string>();
+
+      for (const seg of entry.segments) {
+        if (seg.cycleId !== undefined) seen.add(seg.cycleId);
+      }
+
+      for (const refId of seen) {
+        refCounts.set(refId, (refCounts.get(refId) ?? 0) + 1);
+      }
+    }
+
+    const entryById = new Map<string, CycleEntry>();
+
+    for (const entry of entries) entryById.set(entry.id, entry);
+
+    const ranked: TopReferencedEntry[] = [];
+
+    for (const [refId, count] of refCounts) {
+      const entry = entryById.get(refId);
+
+      // Ref ids that don't resolve to a displayed entry can happen if
+      // the canonical-cycle map was wider than the entries list —
+      // currently they're always in sync, but guard anyway so a future
+      // change doesn't silently drop counts.
+      if (entry !== undefined) ranked.push({ entry, count });
+    }
+
+    ranked.sort((a, b) => b.count - a.count);
+
+    const top = ranked.slice(0, 3);
+
+    // eslint-disable-next-line ember/no-side-effects
+    this.#lastTopSource = entries;
+    // eslint-disable-next-line ember/no-side-effects
+    this.#lastTop = top;
+
+    return top;
   }
 
   /**
@@ -652,6 +750,113 @@ export default class InfoPanel extends Component {
                 >{{if this.allCyclesCollapsed "Expand all" "Collapse all"}}</button>
               {{/if}}
             </summary>
+            {{#if this.topReferencedCycles.length}}
+              <div class="panel__top-cycles">
+                <div class="panel__top-cycles-label">most referenced</div>
+                <ol class="panel__cycles">
+                  {{#each this.topReferencedCycles key="entry.id" as |ref|}}
+                    <li class="panel__cycle">
+                      <button
+                        type="button"
+                        class="panel__cycle-head
+                          {{if (isExpanded this.expandedTopHeaders ref.entry.id) 'is-expanded'}}"
+                        {{on "click" (fn this.toggleTopHeader ref.entry.id)}}
+                        aria-expanded={{if
+                          (isExpanded this.expandedTopHeaders ref.entry.id)
+                          "true"
+                          "false"
+                        }}
+                        title="Referenced by {{ref.count}} other cycle{{if
+                          (notEq ref.count 1)
+                          's'
+                        }}"
+                      >
+                        <span class="panel__cycle-head-text">referenced by
+                          {{ref.count}}{{if (notEq ref.count 1) " cycles" " cycle"}}
+                          ·
+                          {{ref.entry.nodes.length}}
+                          nodes</span>
+                        <code class="cycle-id">{{ref.entry.id}}</code>
+                      </button>
+                      {{#if (isExpanded this.expandedTopHeaders ref.entry.id)}}
+                        <ol class="panel__neighbors panel__neighbors--ordered">
+                          {{#each ref.entry.segments key="key" as |seg|}}
+                            {{#unless seg.cycleId}}
+                              {{#each seg.nodes key="index" as |entry|}}
+                                <li>
+                                  <span class="panel__neighbor-index">{{entry.index}}.</span>
+                                  <button
+                                    type="button"
+                                    class="panel__neighbor"
+                                    title={{entry.node.id}}
+                                    {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                    {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
+                                    {{on "mouseleave" this.unhoverNeighbor}}
+                                  >
+                                    <span class="panel__neighbor-label">{{entry.node.label}}</span>
+                                    {{#if (notEq entry.node.id entry.node.label)}}
+                                      <code class="panel__neighbor-id">{{entry.node.id}}</code>
+                                    {{/if}}
+                                  </button>
+                                </li>
+                              {{/each}}
+                            {{/unless}}
+                            {{#if seg.cycleId}}
+                              <li>
+                                <button
+                                  type="button"
+                                  class="cycle-ref"
+                                  {{on "click" (fn this.toggleCycleRef seg.key)}}
+                                  aria-expanded={{if
+                                    (isExpanded this.expandedRefs seg.key)
+                                    "true"
+                                    "false"
+                                  }}
+                                  title="Toggle which nodes here belong to cycle {{seg.cycleId}}"
+                                >
+                                  <span class="cycle-ref__label">
+                                    … ({{seg.nodes.length}}) — click to expand …
+                                  </span>
+                                  <code class="cycle-id">{{seg.cycleId}}</code>
+                                </button>
+                                {{#if (isExpanded this.expandedRefs seg.key)}}
+                                  <ol
+                                    class="panel__neighbors panel__neighbors--ordered panel__neighbors--nested"
+                                  >
+                                    {{#each seg.nodes key="index" as |entry|}}
+                                      <li>
+                                        <span class="panel__neighbor-index">{{entry.index}}.</span>
+                                        <button
+                                          type="button"
+                                          class="panel__neighbor"
+                                          title={{entry.node.id}}
+                                          {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                          {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
+                                          {{on "mouseleave" this.unhoverNeighbor}}
+                                        >
+                                          <span
+                                            class="panel__neighbor-label"
+                                          >{{entry.node.label}}</span>
+                                          {{#if (notEq entry.node.id entry.node.label)}}
+                                            <code
+                                              class="panel__neighbor-id"
+                                            >{{entry.node.id}}</code>
+                                          {{/if}}
+                                        </button>
+                                      </li>
+                                    {{/each}}
+                                  </ol>
+                                {{/if}}
+                              </li>
+                            {{/if}}
+                          {{/each}}
+                        </ol>
+                      {{/if}}
+                    </li>
+                  {{/each}}
+                </ol>
+              </div>
+            {{/if}}
             {{#if this.cycles.length}}
               <ol class="panel__cycles">
                 {{#each this.cycles key="key" as |cycle|}}
