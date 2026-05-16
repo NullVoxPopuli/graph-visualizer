@@ -334,7 +334,11 @@ pre code {
  * view transition. */
 .controls__toggle {
   position: absolute;
-  top: 4px;
+  /* Match the panel's `padding-top: 10px` so the toggle's top edge
+     lines up with the top edge of the panel's first content element
+     (the Search input), and the two 26px-tall buttons read as
+     vertically aligned. */
+  top: 10px;
   left: calc(100% + 6px);
   z-index: 1;
   display: inline-flex;

@@ -27,6 +27,15 @@ export default class ApplicationRoute extends Route {
     cyclesPanel: { refreshModel: false },
     cyclesPanelOpen: { refreshModel: false },
     infoPanel: { refreshModel: false },
+    // Per-section open/close overrides for the info panel's in / out /
+    // cycles `<details>` elements. Without these declared here, Ember
+    // silently drops them from `transitionTo({ queryParams })` and a
+    // user's explicit close never makes it into `location.search` —
+    // making the section pop back open the next time the auto-default
+    // re-evaluates to "open" for a different selection.
+    infoIn: { refreshModel: false },
+    infoOut: { refreshModel: false },
+    infoCycles: { refreshModel: false },
     controls: { refreshModel: false },
   };
 }

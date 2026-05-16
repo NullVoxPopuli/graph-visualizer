@@ -368,38 +368,33 @@ export default class InfoPanel extends Component {
    * `<summary>` click handler. The browser would normally toggle the
    * parent `<details>` for us — we preventDefault and run the toggle
    * through `viewState` instead so the new open state lands in the URL
-   * and the next page load (or shared link) picks it up. When the new
-   * state happens to match what the auto-default would have picked the
-   * override is cleared, keeping URLs free of redundant noise.
+   * and the next page load (or shared link) picks it up.
+   *
+   * The user's pick is *always* sticky — we never collapse a freshly-
+   * set override back to `null` just because it matches the
+   * auto-default for the currently-selected node. Two different
+   * selections produce two different auto-defaults (the threshold is
+   * per-neighbor-count), so an explicit close on a long-list node
+   * would otherwise quietly reopen the next time the user selected a
+   * short-list node. Storing the user's choice verbatim keeps section
+   * state from springing back open as they click around.
    */
   @action
   toggleIn(event: MouseEvent): void {
     event.preventDefault();
-
-    const willOpen = !this.inOpen;
-    const autoOpen = this.inNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
-
-    this.viewState.infoInOpenOverride = willOpen === autoOpen ? null : willOpen;
+    this.viewState.infoInOpenOverride = !this.inOpen;
   }
 
   @action
   toggleOut(event: MouseEvent): void {
     event.preventDefault();
-
-    const willOpen = !this.outOpen;
-    const autoOpen = this.outNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
-
-    this.viewState.infoOutOpenOverride = willOpen === autoOpen ? null : willOpen;
+    this.viewState.infoOutOpenOverride = !this.outOpen;
   }
 
   @action
   toggleCycles(event: MouseEvent): void {
     event.preventDefault();
-
-    const willOpen = !this.cyclesOpen;
-    const autoOpen = this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
-
-    this.viewState.infoCyclesOpenOverride = willOpen === autoOpen ? null : willOpen;
+    this.viewState.infoCyclesOpenOverride = !this.cyclesOpen;
   }
 
   @action
