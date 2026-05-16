@@ -54,6 +54,54 @@ module("Integration | cycles-panel", function (hooks) {
     assert.dom(".cycles-panel__empty").includesText("This graph has no cycles");
   });
 
+  test("renders the raw file under each step when a node type is hidden", async function (assert) {
+    const g = loadGraph(this.owner, {
+      nodes: [
+        { id: "pkgA", type: "package", edges: ["fileA"] },
+        { id: "fileA", type: "file", edges: ["pkgB"] },
+        { id: "pkgB", type: "package", edges: ["fileB"] },
+        { id: "fileB", type: "file", edges: ["pkgA"] },
+      ],
+    });
+    const fileType = g.nodeTypeNames.indexOf("file");
+
+    viewState(this.owner).toggleHiddenNodeType(fileType);
+    viewState(this.owner).cyclesPanelOpen = true;
+
+    await render(<template><CyclesPanel /></template>);
+    await waitFor(".cycles-panel__entry");
+
+    assert
+      .dom(".cycles-panel__node-raw")
+      .exists("raw-file line renders under bundled steps when files fold into packages");
+  });
+
+  test("glob exclude filter hides nodes from the cycles list", async function (assert) {
+    loadGraph(this.owner, {
+      // Two independent 2-cycles. Excluding `b/*` drops `b/1` so only
+      // the `a → x → a` cycle survives in the list.
+      nodes: [
+        { id: "a", edges: ["x"] },
+        { id: "x", edges: ["a"] },
+        { id: "b/1", edges: ["c"] },
+        { id: "c", edges: ["b/1"] },
+      ],
+    });
+    viewState(this.owner).cyclesPanelOpen = true;
+
+    await render(<template><CyclesPanel /></template>);
+    await waitFor(".cycles-panel__entry");
+
+    assert.dom(".cycles-panel__count").hasText("2", "both cycles present before filter");
+
+    viewState(this.owner).addExcludeGlob("b/*");
+    await waitFor(".cycles-panel__count");
+
+    assert
+      .dom(".cycles-panel__count")
+      .hasText("1", "the b/1-c cycle drops out once b/1 is glob-excluded");
+  });
+
   test("clicking a cycle header toggles its body open/closed", async function (assert) {
     loadGraph(this.owner, {
       nodes: [
