@@ -26,6 +26,8 @@ export default class ApplicationRoute extends Route {
     labelCluster: { refreshModel: false },
     cyclesPanel: { refreshModel: false },
     cyclesPanelOpen: { refreshModel: false },
+    orphansPanel: { refreshModel: false },
+    orphansPanelOpen: { refreshModel: false },
     infoPanel: { refreshModel: false },
     // Per-section open/close overrides for the info panel's in / out /
     // cycles `<details>` elements. Without these declared here, Ember

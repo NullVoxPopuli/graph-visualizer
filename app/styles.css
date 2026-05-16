@@ -1435,11 +1435,10 @@ pre code {
 
 /* ---------- cycles panel ---------- */
 
-.cycles-panel {
+.cycles-panel,
+.orphans-panel {
   /* Position + size only — visual treatment (bg, blur, border, radius)
    * comes from the shared `.panel` base. */
-  left: 12px;
-  bottom: 12px;
   width: 280px;
   min-width: 220px;
   max-width: 96vw;
@@ -1455,6 +1454,21 @@ pre code {
      (`.cycles-panel__list`) has its own `overflow-y: auto` so no
      content escapes the panel visually. */
   overflow: visible;
+}
+
+.cycles-panel {
+  left: 12px;
+  bottom: 12px;
+}
+
+/* Stack the orphans panel above the cycles panel by default so both
+ * can be open at once without overlapping. The `max-height: 50dvh`
+ * cap on each panel leaves room for both stacked along the left side
+ * of typical viewports — and the user can always drag them anywhere
+ * they want once they care. */
+.orphans-panel {
+  left: 12px;
+  top: 50px;
 }
 
 .cycles-panel__titlebar {

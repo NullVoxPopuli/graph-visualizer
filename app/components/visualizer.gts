@@ -17,6 +17,7 @@ import Controls from "./controls.gts";
 import CyclesPanel from "./cycles-panel.gts";
 import Hud from "./hud.gts";
 import InfoPanel from "./info-panel.gts";
+import OrphansPanel from "./orphans-panel.gts";
 
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
@@ -855,6 +856,7 @@ export default class Visualizer extends Component {
     {{! a slider change. Each child handles its own "not yet ready" state. }}
     <Controls @onResetView={{this.resetView}} />
     <CyclesPanel />
+    <OrphansPanel />
     <InfoPanel />
     <Hud />
   </template>

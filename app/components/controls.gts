@@ -5,6 +5,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { hasAnyCycle } from "#lib/cycle";
+import { hasAnyOrphan } from "#lib/orphans";
 
 import Search from "./search.gts";
 
@@ -190,6 +191,44 @@ export default class Controls extends Component<Signature> {
    */
   get showCyclesPanelButton(): boolean {
     return this.graph.current !== null && this.hasAnyCycles;
+  }
+
+  @action
+  toggleOrphansPanel(): void {
+    if (this.viewState.orphansPanelOpen) {
+      this.viewState.orphansPanelOpen = false;
+
+      return;
+    }
+
+    // Same off-screen-recovery behavior as `toggleCyclesPanel`:
+    // clear any saved geometry on open so the panel lands at its CSS
+    // default position regardless of where a previous session left
+    // it.
+    this.viewState.orphansPanelGeometry = null;
+    this.viewState.orphansPanelOpen = true;
+  }
+
+  /**
+   * Same shape as `showCyclesPanelButton`: visible whenever the graph
+   * has any orphans (in-degree-zero nodes), regardless of whether
+   * the panel is already open — clicking still gives the user a way
+   * to dismiss + re-open when the saved geometry has wandered off.
+   */
+  get showOrphansPanelButton(): boolean {
+    return this.graph.current !== null && this.hasAnyOrphans;
+  }
+
+  /**
+   * Cheap `hasAnyOrphan` check for button visibility. Reads only the
+   * graph's `inDegree` view — no traversal, no analysis pass.
+   */
+  get hasAnyOrphans(): boolean {
+    const g = this.graph.current;
+
+    if (!g) return false;
+
+    return hasAnyOrphan(g);
   }
 
   /**
@@ -529,6 +568,17 @@ export default class Controls extends Component<Signature> {
                 "Open the cycle list panel"
               }}
             >{{if this.viewState.cyclesPanelOpen "Hide cycles" "Show cycles"}}</button>
+          {{/if}}
+          {{#if this.showOrphansPanelButton}}
+            <button
+              type="button"
+              {{on "click" this.toggleOrphansPanel}}
+              title={{if
+                this.viewState.orphansPanelOpen
+                "Close the orphan list panel"
+                "Open the orphan list panel"
+              }}
+            >{{if this.viewState.orphansPanelOpen "Hide orphans" "Show orphans"}}</button>
           {{/if}}
           {{#if this.showRecenterPanelsButton}}
             <button

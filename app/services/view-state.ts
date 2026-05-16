@@ -92,7 +92,11 @@ export default class ViewStateService extends Service {
   #geometryResetHandlers: Set<() => void> = new Set();
 
   /** Param keys whose values live in `#geometryRaw` rather than `#qps`. */
-  static readonly #GEOMETRY_KEYS: ReadonlySet<string> = new Set(["infoPanel", "cyclesPanel"]);
+  static readonly #GEOMETRY_KEYS: ReadonlySet<string> = new Set([
+    "infoPanel",
+    "cyclesPanel",
+    "orphansPanel",
+  ]);
 
   #frame: number | null = null;
   /** Slot keys with writes that haven't been flushed to the URL yet. */
@@ -238,6 +242,7 @@ export default class ViewStateService extends Service {
   recenterPanels(): void {
     this.#setParam("infoPanel", null);
     this.#setParam("cyclesPanel", null);
+    this.#setParam("orphansPanel", null);
     for (const cb of this.#geometryResetHandlers) cb();
   }
 
@@ -451,6 +456,19 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Whether the orphans panel is visible. Off by default; the user
+   * opts in via the "Show orphans" button. Orphan analysis is linear
+   * (O(N + E)) so we could safely auto-open, but the panel takes
+   * screen space and most users won't care about orphans in passing.
+   */
+  get orphansPanelOpen(): boolean {
+    return this.#qps["orphansPanelOpen"] === "1";
+  }
+  set orphansPanelOpen(v: boolean) {
+    this.#setParam("orphansPanelOpen", v ? "1" : null);
+  }
+
+  /**
    * Whether the top-left controls panel is expanded. On by default — only
    * the collapsed state is encoded so a fresh URL still shows the panel.
    */
@@ -515,6 +533,18 @@ export default class ViewStateService extends Service {
   }
   set cyclesPanelGeometry(g: PanelGeometry | null) {
     this.#setParam("cyclesPanel", serializePanelGeometry(g));
+  }
+
+  /**
+   * Orphans panel geometry. Same non-tracked treatment as the cycles
+   * panel — drag/resize writes don't fire any reactivity, and the
+   * apply modifier reads this exactly once on mount.
+   */
+  get orphansPanelGeometry(): PanelGeometry | null {
+    return parsePanelGeometry(this.#geometryRaw["orphansPanel"]);
+  }
+  set orphansPanelGeometry(g: PanelGeometry | null) {
+    this.#setParam("orphansPanel", serializePanelGeometry(g));
   }
 }
 
