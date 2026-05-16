@@ -50,4 +50,15 @@ export default [
       "n/no-process-exit": "off",
     },
   },
+  {
+    // Unit tests work over hand-built fixtures whose shape is known at
+    // the call site — `array[0]!` after asserting the length, or
+    // `.get("known-id")!` after building the graph. Same rationale as
+    // the library code above: `noUncheckedIndexedAccess` widens reads
+    // to `T | undefined` even when the index is provably in range.
+    files: ["tests/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "off",
+    },
+  },
 ];
