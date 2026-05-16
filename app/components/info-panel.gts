@@ -411,20 +411,22 @@ export default class InfoPanel extends Component {
 
   setupDrag = createDragModifier({
     panelSelector: ".info-panel",
-    get: () => this.viewState.infoPanelGeometry,
     set: (g) => {
       this.viewState.infoPanelGeometry = g;
     },
   });
 
-  applyGeometry = createApplyGeometryModifier(() => this.viewState.infoPanelGeometry);
+  applyGeometry = createApplyGeometryModifier({
+    getInitial: () => this.viewState.infoPanelGeometry,
+    registerReset: (cb) => this.viewState.registerGeometryReset(cb),
+  });
 
-  observePanelSize = createSizeObserverModifier(
-    () => this.viewState.infoPanelGeometry,
-    (g) => {
+  observePanelSize = createSizeObserverModifier({
+    getCurrent: () => this.viewState.infoPanelGeometry,
+    set: (g) => {
       this.viewState.infoPanelGeometry = g;
     },
-  );
+  });
 
   @action
   selectNeighbor(id: string): void {

@@ -15,8 +15,6 @@ export interface PanelGeometry {
 interface DragOptions {
   /** CSS selector that matches the panel root (e.g. `.cycles-panel`). */
   panelSelector: string;
-  /** Returns the geometry currently committed to the URL, if any. */
-  get: () => PanelGeometry | null;
   /** Writes a new geometry to the URL (dedup / rAF-batch is the caller's job). */
   set: (g: PanelGeometry) => void;
 }
@@ -27,6 +25,11 @@ interface DragOptions {
  * this the title bar's pointer-capture swallows the click. Pointer events
  * use the captured panel rect as the drag origin so the panel can switch
  * from `bottom`/`right` to `top`/`left` anchoring without a jump.
+ *
+ * The drag handler writes inline styles to the panel element **directly**
+ * — geometry is no longer round-tripped through reactive state, so we
+ * can't rely on a re-render to move the panel. The matching `set()` call
+ * is what persists the URL for reloads / shared links.
  */
 export function createDragModifier(opts: DragOptions) {
   return modifier((handle: HTMLElement) => {
@@ -81,6 +84,19 @@ export function createDragModifier(opts: DragOptions) {
       );
       const top = clamp(dragging.panelTop + dy, margin, window.innerHeight - margin - 24);
 
+      const panel = panelEl();
+
+      if (panel) {
+        // Direct DOM write — no reactivity round-trip. Switching
+        // `right`/`bottom` to `auto` matters because the CSS default
+        // anchors some panels at `right: 12px` / `bottom: 12px`, and
+        // leaving those set would fight the drag-supplied `left`/`top`.
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+        panel.style.right = "auto";
+        panel.style.bottom = "auto";
+      }
+
       opts.set({
         left,
         top,
@@ -109,48 +125,76 @@ export function createDragModifier(opts: DragOptions) {
   });
 }
 
+interface ApplyGeometryOptions {
+  /** Reads the *initial* persisted geometry. Called once on mount. */
+  getInitial: () => PanelGeometry | null;
+  /**
+   * Registers a callback that this modifier will run when the user
+   * clicks "Recenter panels" (or any other path that asks all
+   * floating panels to reset to their CSS defaults). Returns an
+   * unregister function so the modifier can clean up on teardown.
+   */
+  registerReset: (cb: () => void) => () => void;
+}
+
 /**
- * Apply the persisted geometry as inline styles. ember-modifier auto-
- * tracks the `get()` read, so a URL update re-runs the modifier and
- * re-applies the styles. Clearing geometry resets the styles to "" so
- * the CSS defaults take over.
+ * Apply the persisted geometry as inline styles **once** at mount,
+ * then step out of the way — drag and resize handlers update inline
+ * styles directly, so we don't want a reactive re-apply running on
+ * every drag tick. The only re-apply path left is "user asked to
+ * recenter": that fires the registered reset callback, which clears
+ * the inline styles back to "" so the CSS defaults take over.
  */
-export function createApplyGeometryModifier(get: () => PanelGeometry | null) {
+export function createApplyGeometryModifier(opts: ApplyGeometryOptions) {
   return modifier((el: HTMLElement) => {
-    const g = get();
+    applyGeometryToElement(el, opts.getInitial());
 
-    if (g === null) {
-      el.style.left = "";
-      el.style.top = "";
-      el.style.right = "";
-      el.style.bottom = "";
-      el.style.width = "";
-      el.style.height = "";
+    const unregister = opts.registerReset(() => {
+      applyGeometryToElement(el, null);
+    });
 
-      return;
-    }
-
-    if (g.left !== null && g.top !== null) {
-      el.style.left = `${g.left}px`;
-      el.style.top = `${g.top}px`;
-      el.style.right = "auto";
-      el.style.bottom = "auto";
-    }
-
-    if (g.width !== null) el.style.width = `${g.width}px`;
-    if (g.height !== null) el.style.height = `${g.height}px`;
+    return unregister;
   });
+}
+
+function applyGeometryToElement(el: HTMLElement, g: PanelGeometry | null): void {
+  if (g === null) {
+    el.style.left = "";
+    el.style.top = "";
+    el.style.right = "";
+    el.style.bottom = "";
+    el.style.width = "";
+    el.style.height = "";
+
+    return;
+  }
+
+  if (g.left !== null && g.top !== null) {
+    el.style.left = `${g.left}px`;
+    el.style.top = `${g.top}px`;
+    el.style.right = "auto";
+    el.style.bottom = "auto";
+  }
+
+  if (g.width !== null) el.style.width = `${g.width}px`;
+  if (g.height !== null) el.style.height = `${g.height}px`;
+}
+
+interface SizeObserverOptions {
+  /** Reads the currently persisted geometry — used only to dedupe identical writes. */
+  getCurrent: () => PanelGeometry | null;
+  /** Writes a new geometry to the URL. */
+  set: (g: PanelGeometry) => void;
 }
 
 /**
  * ResizeObserver bridge: native `resize: both` lets the user grab the
- * bottom-right corner; we commit the resulting size (alongside the
- * current position) to the URL so a reload restores it.
+ * bottom-right corner; the browser updates the DOM, and we just need
+ * to mirror the resulting size to the URL so a reload restores it.
+ * `getCurrent` is intentionally a non-tracked read of `#geometryRaw`,
+ * so this modifier doesn't re-run on every URL write.
  */
-export function createSizeObserverModifier(
-  get: () => PanelGeometry | null,
-  set: (g: PanelGeometry) => void,
-) {
+export function createSizeObserverModifier(opts: SizeObserverOptions) {
   return modifier((el: HTMLElement) => {
     let lastW = 0;
     let lastH = 0;
@@ -168,12 +212,12 @@ export function createSizeObserverModifier(
       lastW = w;
       lastH = h;
 
-      const current = get();
+      const current = opts.getCurrent();
       const sameAsCurrent = current !== null && current.width === w && current.height === h;
 
       if (sameAsCurrent) return;
 
-      set({
+      opts.set({
         left: current?.left ?? rect.left,
         top: current?.top ?? rect.top,
         width: w,

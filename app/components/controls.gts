@@ -197,17 +197,28 @@ export default class Controls extends Component<Signature> {
    * their CSS default positions, which sit inside the viewport. Useful
    * when a saved URL has a panel positioned off-screen — e.g. dragged
    * to the right edge on a wide monitor, then opened on a smaller one.
-   * Only offered when at least one panel actually has a custom position
-   * stored; otherwise the button does nothing visible.
+   * Calls through to `viewState.recenterPanels()` which clears the URL
+   * params *and* imperatively invokes each apply modifier's registered
+   * reset callback — geometry isn't tracked anymore, so the URL clear
+   * by itself wouldn't update the DOM.
    */
   @action
   recenterPanels(): void {
-    this.viewState.infoPanelGeometry = null;
-    this.viewState.cyclesPanelGeometry = null;
+    this.viewState.recenterPanels();
   }
 
+  /**
+   * Visible whenever a graph is loaded. We can't gate on "has custom
+   * geometry?" anymore — the geometry fields are intentionally non-
+   * tracked (writing them must not re-render the controls panel), so
+   * a getter reading them wouldn't update when they flipped to non-
+   * null. Always-on costs one harmless button row when the user
+   * hasn't moved anything; if they have, the click clears it. Same
+   * "always available when a graph is loaded" pattern as
+   * `showCyclesPanelButton`.
+   */
   get showRecenterPanelsButton(): boolean {
-    return this.viewState.infoPanelGeometry !== null || this.viewState.cyclesPanelGeometry !== null;
+    return this.graph.current !== null;
   }
 
   /**

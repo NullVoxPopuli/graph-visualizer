@@ -1,3 +1,4 @@
+import { trackedObject } from "@ember/reactive/collections";
 import Service, { service } from "@ember/service";
 
 import type RouterService from "@ember/routing/router-service";
@@ -8,6 +9,17 @@ import type { PanelGeometry } from "#lib/floating-panel";
 // Ember leaves omitted keys alone, so a plain `delete` wouldn't actually
 // strip them from `location.search`.
 type QPs = Record<string, string | null>;
+
+/**
+ * Equality used by the `trackedObject` store (and by the explicit
+ * pre-write check). All falsy values — `null`, `undefined`, `""` — map
+ * to the same logical "param absent" state so swapping between them
+ * doesn't dirty any tracked dependency. `"0"`, `"1"`, and other
+ * meaningful strings compare strictly.
+ */
+function qpEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  return (!a && !b) || a === b;
+}
 
 /**
  * Single source of truth for UI state that is meaningful to remember across
@@ -37,31 +49,146 @@ export const DEFAULT_CLUSTERING = 1;
 export default class ViewStateService extends Service {
   @service declare router: RouterService;
 
-  // Reads merge the router's committed query params with any not-yet-flushed
-  // writes from `#pending`, so two rapid toggles read the just-set value
-  // instead of the (stale) value the router still has.
-  get #queryParams(): QPs {
-    const committed = (this.router.currentRoute?.queryParams ?? {}) as QPs;
+  /**
+   * Fine-grained tracked store, one slot per query param. Replaces a
+   * previous coarse `router.currentRoute.queryParams` read inside a
+   * getter — that approach made every QP-derived getter depend on the
+   * entire route, so a single QP write was dirtying every other
+   * QP-derived computation on the service. With `trackedObject`,
+   * reading `#qps["cyclesPanelOpen"]` only tracks the
+   * `cyclesPanelOpen` slot.
+   *
+   * **Panel geometry (`infoPanel` / `cyclesPanel`) deliberately is
+   * NOT in this store.** Dragging or resizing a panel writes the
+   * URL many times a second; we don't want those writes to fire any
+   * reactivity at all. Geometry lives in the plain non-tracked
+   * `#geometryRaw` field below — modifiers grab its value once at
+   * mount, then write back imperatively from the drag / resize
+   * handlers. The "Recenter panels" affordance uses
+   * `#geometryResetHandlers` to imperatively clear DOM styles
+   * alongside the URL.
+   *
+   * `equals: qpEqual` collapses all falsy values (`null` / `undefined`
+   * / `""`) so the sync code doesn't fire spurious changes between
+   * representations of "absent".
+   */
+  #qps: QPs = trackedObject<QPs>({}, { equals: qpEqual });
 
-    return this.#pending === null ? committed : { ...committed, ...this.#pending };
-  }
+  /**
+   * Non-tracked storage for `infoPanel` / `cyclesPanel` raw query
+   * param strings. Reads of this object don't subscribe Glimmer to
+   * anything, so the panel-apply modifier won't re-run when a drag
+   * tick writes a new value. The URL still updates via the same
+   * rAF-batched `transitionTo` path as everything else.
+   */
+  #geometryRaw: Record<string, string | null> = {};
+
+  /**
+   * Callbacks registered by panel `createApplyGeometryModifier`
+   * instances; each one clears the panel's inline geometry styles when
+   * invoked. `recenterPanels()` drains this Set after clearing the
+   * URL, so the DOM resets even though no tracked state is wired up.
+   */
+  #geometryResetHandlers: Set<() => void> = new Set();
+
+  /** Param keys whose values live in `#geometryRaw` rather than `#qps`. */
+  static readonly #GEOMETRY_KEYS: ReadonlySet<string> = new Set(["infoPanel", "cyclesPanel"]);
 
   #frame: number | null = null;
-  #pending: QPs | null = null;
+  /** Slot keys with writes that haven't been flushed to the URL yet. */
+  #pending: Set<string> | null = null;
+
+  constructor(...args: ConstructorParameters<typeof Service>) {
+    super(...args);
+    this.router.on("routeDidChange", this.#syncFromRouter);
+    // Initial sync in case the page loaded with QPs in the URL — the
+    // `routeDidChange` for the boot transition usually fires *after*
+    // service instantiation, but doing it both ways is cheap and means
+    // first reads on the service don't see an empty store.
+    this.#syncFromRouter();
+  }
+
+  #syncFromRouter = (): void => {
+    const committed = (this.router.currentRoute?.queryParams ?? {}) as Record<
+      string,
+      string | undefined
+    >;
+
+    // Add/update slots that differ. Skip keys we've written but not yet
+    // flushed — clobbering them here would erase the user's most recent
+    // edit if `routeDidChange` fires for an in-flight previous
+    // transition before our own rAF runs. The `qpEqual` falsy-collapse
+    // is what stops a `""` ↔ `null` ↔ `undefined` flip-flop between
+    // router shape and our own normalization from dirtying a slot.
+    for (const [key, val] of Object.entries(committed)) {
+      if (this.#pending?.has(key)) continue;
+
+      const desired = val ?? null;
+
+      if (ViewStateService.#GEOMETRY_KEYS.has(key)) {
+        // Non-tracked write — no reactivity, modifiers won't re-run.
+        this.#geometryRaw[key] = desired;
+      } else if (!qpEqual(this.#qps[key], desired)) {
+        this.#qps[key] = desired;
+      }
+    }
+
+    // Clear slots that have dropped out of the URL entirely (e.g. user
+    // hit back to a state without `cyclesPanelOpen=1`).
+    for (const key of Object.keys(this.#qps)) {
+      if (this.#pending?.has(key)) continue;
+
+      if (!(key in committed) && !qpEqual(this.#qps[key], null)) {
+        this.#qps[key] = null;
+      }
+    }
+
+    for (const key of Object.keys(this.#geometryRaw)) {
+      if (this.#pending?.has(key)) continue;
+
+      if (!(key in committed) && this.#geometryRaw[key] !== null) {
+        this.#geometryRaw[key] = null;
+      }
+    }
+  };
+
+  /** Read the current in-memory value for a param, regardless of which store it lives in. */
+  #currentValue(key: string): string | null {
+    return ViewStateService.#GEOMETRY_KEYS.has(key)
+      ? (this.#geometryRaw[key] ?? null)
+      : (this.#qps[key] ?? null);
+  }
 
   #setParam(key: string, value: string | null): void {
-    const next: QPs = { ...this.#queryParams };
+    const normalized: string | null = value === null || value === "" ? null : value;
 
-    next[key] = value === null || value === "" ? null : value;
-    this.#pending = next;
+    if (ViewStateService.#GEOMETRY_KEYS.has(key)) {
+      // Non-tracked write: just stash the raw value. Modifiers reading
+      // geometry at mount time will see this, but on-going drag /
+      // resize writes won't trigger any Glimmer re-renders.
+      this.#geometryRaw[key] = normalized;
+    } else if (!qpEqual(this.#qps[key], normalized)) {
+      // Tracked write — the store's own `equals: qpEqual` already
+      // short-circuits redundant assignments, but skipping the proxy
+      // round-trip with an explicit falsy-equal check shaves the
+      // slowest path on rapid writes (e.g. slider drags).
+      this.#qps[key] = normalized;
+    }
+
+    if (this.#pending === null) this.#pending = new Set();
+    this.#pending.add(key);
 
     if (this.#frame !== null) cancelAnimationFrame(this.#frame);
 
     this.#frame = requestAnimationFrame(() => {
-      const qps = this.#pending ?? {};
+      const keys = this.#pending ?? new Set<string>();
 
       this.#frame = null;
       this.#pending = null;
+
+      const qps: QPs = {};
+
+      for (const k of keys) qps[k] = this.#currentValue(k);
       void this.router.transitionTo({ queryParams: qps });
     });
   }
@@ -78,16 +205,46 @@ export default class ViewStateService extends Service {
     cancelAnimationFrame(this.#frame);
     this.#frame = null;
 
-    const qps = this.#pending ?? {};
+    const keys = this.#pending ?? new Set<string>();
 
     this.#pending = null;
+
+    const qps: QPs = {};
+
+    for (const k of keys) qps[k] = this.#currentValue(k);
     await this.router.transitionTo({ queryParams: qps });
+  }
+
+  /**
+   * Register a callback that clears a panel's inline geometry styles.
+   * Invoked by `recenterPanels()` alongside the URL clear so the DOM
+   * actually resets — since geometry isn't tracked, the apply modifier
+   * doesn't auto-respond to URL writes anymore. Returns an unregister
+   * function the modifier's cleanup uses.
+   */
+  registerGeometryReset(cb: () => void): () => void {
+    this.#geometryResetHandlers.add(cb);
+
+    return () => {
+      this.#geometryResetHandlers.delete(cb);
+    };
+  }
+
+  /**
+   * Clear both saved panel geometries (URL + in-memory) and ask every
+   * registered apply modifier to wipe its element's inline styles so
+   * the CSS defaults take over immediately.
+   */
+  recenterPanels(): void {
+    this.#setParam("infoPanel", null);
+    this.#setParam("cyclesPanel", null);
+    for (const cb of this.#geometryResetHandlers) cb();
   }
 
   // ---- typed aliases
 
   get showEdges(): boolean {
-    return this.#queryParams["edges"] !== "0";
+    return this.#qps["edges"] !== "0";
   }
   set showEdges(v: boolean) {
     // Default true; only encode the off state.
@@ -95,7 +252,7 @@ export default class ViewStateService extends Service {
   }
 
   get showHulls(): boolean {
-    return this.#queryParams["hulls"] === "1";
+    return this.#qps["hulls"] === "1";
   }
   set showHulls(v: boolean) {
     this.#setParam("hulls", v ? "1" : null);
@@ -107,14 +264,14 @@ export default class ViewStateService extends Service {
    * default — the URL only encodes the off state.
    */
   get showArrows(): boolean {
-    return this.#queryParams["arrows"] !== "0";
+    return this.#qps["arrows"] !== "0";
   }
   set showArrows(v: boolean) {
     this.#setParam("arrows", v ? null : "0");
   }
 
   get hiddenEdgeTypes(): Set<number> {
-    return parseIntSet(this.#queryParams["hiddenEdgeTypes"]);
+    return parseIntSet(this.#qps["hiddenEdgeTypes"]);
   }
 
   toggleHiddenEdgeType(id: number): void {
@@ -122,7 +279,7 @@ export default class ViewStateService extends Service {
   }
 
   get hiddenNodeTypes(): Set<number> {
-    return parseIntSet(this.#queryParams["hiddenNodeTypes"]);
+    return parseIntSet(this.#qps["hiddenNodeTypes"]);
   }
 
   toggleHiddenNodeType(id: number): void {
@@ -139,7 +296,7 @@ export default class ViewStateService extends Service {
    * containing a literal `,` cannot round-trip through this URL encoding.
    */
   get collapsedIds(): Set<string> {
-    const raw = this.#queryParams["collapsed"];
+    const raw = this.#qps["collapsed"];
 
     if (!raw) return EMPTY_STRING_SET;
 
@@ -170,7 +327,7 @@ export default class ViewStateService extends Service {
    * `,` cannot round-trip through this URL encoding.
    */
   get hiddenNodeIds(): Set<string> {
-    const raw = this.#queryParams["hiddenNodes"];
+    const raw = this.#qps["hiddenNodes"];
 
     if (!raw) return EMPTY_STRING_SET;
 
@@ -211,7 +368,7 @@ export default class ViewStateService extends Service {
 
   /** Selected node id as it appears in the input JSON (string form), or null. */
   get selectedId(): string | null {
-    const v = this.#queryParams["selected"];
+    const v = this.#qps["selected"];
 
     return v && v.length > 0 ? v : null;
   }
@@ -221,7 +378,7 @@ export default class ViewStateService extends Service {
 
   /** Repulsion force fed into the d3-force charge body. */
   get repulsion(): number {
-    const v = this.#queryParams["repulsion"];
+    const v = this.#qps["repulsion"];
     const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) ? n : DEFAULT_REPULSION;
@@ -232,7 +389,7 @@ export default class ViewStateService extends Service {
 
   /** Spring length for edges that stay inside a community. */
   get nodeDistance(): number {
-    const v = this.#queryParams["nodeDistance"];
+    const v = this.#qps["nodeDistance"];
     const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) ? n : DEFAULT_NODE_DISTANCE;
@@ -243,7 +400,7 @@ export default class ViewStateService extends Service {
 
   /** Spring length for edges that cross community boundaries. */
   get clusterDistance(): number {
-    const v = this.#queryParams["clusterDistance"];
+    const v = this.#qps["clusterDistance"];
     const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) ? n : DEFAULT_CLUSTER_DISTANCE;
@@ -258,7 +415,7 @@ export default class ViewStateService extends Service {
    * default modularity weighting.
    */
   get clustering(): number {
-    const v = this.#queryParams["clustering"];
+    const v = this.#qps["clustering"];
     const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
 
     return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLUSTERING;
@@ -274,7 +431,7 @@ export default class ViewStateService extends Service {
    * line up with intuitive groupings. Off by default.
    */
   get clusterByLabel(): boolean {
-    return this.#queryParams["labelCluster"] === "1";
+    return this.#qps["labelCluster"] === "1";
   }
   set clusterByLabel(v: boolean) {
     this.#setParam("labelCluster", v ? "1" : null);
@@ -287,7 +444,7 @@ export default class ViewStateService extends Service {
    * The user opts in explicitly when they want the analysis.
    */
   get cyclesPanelOpen(): boolean {
-    return this.#queryParams["cyclesPanelOpen"] === "1";
+    return this.#qps["cyclesPanelOpen"] === "1";
   }
   set cyclesPanelOpen(v: boolean) {
     this.#setParam("cyclesPanelOpen", v ? "1" : null);
@@ -298,17 +455,21 @@ export default class ViewStateService extends Service {
    * the collapsed state is encoded so a fresh URL still shows the panel.
    */
   get controlsOpen(): boolean {
-    return this.#queryParams["controls"] !== "0";
+    return this.#qps["controls"] !== "0";
   }
   set controlsOpen(v: boolean) {
     this.#setParam("controls", v ? null : "0");
   }
 
   /**
-   * Info panel geometry, encoded the same way as `cyclesPanel`.
+   * Info panel geometry. Non-tracked: reads pull from `#geometryRaw`
+   * (not the tracked `#qps`), so a drag/resize that calls the setter
+   * many times a second doesn't trigger any Glimmer re-renders. Panel
+   * modifiers read this once at mount and apply it to the DOM; from
+   * then on the drag handler writes inline styles itself.
    */
   get infoPanelGeometry(): PanelGeometry | null {
-    return parsePanelGeometry(this.#queryParams["infoPanel"]);
+    return parsePanelGeometry(this.#geometryRaw["infoPanel"]);
   }
   set infoPanelGeometry(g: PanelGeometry | null) {
     this.#setParam("infoPanel", serializePanelGeometry(g));
@@ -323,21 +484,21 @@ export default class ViewStateService extends Service {
    * section back to its natural state clears the URL key.
    */
   get infoInOpenOverride(): boolean | null {
-    return parseTri(this.#queryParams["infoIn"]);
+    return parseTri(this.#qps["infoIn"]);
   }
   set infoInOpenOverride(v: boolean | null) {
     this.#setParam("infoIn", serializeTri(v));
   }
 
   get infoOutOpenOverride(): boolean | null {
-    return parseTri(this.#queryParams["infoOut"]);
+    return parseTri(this.#qps["infoOut"]);
   }
   set infoOutOpenOverride(v: boolean | null) {
     this.#setParam("infoOut", serializeTri(v));
   }
 
   get infoCyclesOpenOverride(): boolean | null {
-    return parseTri(this.#queryParams["infoCycles"]);
+    return parseTri(this.#qps["infoCycles"]);
   }
   set infoCyclesOpenOverride(v: boolean | null) {
     this.#setParam("infoCycles", serializeTri(v));
@@ -345,11 +506,12 @@ export default class ViewStateService extends Service {
 
   /**
    * Cycles panel geometry, encoded as `left,top,width,height` in CSS px.
-   * `null` for any field means "use the default" (CSS-defined). The whole
-   * value drops out of the URL when nothing has been moved or resized.
+   * Non-tracked, same as `infoPanelGeometry`: reads come from
+   * `#geometryRaw` and the setter only updates that field + the URL,
+   * never the tracked store.
    */
   get cyclesPanelGeometry(): PanelGeometry | null {
-    return parsePanelGeometry(this.#queryParams["cyclesPanel"]);
+    return parsePanelGeometry(this.#geometryRaw["cyclesPanel"]);
   }
   set cyclesPanelGeometry(g: PanelGeometry | null) {
     this.#setParam("cyclesPanel", serializePanelGeometry(g));

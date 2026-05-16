@@ -227,20 +227,22 @@ export default class CyclesPanel extends Component {
 
   setupDrag = createDragModifier({
     panelSelector: ".cycles-panel",
-    get: () => this.viewState.cyclesPanelGeometry,
     set: (g) => {
       this.viewState.cyclesPanelGeometry = g;
     },
   });
 
-  applyGeometry = createApplyGeometryModifier(() => this.viewState.cyclesPanelGeometry);
+  applyGeometry = createApplyGeometryModifier({
+    getInitial: () => this.viewState.cyclesPanelGeometry,
+    registerReset: (cb) => this.viewState.registerGeometryReset(cb),
+  });
 
-  observePanelSize = createSizeObserverModifier(
-    () => this.viewState.cyclesPanelGeometry,
-    (g) => {
+  observePanelSize = createSizeObserverModifier({
+    getCurrent: () => this.viewState.cyclesPanelGeometry,
+    set: (g) => {
       this.viewState.cyclesPanelGeometry = g;
     },
-  );
+  });
 
   <template>
     {{#if this.viewState.cyclesPanelOpen}}
