@@ -7,7 +7,7 @@ import { service } from "@ember/service";
 
 import { VerticalCollection } from "@html-next/vertical-collection";
 
-import { type Collapsed, collapseList, toggleInSet } from "#lib/collapse-list";
+import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
 import { canonicalCycleKey, findBundledCyclesViaRaw, hasAnyCycle } from "#lib/cycle";
 import {
@@ -28,18 +28,76 @@ interface CycleNode {
   label: string;
 }
 
-interface CycleEntry {
+/**
+ * One displayed chunk inside a cycle's node list. Adjacent nodes whose
+ * canonical cycle is the same are grouped together — a run of nodes
+ * that "belong to" this cycle becomes an `own` segment, a run of nodes
+ * whose smallest containing cycle is some other one becomes a `ref`
+ * segment that the template renders as a clickable `cycle#N` chip.
+ *
+ * `nodes` on a `ref` is the subset of *this* cycle's nodes that share
+ * that canonical — expanding the chip surfaces them inline so the user
+ * can see which positions in the current cycle map to the referenced
+ * one.
+ */
+export interface CycleSegment {
+  key: string;
   nodes: CycleNode[];
   /**
-   * Long cycles render as `head … N hidden … tail` so a 22-node loop
-   * doesn't dominate the panel. Built per cycle from `nodes` against
-   * the component's `expandedNodeLists` set, so clicking the hidden
-   * marker on a single cycle expands just that one's list to the full
-   * sequence (without touching the others).
+   * Set on segments whose nodes belong to a smaller cycle — the
+   * template renders these as a `cycle#N` chip. `undefined` on
+   * "own" segments (the cycle's unique nodes). A presence check
+   * narrows the type for Glint inside the `{{#if seg.cycleId}}`
+   * branch, which is why we don't use a discriminated `kind` union.
    */
-  displayed: Collapsed<CycleNode>;
+  cycleId?: number;
+}
+
+interface CycleEntry {
+  nodes: CycleNode[];
+  /** 1-based, shortest-first. Stable across renders for a given graph. */
+  id: number;
+  segments: CycleSegment[];
   /** stable key for `{{#each}}` — concatenated ids, deterministic per cycle. */
   key: string;
+}
+
+/**
+ * Walk a cycle's node sequence and group adjacent nodes by their
+ * canonical cycle id (the smallest cycle each node appears in). Nodes
+ * whose canonical is this cycle's own id become "own" segments and
+ * render as the actual node rows; runs of nodes whose canonical is
+ * some smaller cycle become "ref" segments that the template renders
+ * as a `cycle#N` chip, click-to-expand to surface the shared nodes
+ * in place.
+ *
+ * The segment `key` is `<cycleId>-<segmentIndex>`, used for Glimmer's
+ * `{{#each key="key"}}` and as the dedup key in `expandedRefs`.
+ */
+function buildCycleSegments(
+  nodes: CycleNode[],
+  cycleId: number,
+  canonical: Map<string, number>,
+): CycleSegment[] {
+  const out: CycleSegment[] = [];
+  let current: CycleSegment | null = null;
+
+  for (const node of nodes) {
+    const nodeCanonical = canonical.get(node.id) ?? cycleId;
+    const isOwn = nodeCanonical === cycleId;
+    const targetCycleId = isOwn ? undefined : nodeCanonical;
+
+    if (current === null || current.cycleId !== targetCycleId) {
+      const key = `${cycleId}-${out.length}`;
+
+      current = { key, cycleId: targetCycleId, nodes: [node] };
+      out.push(current);
+    } else {
+      current.nodes.push(node);
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -80,17 +138,30 @@ export default class CyclesPanel extends Component {
   #lastBundled: { nodes: CycleNode[]; key: string }[] = [];
 
   /**
-   * Set of cycle keys whose node list the user has expanded past the
-   * default `head … N hidden … tail` collapse. Tracked by reassigning
-   * the Set so Glimmer picks up the change. Resets when the component
-   * is torn down — intentional, since "expanded" only makes sense for
-   * the cycles currently on screen.
+   * Set of cycle keys whose body (the inner node list) the user has
+   * collapsed. Each cycle's body renders by default (so the panel is
+   * useful at a glance); clicking the header *adds* the cycle here
+   * and the row becomes just its `cycle#N` label. Tracked-by-reassign
+   * so Glimmer picks up the change.
    */
-  @tracked private expandedNodeLists: Set<string> = new Set();
+  @tracked private collapsedHeaders: Set<string> = new Set();
+
+  /**
+   * Cycle-ref segment keys (`<cycle.id>-<segmentIndex>`) the user has
+   * expanded inline. Each ref segment in a cycle's body collapses to
+   * a `cycle#Y` chip by default; clicking the chip adds its key here
+   * and the segment's actual nodes render in place.
+   */
+  @tracked private expandedRefs: Set<string> = new Set();
 
   @action
-  toggleCycleNodeList(key: string): void {
-    this.expandedNodeLists = toggleInSet(this.expandedNodeLists, key);
+  toggleCycleHeader(key: string): void {
+    this.collapsedHeaders = toggleInSet(this.collapsedHeaders, key);
+  }
+
+  @action
+  toggleCycleRef(segKey: string): void {
+    this.expandedRefs = toggleInSet(this.expandedRefs, segKey);
   }
 
   /**
@@ -182,16 +253,33 @@ export default class CyclesPanel extends Component {
       this.#lastBundled = bundled;
     }
 
-    // Cheap projection: take the cached bundled cycles and stamp each
-    // with its current head/hidden/tail collapse against the user's
-    // expanded-set. This re-runs every render — including when the
-    // user clicks a hidden marker — but it's just a `.map` over an
-    // already-built list, no cycle enumeration involved.
-    return this.#lastBundled.map(({ nodes, key: ck }) => ({
-      nodes,
-      key: ck,
-      displayed: collapseList(nodes, this.expandedNodeLists.has(ck)),
-    }));
+    // Compute each node's canonical cycle id — the smallest cycle in
+    // the current bundled list that contains it. `bundled` is already
+    // sorted shortest-first, so the first cycle a node appears in is
+    // its canonical one. Cached implicitly via `#lastBundled`'s cache
+    // — recomputing this map on every render is cheap (linear in the
+    // total node-count across cycles) compared with the bundling we
+    // just avoided.
+    const canonical = new Map<string, number>();
+
+    for (let i = 0; i < this.#lastBundled.length; i++) {
+      const cycleId = i + 1;
+
+      for (const node of this.#lastBundled[i]!.nodes) {
+        if (!canonical.has(node.id)) canonical.set(node.id, cycleId);
+      }
+    }
+
+    return this.#lastBundled.map(({ nodes, key: ck }, idx) => {
+      const id = idx + 1;
+
+      return {
+        nodes,
+        id,
+        segments: buildCycleSegments(nodes, id, canonical),
+        key: ck,
+      };
+    });
   }
 
   get selectedId(): string | null {
@@ -320,69 +408,79 @@ export default class CyclesPanel extends Component {
             <li class="cycles-panel__entry">
               <button
                 type="button"
-                class="cycles-panel__header"
-                {{on "click" (fn this.selectNode cycle.nodes.[0].id)}}
-                title="Select the first node in this cycle"
+                class="cycles-panel__header
+                  {{unless (has this.collapsedHeaders cycle.key) 'is-expanded'}}"
+                {{on "click" (fn this.toggleCycleHeader cycle.key)}}
+                title="Toggle cycle details"
+                aria-expanded={{unless (has this.collapsedHeaders cycle.key) "true" "false"}}
               >
-                <span class="cycles-panel__entry-index">#{{add i 1}}</span>
-                <span class="cycles-panel__entry-summary">{{cycle.nodes.length}} nodes</span>
+                <span class="cycles-panel__entry-index">cycle#{{add i 1}}</span>
+                {{#unless (has this.collapsedHeaders cycle.key)}}
+                  <span class="cycles-panel__entry-summary">{{cycle.nodes.length}} nodes</span>
+                {{/unless}}
               </button>
-              <ol class="cycles-panel__nodes">
-                {{#each cycle.displayed.head key="id" as |node|}}
-                  <li>
-                    <button
-                      type="button"
-                      class="cycles-panel__node {{if (eq node.id this.selectedId) 'is-selected'}}"
-                      title={{node.id}}
-                      {{on "click" (fn this.selectNode node.id)}}
-                      {{on "mouseenter" (fn this.hoverNode node.id)}}
-                      {{on "mouseleave" this.unhoverNode}}
-                    >
-                      <span class="cycles-panel__node-label">{{node.label}}</span>
-                      {{#if (notEq node.id node.label)}}
-                        <code class="cycles-panel__node-id">{{node.id}}</code>
-                      {{/if}}
-                    </button>
-                  </li>
-                {{/each}}
-                {{#if cycle.displayed.hiddenCount}}
-                  <li>
-                    <button
-                      type="button"
-                      class="cycle-hidden"
-                      title="Show all {{cycle.nodes.length}} nodes"
-                      {{on "click" (fn this.toggleCycleNodeList cycle.key)}}
-                    >… {{cycle.displayed.hiddenCount}} hidden — click to expand</button>
-                  </li>
-                {{/if}}
-                {{#each cycle.displayed.tail key="id" as |node|}}
-                  <li>
-                    <button
-                      type="button"
-                      class="cycles-panel__node {{if (eq node.id this.selectedId) 'is-selected'}}"
-                      title={{node.id}}
-                      {{on "click" (fn this.selectNode node.id)}}
-                      {{on "mouseenter" (fn this.hoverNode node.id)}}
-                      {{on "mouseleave" this.unhoverNode}}
-                    >
-                      <span class="cycles-panel__node-label">{{node.label}}</span>
-                      {{#if (notEq node.id node.label)}}
-                        <code class="cycles-panel__node-id">{{node.id}}</code>
-                      {{/if}}
-                    </button>
-                  </li>
-                {{/each}}
-                {{#if (isExpanded this.expandedNodeLists cycle.key cycle.nodes.length)}}
-                  <li>
-                    <button
-                      type="button"
-                      class="cycle-hidden"
-                      title="Collapse the node list"
-                      {{on "click" (fn this.toggleCycleNodeList cycle.key)}}
-                    >show less</button>
-                  </li>
-                {{/if}}
-              </ol>
+              {{#unless (has this.collapsedHeaders cycle.key)}}
+                <ol class="cycles-panel__nodes">
+                  {{#each cycle.segments key="key" as |seg|}}
+                    {{#unless seg.cycleId}}
+                      {{#each seg.nodes key="id" as |node|}}
+                        <li>
+                          <button
+                            type="button"
+                            class="cycles-panel__node
+                              {{if (eq node.id this.selectedId) 'is-selected'}}"
+                            title={{node.id}}
+                            {{on "click" (fn this.selectNode node.id)}}
+                            {{on "mouseenter" (fn this.hoverNode node.id)}}
+                            {{on "mouseleave" this.unhoverNode}}
+                          >
+                            <span class="cycles-panel__node-label">{{node.label}}</span>
+                            {{#if (notEq node.id node.label)}}
+                              <code class="cycles-panel__node-id">{{node.id}}</code>
+                            {{/if}}
+                          </button>
+                        </li>
+                      {{/each}}
+                    {{/unless}}
+                    {{#if seg.cycleId}}
+                      <li>
+                        <button
+                          type="button"
+                          class="cycle-ref"
+                          {{on "click" (fn this.toggleCycleRef seg.key)}}
+                          aria-expanded={{if (has this.expandedRefs seg.key) "true" "false"}}
+                          title="Toggle which nodes here belong to cycle#{{seg.cycleId}}"
+                        >
+                          … cycle#{{seg.cycleId}}
+                          ({{seg.nodes.length}}) — click to expand …
+                        </button>
+                        {{#if (has this.expandedRefs seg.key)}}
+                          <ol class="cycles-panel__nodes cycles-panel__nodes--nested">
+                            {{#each seg.nodes key="id" as |node|}}
+                              <li>
+                                <button
+                                  type="button"
+                                  class="cycles-panel__node
+                                    {{if (eq node.id this.selectedId) 'is-selected'}}"
+                                  title={{node.id}}
+                                  {{on "click" (fn this.selectNode node.id)}}
+                                  {{on "mouseenter" (fn this.hoverNode node.id)}}
+                                  {{on "mouseleave" this.unhoverNode}}
+                                >
+                                  <span class="cycles-panel__node-label">{{node.label}}</span>
+                                  {{#if (notEq node.id node.label)}}
+                                    <code class="cycles-panel__node-id">{{node.id}}</code>
+                                  {{/if}}
+                                </button>
+                              </li>
+                            {{/each}}
+                          </ol>
+                        {{/if}}
+                      </li>
+                    {{/if}}
+                  {{/each}}
+                </ol>
+              {{/unless}}
             </li>
           </VerticalCollection>
         </ol>
@@ -419,12 +517,8 @@ function eq(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-function isExpanded(set: Set<string>, key: string, length: number): boolean {
-  // The "show less" affordance only appears when the cycle is long
-  // enough that collapsing it would actually save rows AND the user
-  // has expanded it past the default head/tail collapse. Bundled
-  // together so the template stays single-call.
-  return length > 5 && set.has(key);
+function has(set: Set<string>, key: string): boolean {
+  return set.has(key);
 }
 
 function notEq(a: unknown, b: unknown): boolean {

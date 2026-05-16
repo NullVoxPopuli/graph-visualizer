@@ -397,11 +397,24 @@ export function findBundledCyclesViaRaw(
 }
 
 /**
- * Contract every raw cycle through `nodeRemap`, dedupe by canonical key,
- * and return shortest-first. Split out from `findBundledCyclesViaRaw` so
- * callers that need both the raw and bundled lists (the info panel) can
- * reuse a single `findAllCycles` pass instead of running the exponential
- * enumeration twice.
+ * Contract every raw cycle through `nodeRemap`, dedupe by *visual key*,
+ * and return shortest-first. Split out from `findBundledCyclesViaRaw`
+ * so callers that need both the raw and bundled lists (the info panel)
+ * can reuse a single `findAllCycles` pass instead of running the
+ * exponential enumeration twice.
+ *
+ * The visual key collapses cycles that *look* identical when rendered
+ * with the head/hidden/tail truncation into one entry — two cycles
+ * that share the same canonical first node, canonical second node,
+ * canonical last node, and total length are essentially "different
+ * paths between the same two endpoints" from the user's perspective.
+ * Showing them as separate rows produces dozens of visually identical
+ * `application.ts → assistant.ts → … 54 hidden → auditable-entity.js`
+ * entries that the user has explicitly said they don't want to see.
+ * Short cycles (≤ 5 nodes) fall back to the full canonical sequence
+ * since they render in full — collapsing those by endpoints would
+ * over-merge unrelated 3-cycles like `a → b → c → a` and `a → d → c
+ * → a`.
  */
 export function bundleRawCycles(rawCycles: number[][], nodeRemap: Int32Array | null): number[][] {
   const seen = new Set<string>();
@@ -412,7 +425,7 @@ export function bundleRawCycles(rawCycles: number[][], nodeRemap: Int32Array | n
 
     if (bundled === null) continue;
 
-    const key = canonicalCycleKey(bundled);
+    const key = visualCycleKey(bundled);
 
     if (seen.has(key)) continue;
     seen.add(key);
@@ -422,6 +435,41 @@ export function bundleRawCycles(rawCycles: number[][], nodeRemap: Int32Array | n
   out.sort((a, b) => a.length - b.length);
 
   return out;
+}
+
+/**
+ * Dedup key that treats cycles which share the same canonical start +
+ * second + last + length as the same cycle. For cycles of 5 nodes or
+ * fewer the full canonical sequence is used (so we don't over-merge
+ * short cycles where every node is visible). For longer cycles only
+ * the visible "anchors" of the head/hidden/tail rendering matter,
+ * because everything between them is hidden behind the
+ * "N hidden — click to expand" marker anyway.
+ */
+function visualCycleKey(cycle: number[]): string {
+  const n = cycle.length;
+
+  if (n === 0) return "";
+
+  let minIdx = 0;
+
+  for (let i = 1; i < n; i++) {
+    if (cycle[i]! < cycle[minIdx]!) minIdx = i;
+  }
+
+  if (n <= 5) {
+    const out: number[] = [];
+
+    for (let i = 0; i < n; i++) out.push(cycle[(minIdx + i) % n]!);
+
+    return out.join(",");
+  }
+
+  const first = cycle[minIdx]!;
+  const second = cycle[(minIdx + 1) % n]!;
+  const last = cycle[(minIdx + n - 1) % n]!;
+
+  return `${first}|${second}|${last}|${n}`;
 }
 
 /**
