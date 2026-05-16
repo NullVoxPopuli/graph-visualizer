@@ -180,54 +180,169 @@ function applyGeometryToElement(el: HTMLElement, g: PanelGeometry | null): void 
   if (g.height !== null) el.style.height = `${g.height}px`;
 }
 
-interface SizeObserverOptions {
-  /** Reads the currently persisted geometry — used only to dedupe identical writes. */
-  getCurrent: () => PanelGeometry | null;
-  /** Writes a new geometry to the URL. */
+/**
+ * Which edge / corner a `createResizeModifier` handle drags. Compass
+ * letters: `n` north (top), `s` south (bottom), `e` east (right), `w`
+ * west (left); corners combine two letters. The presence of each
+ * letter in the string flips on that side of the drag math.
+ */
+export type ResizeEdge = "n" | "s" | "e" | "w" | "nw" | "ne" | "sw" | "se";
+
+interface ResizeOptions {
+  /** CSS selector that matches the panel root (e.g. `.info-panel`). */
+  panelSelector: string;
+  edge: ResizeEdge;
+  /** Writes the resized geometry to the URL. */
   set: (g: PanelGeometry) => void;
 }
 
 /**
- * ResizeObserver bridge: native `resize: both` lets the user grab the
- * bottom-right corner; the browser updates the DOM, and we just need
- * to mirror the resulting size to the URL so a reload restores it.
- * `getCurrent` is intentionally a non-tracked read of `#geometryRaw`,
- * so this modifier doesn't re-run on every URL write.
+ * Edge-based resize handle. Replaces the native `resize: both` corner
+ * grab (which kept getting eaten by the inner scrollbar when the user
+ * scrolled to the bottom and tried to grip the corner). Each panel
+ * gets eight of these — one per edge and one per corner — positioned
+ * just outside the panel border in CSS, so they never compete with
+ * the inner element's scrollbar.
+ *
+ * Pointer events update the panel element's inline `width` /
+ * `height` (and `left` / `top` for west/north drags) directly during
+ * the drag so there's no reactive round-trip, and `set()` persists
+ * the final geometry to the URL each frame.
  */
-export function createSizeObserverModifier(opts: SizeObserverOptions) {
-  return modifier((el: HTMLElement) => {
-    let lastW = 0;
-    let lastH = 0;
+export function createResizeModifier(opts: ResizeOptions) {
+  const hasW = opts.edge.includes("w");
+  const hasE = opts.edge.includes("e");
+  const hasN = opts.edge.includes("n");
+  const hasS = opts.edge.includes("s");
 
-    const obs = new ResizeObserver((entries) => {
-      const entry = entries[0];
+  return modifier((handle: HTMLElement) => {
+    let dragging: {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      startWidth: number;
+      startHeight: number;
+      panelLeft: number;
+      panelTop: number;
+    } | null = null;
 
-      if (!entry) return;
+    const panelEl = (): HTMLElement | null => handle.closest(opts.panelSelector);
 
-      const rect = el.getBoundingClientRect();
-      const w = Math.round(rect.width);
-      const h = Math.round(rect.height);
+    const onPointerDown = (ev: PointerEvent): void => {
+      if (ev.button !== 0) return;
 
-      if (w === lastW && h === lastH) return;
-      lastW = w;
-      lastH = h;
+      const panel = panelEl();
 
-      const current = opts.getCurrent();
-      const sameAsCurrent = current !== null && current.width === w && current.height === h;
+      if (!panel) return;
 
-      if (sameAsCurrent) return;
+      const rect = panel.getBoundingClientRect();
+
+      dragging = {
+        pointerId: ev.pointerId,
+        startX: ev.clientX,
+        startY: ev.clientY,
+        startWidth: rect.width,
+        startHeight: rect.height,
+        panelLeft: rect.left,
+        panelTop: rect.top,
+      };
+
+      // Pin the panel to top-left anchoring before resizing — the
+      // cycles-panel's CSS default is `left: 12px; bottom: 12px`, so
+      // growing the height while `bottom` is fixed would push the top
+      // edge *up*. Flipping to `top` / `left` matches the drag handler
+      // and makes the resize math straightforward.
+      panel.style.left = `${rect.left}px`;
+      panel.style.top = `${rect.top}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+
+      handle.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    };
+
+    const onPointerMove = (ev: PointerEvent): void => {
+      if (!dragging || ev.pointerId !== dragging.pointerId) return;
+
+      const dx = ev.clientX - dragging.startX;
+      const dy = ev.clientY - dragging.startY;
+      const margin = 12;
+      const minW = 200;
+      const minH = 100;
+      const panel = panelEl();
+
+      if (!panel) return;
+
+      let newWidth = dragging.startWidth;
+      let newHeight = dragging.startHeight;
+      let newLeft = dragging.panelLeft;
+      let newTop = dragging.panelTop;
+
+      if (hasE) {
+        // East drag: right edge follows pointer, left edge stays put.
+        newWidth = clamp(
+          dragging.startWidth + dx,
+          minW,
+          window.innerWidth - dragging.panelLeft - margin,
+        );
+      } else if (hasW) {
+        // West drag: left edge follows pointer, right edge stays put.
+        // Width changes inversely with dx; left offsets by the
+        // difference so the right edge stays anchored. Clamped so the
+        // left edge can't cross either the viewport margin or the
+        // panel's minimum width.
+        const rightEdge = dragging.panelLeft + dragging.startWidth;
+        const maxWidthFromMargin = rightEdge - margin;
+
+        newWidth = clamp(dragging.startWidth - dx, minW, maxWidthFromMargin);
+        newLeft = rightEdge - newWidth;
+      }
+
+      if (hasS) {
+        newHeight = clamp(
+          dragging.startHeight + dy,
+          minH,
+          window.innerHeight - dragging.panelTop - margin,
+        );
+      } else if (hasN) {
+        const bottomEdge = dragging.panelTop + dragging.startHeight;
+        const maxHeightFromMargin = bottomEdge - margin;
+
+        newHeight = clamp(dragging.startHeight - dy, minH, maxHeightFromMargin);
+        newTop = bottomEdge - newHeight;
+      }
+
+      panel.style.width = `${newWidth}px`;
+      panel.style.height = `${newHeight}px`;
+
+      if (hasW) panel.style.left = `${newLeft}px`;
+      if (hasN) panel.style.top = `${newTop}px`;
 
       opts.set({
-        left: current?.left ?? rect.left,
-        top: current?.top ?? rect.top,
-        width: w,
-        height: h,
+        left: newLeft,
+        top: newTop,
+        width: newWidth,
+        height: newHeight,
       });
-    });
+    };
 
-    obs.observe(el);
+    const onPointerUp = (ev: PointerEvent): void => {
+      if (!dragging || ev.pointerId !== dragging.pointerId) return;
+      handle.releasePointerCapture(dragging.pointerId);
+      dragging = null;
+    };
 
-    return () => obs.disconnect();
+    handle.addEventListener("pointerdown", onPointerDown);
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointercancel", onPointerUp);
+
+    return () => {
+      handle.removeEventListener("pointerdown", onPointerDown);
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", onPointerUp);
+      handle.removeEventListener("pointercancel", onPointerUp);
+    };
   });
 }
 

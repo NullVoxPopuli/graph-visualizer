@@ -13,10 +13,11 @@ import { canonicalCycleKey, findBundledCyclesViaRaw, hasAnyCycle } from "#lib/cy
 import {
   createApplyGeometryModifier,
   createDragModifier,
-  createSizeObserverModifier,
+  createResizeModifier,
 } from "#lib/floating-panel";
 import { computeRadii } from "#lib/pack";
 
+import type { PanelGeometry } from "#lib/floating-panel";
 import type { LoadedGraph } from "#lib/types";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
@@ -237,21 +238,54 @@ export default class CyclesPanel extends Component {
     registerReset: (cb) => this.viewState.registerGeometryReset(cb),
   });
 
-  observePanelSize = createSizeObserverModifier({
-    getCurrent: () => this.viewState.cyclesPanelGeometry,
-    set: (g) => {
-      this.viewState.cyclesPanelGeometry = g;
-    },
+  #setGeometry = (g: PanelGeometry): void => {
+    this.viewState.cyclesPanelGeometry = g;
+  };
+
+  resizeN = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "n",
+    set: this.#setGeometry,
+  });
+  resizeS = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "s",
+    set: this.#setGeometry,
+  });
+  resizeE = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "e",
+    set: this.#setGeometry,
+  });
+  resizeW = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "w",
+    set: this.#setGeometry,
+  });
+  resizeNW = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "nw",
+    set: this.#setGeometry,
+  });
+  resizeNE = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "ne",
+    set: this.#setGeometry,
+  });
+  resizeSW = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "sw",
+    set: this.#setGeometry,
+  });
+  resizeSE = createResizeModifier({
+    panelSelector: ".cycles-panel",
+    edge: "se",
+    set: this.#setGeometry,
   });
 
   <template>
     {{#if this.viewState.cyclesPanelOpen}}
-      <aside
-        class="panel cycles-panel"
-        aria-label="Cycle list"
-        {{this.applyGeometry}}
-        {{this.observePanelSize}}
-      >
+      <aside class="panel cycles-panel" aria-label="Cycle list" {{this.applyGeometry}}>
         <div class="cycles-panel__titlebar" {{this.setupDrag}}>
           <h3 class="cycles-panel__title">
             Cycles
@@ -352,6 +386,14 @@ export default class CyclesPanel extends Component {
             </li>
           </VerticalCollection>
         </ol>
+        <div class="panel__resize-handle panel__resize-handle--n" {{this.resizeN}}></div>
+        <div class="panel__resize-handle panel__resize-handle--s" {{this.resizeS}}></div>
+        <div class="panel__resize-handle panel__resize-handle--e" {{this.resizeE}}></div>
+        <div class="panel__resize-handle panel__resize-handle--w" {{this.resizeW}}></div>
+        <div class="panel__resize-handle panel__resize-handle--nw" {{this.resizeNW}}></div>
+        <div class="panel__resize-handle panel__resize-handle--ne" {{this.resizeNE}}></div>
+        <div class="panel__resize-handle panel__resize-handle--sw" {{this.resizeSW}}></div>
+        <div class="panel__resize-handle panel__resize-handle--se" {{this.resizeSE}}></div>
       </aside>
     {{/if}}
   </template>

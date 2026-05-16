@@ -16,10 +16,11 @@ import {
 import {
   createApplyGeometryModifier,
   createDragModifier,
-  createSizeObserverModifier,
+  createResizeModifier,
 } from "#lib/floating-panel";
 import { computeRadii } from "#lib/pack";
 
+import type { PanelGeometry } from "#lib/floating-panel";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
@@ -416,11 +417,49 @@ export default class InfoPanel extends Component {
     registerReset: (cb) => this.viewState.registerGeometryReset(cb),
   });
 
-  observePanelSize = createSizeObserverModifier({
-    getCurrent: () => this.viewState.infoPanelGeometry,
-    set: (g) => {
-      this.viewState.infoPanelGeometry = g;
-    },
+  #setGeometry = (g: PanelGeometry): void => {
+    this.viewState.infoPanelGeometry = g;
+  };
+
+  resizeN = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "n",
+    set: this.#setGeometry,
+  });
+  resizeS = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "s",
+    set: this.#setGeometry,
+  });
+  resizeE = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "e",
+    set: this.#setGeometry,
+  });
+  resizeW = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "w",
+    set: this.#setGeometry,
+  });
+  resizeNW = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "nw",
+    set: this.#setGeometry,
+  });
+  resizeNE = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "ne",
+    set: this.#setGeometry,
+  });
+  resizeSW = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "sw",
+    set: this.#setGeometry,
+  });
+  resizeSE = createResizeModifier({
+    panelSelector: ".info-panel",
+    edge: "se",
+    set: this.#setGeometry,
   });
 
   @action
@@ -460,7 +499,7 @@ export default class InfoPanel extends Component {
 
   <template>
     {{#if this.info}}
-      <aside class="panel info-panel" {{this.applyGeometry}} {{this.observePanelSize}}>
+      <aside class="panel info-panel" {{this.applyGeometry}}>
         <div class="panel__head" {{this.setupDrag}}>
           <h2 class="panel__title">{{this.info.label}}</h2>
           <button
@@ -697,6 +736,14 @@ export default class InfoPanel extends Component {
             </dl>
           {{/if}}
         </div>
+        <div class="panel__resize-handle panel__resize-handle--n" {{this.resizeN}}></div>
+        <div class="panel__resize-handle panel__resize-handle--s" {{this.resizeS}}></div>
+        <div class="panel__resize-handle panel__resize-handle--e" {{this.resizeE}}></div>
+        <div class="panel__resize-handle panel__resize-handle--w" {{this.resizeW}}></div>
+        <div class="panel__resize-handle panel__resize-handle--nw" {{this.resizeNW}}></div>
+        <div class="panel__resize-handle panel__resize-handle--ne" {{this.resizeNE}}></div>
+        <div class="panel__resize-handle panel__resize-handle--sw" {{this.resizeSW}}></div>
+        <div class="panel__resize-handle panel__resize-handle--se" {{this.resizeSE}}></div>
       </aside>
     {{/if}}
   </template>

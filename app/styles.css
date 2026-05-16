@@ -847,6 +847,99 @@ pre code {
   text-align: right;
 }
 
+/* Edge-based resize handles — three per panel (right edge, bottom
+ * edge, bottom-right corner). Live in the small region *outside* the
+ * panel's border so they never compete with the inner scrollbar
+ * (which is the bug that made the native `resize: both` corner grab
+ * uncatchable when the panel had to scroll). Each handle has a
+ * matching `createResizeModifier(edge)` attached so a pointerdown on
+ * it starts a resize drag. */
+.panel__resize-handle {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+  /* Light hover hint — the handles are otherwise invisible so they
+     don't draw attention to themselves on calm panels. */
+  background: transparent;
+  transition: background 80ms ease;
+}
+
+.panel__resize-handle:hover {
+  background: rgba(106, 167, 255, 0.18);
+}
+
+.panel__resize-handle--n,
+.panel__resize-handle--s {
+  /* Edge handles span the long dimension minus the corner pads, so the
+     corners stay grabable. */
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+  border-radius: 3px;
+}
+
+.panel__resize-handle--n {
+  top: -3px;
+}
+
+.panel__resize-handle--s {
+  bottom: -3px;
+}
+
+.panel__resize-handle--e,
+.panel__resize-handle--w {
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+  border-radius: 3px;
+}
+
+.panel__resize-handle--e {
+  right: -3px;
+}
+
+.panel__resize-handle--w {
+  left: -3px;
+}
+
+/* Corners sit above the edge handles in the overlap zone so the
+ * diagonal cursor wins right at the corner. */
+.panel__resize-handle--nw,
+.panel__resize-handle--ne,
+.panel__resize-handle--sw,
+.panel__resize-handle--se {
+  width: 14px;
+  height: 14px;
+  z-index: 3;
+  border-radius: 3px;
+}
+
+.panel__resize-handle--nw {
+  top: -3px;
+  left: -3px;
+  cursor: nwse-resize;
+}
+
+.panel__resize-handle--ne {
+  top: -3px;
+  right: -3px;
+  cursor: nesw-resize;
+}
+
+.panel__resize-handle--sw {
+  bottom: -3px;
+  left: -3px;
+  cursor: nesw-resize;
+}
+
+.panel__resize-handle--se {
+  bottom: -3px;
+  right: -3px;
+  cursor: nwse-resize;
+}
+
 /* Shared base for every floating panel — the cycles, info, and
  * controls panels all carry this class in addition to their own
  * `.cycles-panel` / `.info-panel` / `.controls` modifier. The base sets
@@ -880,11 +973,12 @@ pre code {
      with hundreds of neighbors can't push the panel off-screen. */
   max-height: min(96vh, max(50dvh, 500px));
   font-size: 13px;
-  /* `resize: both` puts a native drag handle at the bottom-right.
-     `overflow: hidden` lets the handle render; internal scrolling lives
-     on a child. */
-  resize: both;
-  overflow: hidden;
+  /* `overflow: visible` so the `.panel__resize-handle` children can
+     extend a few pixels past the border. The internal scroll lives on
+     `.panel__body`, so removing `overflow: hidden` here doesn't break
+     anything visible — children with backgrounds are all transparent
+     against the rounded panel background. */
+  overflow: visible;
 }
 
 .panel__head {
@@ -1235,16 +1329,15 @@ pre code {
   /* Size to content with no `min-height`: a graph with two cycles
      shouldn't reserve half the screen for empty space. Cap at half
      the viewport but never less than 500px (clamped to 96vh on very
-     short screens); the resize handle is still there if the user
-     wants more. */
+     short screens); the custom edge handles let the user grow it. */
   max-height: min(96vh, max(50dvh, 500px));
   padding: 0 0 6px;
   font-size: 12px;
-  /* `resize: both` puts a native drag handle in the bottom-right corner.
-     `overflow: hidden` here is what makes the resize handle appear; the
-     internal list does its own scrolling. */
-  resize: both;
-  overflow: hidden;
+  /* `overflow: visible` so `.panel__resize-handle` children can sit
+     just outside the border without being clipped. The list inside
+     (`.cycles-panel__list`) has its own `overflow-y: auto` so no
+     content escapes the panel visually. */
+  overflow: visible;
 }
 
 .cycles-panel__titlebar {
