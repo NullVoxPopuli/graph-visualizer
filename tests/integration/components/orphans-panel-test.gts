@@ -1,4 +1,4 @@
-import { render } from "@ember/test-helpers";
+import { render, waitFor } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -30,6 +30,9 @@ module("Integration | orphans-panel", function (hooks) {
     assert.dom(".cycles-panel__title").includesText("Orphans");
     // Single orphan (`alone`); the a-b cycle is *not* orphan.
     assert.dom(".cycles-panel__count").hasText("1");
+    // `VerticalCollection` mounts list rows after the initial settled
+    // tick — see the cycles-panel test for the same pattern.
+    await waitFor(".cycles-panel__node-label");
     assert.dom(".cycles-panel__node-label").hasText("alone");
   });
 
