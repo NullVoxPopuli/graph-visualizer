@@ -41,16 +41,24 @@ export default class OrphansPanel extends Component {
   @service declare visualizer: VisualizerService;
 
   /**
-   * Memoize the orphans list by `graph.current` identity *and* the
-   * serialized hidden-edge-type set. Orphan analysis is O(N + E) so
-   * re-running on every render isn't catastrophic, but skipping it
-   * when nothing changed keeps the panel's render path predictable as
-   * the user clicks around. Hidden-edge-types feeds directly into
-   * `findOrphans` (visible edges only), so any change to the set must
-   * invalidate the cache.
+   * Memoize the orphans list by `graph.current` identity, the hidden-
+   * edge-type set, and the effective hide-id set (per-id "Hide" +
+   * label glob filters). Orphan analysis is O(N + E) so re-running on
+   * every render isn't catastrophic, but skipping it when nothing
+   * changed keeps the panel's render path predictable as the user
+   * clicks around.
+   *
+   * Note that `findOrphans` itself only takes an edge-type filter —
+   * hidden-node-ids and glob filters are applied as a post-pass:
+   * orphans are computed against the full graph (so a node's "real"
+   * orphan status doesn't depend on what the user's hidden), then any
+   * orphan whose id is in the effective hide set is dropped from the
+   * displayed list. This matches the renderer's behavior — a hidden
+   * node's edges drop out of the canvas too — without forcing
+   * `findOrphans` to grow another knob.
    */
   #lastGraph: LoadedGraph | null = null;
-  #lastHiddenEdgeTypesKey = "";
+  #lastCacheKey = "";
   #lastOrphans: OrphanEntry[] = [];
 
   get orphans(): OrphanEntry[] {
@@ -64,18 +72,23 @@ export default class OrphansPanel extends Component {
     if (!g) return [];
 
     const hiddenEdgeTypes = this.viewState.hiddenEdgeTypes;
-    const hiddenEdgeTypesKey = serializeIntSet(hiddenEdgeTypes);
+    const effectiveHidden = this.viewState.effectiveHiddenNodeIds(g);
+    const cacheKey = `${serializeIntSet(hiddenEdgeTypes)}|${serializeStringSet(effectiveHidden)}`;
 
-    if (g !== this.#lastGraph || hiddenEdgeTypesKey !== this.#lastHiddenEdgeTypesKey) {
+    if (g !== this.#lastGraph || cacheKey !== this.#lastCacheKey) {
       // Cache miss: re-run the analysis. Same write-inside-the-branch
       // shape as the cycles panel's getter so the eslint
       // `ember/no-side-effects` rule reads this as a memoized
       // computation rather than an unconditional mutation.
-      const entries: OrphanEntry[] = findOrphans(g, hiddenEdgeTypes).map((idx) => ({
-        index: idx,
-        id: g.ids[idx]!,
-        label: g.labels[idx]!,
-      }));
+      const rawOrphans = findOrphans(g, hiddenEdgeTypes);
+      const entries: OrphanEntry[] = [];
+
+      for (const idx of rawOrphans) {
+        const id = g.ids[idx]!;
+
+        if (effectiveHidden.has(id)) continue;
+        entries.push({ index: idx, id, label: g.labels[idx]! });
+      }
 
       entries.sort((a, b) => a.label.localeCompare(b.label));
 
@@ -85,7 +98,7 @@ export default class OrphansPanel extends Component {
       // eslint-disable-next-line ember/no-side-effects
       this.#lastGraph = g;
       // eslint-disable-next-line ember/no-side-effects
-      this.#lastHiddenEdgeTypesKey = hiddenEdgeTypesKey;
+      this.#lastCacheKey = cacheKey;
       // eslint-disable-next-line ember/no-side-effects
       this.#lastOrphans = entries;
     }
@@ -245,4 +258,10 @@ function serializeIntSet(set: Set<number>): string {
   if (set.size === 0) return "";
 
   return [...set].sort((a, b) => a - b).join(",");
+}
+
+function serializeStringSet(set: Set<string>): string {
+  if (set.size === 0) return "";
+
+  return [...set].sort().join(",");
 }

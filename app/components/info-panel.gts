@@ -259,7 +259,7 @@ export default class InfoPanel extends Component {
       radii,
       this.viewState.hiddenNodeTypes,
       this.viewState.collapsedIds,
-      this.viewState.hiddenNodeIds,
+      this.viewState.effectiveHiddenNodeIds(g),
     );
     const remap = contraction?.nodeRemap ?? null;
 

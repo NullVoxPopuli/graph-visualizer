@@ -227,7 +227,8 @@ export default class CyclesPanel extends Component {
     const hiddenEdgeTypesKey = serializeIntSet(this.viewState.hiddenEdgeTypes);
     const collapsedKey = serializeStringSet(this.viewState.collapsedIds);
     const hiddenIdsKey = serializeStringSet(this.viewState.hiddenNodeIds);
-    const key = `${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${selectedId ?? ""}`;
+    const globKey = `${this.viewState.includeGlobs.join("|")}::${this.viewState.excludeGlobs.join("|")}`;
+    const key = `${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${globKey}|${selectedId ?? ""}`;
 
     if (g !== this.#lastGraph || key !== this.#lastCycleKey) {
       const radii = computeRadii(g.inDegree, g.outDegree);
@@ -236,7 +237,7 @@ export default class CyclesPanel extends Component {
         radii,
         this.viewState.hiddenNodeTypes,
         this.viewState.collapsedIds,
-        this.viewState.hiddenNodeIds,
+        this.viewState.effectiveHiddenNodeIds(g),
       );
       const remap = contraction?.nodeRemap ?? null;
       // When a node is selected, scope the list to cycles whose bundled

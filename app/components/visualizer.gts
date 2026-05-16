@@ -83,6 +83,7 @@ export default class Visualizer extends Component {
   private lastHiddenKey = "";
   private lastHiddenNodeKey = "";
   private lastHiddenNodeIdsKey = "";
+  private lastGlobKey = "";
   private lastCollapsedKey = "";
   private lastSelectedId: string | null = null;
   private lastFocusTs = 0;
@@ -187,6 +188,7 @@ export default class Visualizer extends Component {
     const hiddenKey = serializeHidden(vs.hiddenEdgeTypes);
     const hiddenNodeKey = serializeHidden(vs.hiddenNodeTypes);
     const hiddenNodeIdsKey = serializeStringSet(vs.hiddenNodeIds);
+    const globKey = `${vs.includeGlobs.join("|")}::${vs.excludeGlobs.join("|")}`;
     const collapsedKey = serializeStringSet(vs.collapsedIds);
     const selectedId = vs.selectedId;
 
@@ -224,11 +226,13 @@ export default class Visualizer extends Component {
     if (
       hiddenNodeKey !== this.lastHiddenNodeKey ||
       collapsedKey !== this.lastCollapsedKey ||
-      hiddenNodeIdsKey !== this.lastHiddenNodeIdsKey
+      hiddenNodeIdsKey !== this.lastHiddenNodeIdsKey ||
+      globKey !== this.lastGlobKey
     ) {
       this.lastHiddenNodeKey = hiddenNodeKey;
       this.lastCollapsedKey = collapsedKey;
       this.lastHiddenNodeIdsKey = hiddenNodeIdsKey;
+      this.lastGlobKey = globKey;
       this.rebuildHideNodeMask(scene);
       // Cycle depends on the contracted graph — recompute before nodes so
       // the red ring lands on the current cycle members.
@@ -412,7 +416,7 @@ export default class Visualizer extends Component {
       scene.radii,
       this.viewState.hiddenNodeTypes,
       this.viewState.collapsedIds,
-      this.viewState.hiddenNodeIds,
+      this.viewState.effectiveHiddenNodeIds(scene.graph),
     );
 
     if (c === null) {
@@ -771,6 +775,7 @@ export default class Visualizer extends Component {
       this.lastHiddenNodeKey = serializeHidden(this.viewState.hiddenNodeTypes);
       this.lastCollapsedKey = serializeStringSet(this.viewState.collapsedIds);
       this.lastHiddenNodeIdsKey = serializeStringSet(this.viewState.hiddenNodeIds);
+      this.lastGlobKey = `${this.viewState.includeGlobs.join("|")}::${this.viewState.excludeGlobs.join("|")}`;
       // Sync the renderer's toggles with the URL-backed state before the
       // first draw so an `arrows=0` URL doesn't briefly render arrows.
       // `showEdges` is no longer a renderer-side flag — the visualizer

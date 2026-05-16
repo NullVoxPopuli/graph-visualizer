@@ -1,4 +1,5 @@
 import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
 import { fn } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
@@ -147,6 +148,63 @@ export default class Controls extends Component<Signature> {
   @action
   toggleNodeType(id: number): void {
     this.viewState.toggleHiddenNodeType(id);
+  }
+
+  /**
+   * Draft text for the two glob input fields. Local-only — only the
+   * patterns the user actually commits with the "Add" button (or Enter)
+   * land in `viewState.includeGlobs` / `excludeGlobs` and from there
+   * into the URL.
+   */
+  @tracked private includeDraft = "";
+  @tracked private excludeDraft = "";
+
+  get includeGlobs(): string[] {
+    return this.viewState.includeGlobs;
+  }
+
+  get excludeGlobs(): string[] {
+    return this.viewState.excludeGlobs;
+  }
+
+  @action
+  updateIncludeDraft(event: Event): void {
+    this.includeDraft = (event.target as HTMLInputElement).value;
+  }
+
+  @action
+  updateExcludeDraft(event: Event): void {
+    this.excludeDraft = (event.target as HTMLInputElement).value;
+  }
+
+  @action
+  submitIncludeGlob(event: Event): void {
+    event.preventDefault();
+
+    const value = this.includeDraft;
+
+    this.viewState.addIncludeGlob(value);
+    this.includeDraft = "";
+  }
+
+  @action
+  submitExcludeGlob(event: Event): void {
+    event.preventDefault();
+
+    const value = this.excludeDraft;
+
+    this.viewState.addExcludeGlob(value);
+    this.excludeDraft = "";
+  }
+
+  @action
+  removeIncludeGlob(pattern: string): void {
+    this.viewState.removeIncludeGlob(pattern);
+  }
+
+  @action
+  removeExcludeGlob(pattern: string): void {
+    this.viewState.removeExcludeGlob(pattern);
   }
 
   @action
@@ -449,24 +507,89 @@ export default class Controls extends Component<Signature> {
             </div>
           </div>
         {{/if}}
-        {{#if this.edgeTypes.length}}
-          <div class="controls__section">
-            <div class="controls__section-label">edge types</div>
-            <div class="controls__types">
-              {{#each this.edgeTypes as |t|}}
-                <label class="controls__type">
-                  <input
-                    type="checkbox"
-                    checked={{not t.hidden}}
-                    {{on "change" (fn this.toggleEdgeType t.id)}}
-                  />
-                  <span class="controls__type-name">{{t.name}}</span>
-                  <span class="controls__type-count">{{t.count}}</span>
-                </label>
-              {{/each}}
+        <details class="controls__section controls__details" open>
+          <summary class="controls__section-label">filters</summary>
+          {{#if this.edgeTypes.length}}
+            <div class="controls__filter-group">
+              <div class="controls__filter-label">edge types</div>
+              <div class="controls__types">
+                {{#each this.edgeTypes as |t|}}
+                  <label class="controls__type">
+                    <input
+                      type="checkbox"
+                      checked={{not t.hidden}}
+                      {{on "change" (fn this.toggleEdgeType t.id)}}
+                    />
+                    <span class="controls__type-name">{{t.name}}</span>
+                    <span class="controls__type-count">{{t.count}}</span>
+                  </label>
+                {{/each}}
+              </div>
             </div>
+          {{/if}}
+          <div class="controls__filter-group">
+            <div
+              class="controls__filter-label"
+              title="Only show nodes whose label matches at least one pattern. Wildcards: * (any chars) and ? (single char). Empty list means everything passes."
+            >include labels</div>
+            <form class="controls__glob-form" {{on "submit" this.submitIncludeGlob}}>
+              <input
+                type="text"
+                class="controls__glob-input"
+                placeholder="e.g. src/**"
+                value={{this.includeDraft}}
+                {{on "input" this.updateIncludeDraft}}
+              />
+              <button type="submit" class="controls__glob-add">Add</button>
+            </form>
+            {{#if this.includeGlobs.length}}
+              <ul class="controls__glob-list">
+                {{#each this.includeGlobs as |pattern|}}
+                  <li class="controls__glob">
+                    <code class="controls__glob-pattern">{{pattern}}</code>
+                    <button
+                      type="button"
+                      class="controls__glob-remove"
+                      title="Remove this include pattern"
+                      {{on "click" (fn this.removeIncludeGlob pattern)}}
+                    >×</button>
+                  </li>
+                {{/each}}
+              </ul>
+            {{/if}}
           </div>
-        {{/if}}
+          <div class="controls__filter-group">
+            <div
+              class="controls__filter-label"
+              title="Hide nodes whose label matches any pattern. Exclude wins over include."
+            >exclude labels</div>
+            <form class="controls__glob-form" {{on "submit" this.submitExcludeGlob}}>
+              <input
+                type="text"
+                class="controls__glob-input"
+                placeholder="e.g. *.test.ts"
+                value={{this.excludeDraft}}
+                {{on "input" this.updateExcludeDraft}}
+              />
+              <button type="submit" class="controls__glob-add">Add</button>
+            </form>
+            {{#if this.excludeGlobs.length}}
+              <ul class="controls__glob-list">
+                {{#each this.excludeGlobs as |pattern|}}
+                  <li class="controls__glob">
+                    <code class="controls__glob-pattern">{{pattern}}</code>
+                    <button
+                      type="button"
+                      class="controls__glob-remove"
+                      title="Remove this exclude pattern"
+                      {{on "click" (fn this.removeExcludeGlob pattern)}}
+                    >×</button>
+                  </li>
+                {{/each}}
+              </ul>
+            {{/if}}
+          </div>
+        </details>
         {{#if this.hiddenNodes.length}}
           <details class="controls__section controls__details">
             <summary class="controls__section-head">

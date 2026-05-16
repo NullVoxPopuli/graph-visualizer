@@ -17,6 +17,8 @@ export default class ApplicationRoute extends Route {
     hiddenEdgeTypes: { refreshModel: false },
     hiddenNodeTypes: { refreshModel: false },
     hiddenNodes: { refreshModel: false },
+    includeGlobs: { refreshModel: false },
+    excludeGlobs: { refreshModel: false },
     collapsed: { refreshModel: false },
     selected: { refreshModel: false },
     repulsion: { refreshModel: false },

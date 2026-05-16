@@ -1,8 +1,11 @@
 import { trackedObject } from "@ember/reactive/collections";
 import Service, { service } from "@ember/service";
 
+import { isLabelFilteredOut, normalizeGlobInput, parseGlobs, serializeGlobs } from "#lib/glob";
+
 import type RouterService from "@ember/routing/router-service";
 import type { PanelGeometry } from "#lib/floating-panel";
+import type { LoadedGraph } from "#lib/types";
 
 // Values are strings when set, null when explicitly cleared. We keep cleared
 // keys in the bag so the next `transitionTo` removes them from the URL —
@@ -355,6 +358,86 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Label glob include / exclude lists. A label is shown when it
+   * matches any include glob (or the include list is empty) AND does
+   * not match any exclude glob. Encoded in the URL as pipe-separated
+   * strings — globs almost never contain `|`, and choosing it as the
+   * separator keeps the URL readable. Patterns containing `|` are
+   * rejected at add time.
+   */
+  get includeGlobs(): string[] {
+    return parseGlobs(this.#qps["includeGlobs"]);
+  }
+
+  get excludeGlobs(): string[] {
+    return parseGlobs(this.#qps["excludeGlobs"]);
+  }
+
+  addIncludeGlob(raw: string): void {
+    const next = normalizeGlobInput(raw);
+
+    if (next === null) return;
+
+    const current = this.includeGlobs;
+
+    if (current.includes(next)) return;
+
+    this.#setParam("includeGlobs", serializeGlobs([...current, next]));
+  }
+
+  removeIncludeGlob(pattern: string): void {
+    const next = this.includeGlobs.filter((g) => g !== pattern);
+
+    this.#setParam("includeGlobs", serializeGlobs(next));
+  }
+
+  addExcludeGlob(raw: string): void {
+    const next = normalizeGlobInput(raw);
+
+    if (next === null) return;
+
+    const current = this.excludeGlobs;
+
+    if (current.includes(next)) return;
+
+    this.#setParam("excludeGlobs", serializeGlobs([...current, next]));
+  }
+
+  removeExcludeGlob(pattern: string): void {
+    const next = this.excludeGlobs.filter((g) => g !== pattern);
+
+    this.#setParam("excludeGlobs", serializeGlobs(next));
+  }
+
+  /**
+   * Resolve include/exclude globs against a loaded graph and return the
+   * union of explicit `hiddenNodeIds` plus every id whose label is
+   * filtered out by the glob rules. Used at each `buildContraction`
+   * call site so the glob filter shares the same hide-by-id machinery
+   * as the per-node "Hide" button — every consumer that already
+   * respects `hiddenNodeIds` picks up the new filter automatically.
+   *
+   * Returns the original `hiddenNodeIds` set unchanged when neither
+   * glob list has anything in it, so the fast path doesn't allocate.
+   */
+  effectiveHiddenNodeIds(graph: LoadedGraph): Set<string> {
+    const include = this.includeGlobs;
+    const exclude = this.excludeGlobs;
+    const base = this.hiddenNodeIds;
+
+    if (include.length === 0 && exclude.length === 0) return base;
+
+    const out = new Set(base);
+    const { labels, ids } = graph;
+
+    for (let i = 0; i < labels.length; i++) {
+      if (isLabelFilteredOut(labels[i]!, include, exclude)) out.add(ids[i]!);
+    }
+
+    return out;
+  }
+
+  /**
    * Drop every URL-backed setting that's tied to the specific graph
    * that *was* loaded — selection, hidden node ids, collapsed toggles,
    * type filters, edge-type filters. Type-filter / edge-type ids index
@@ -369,6 +452,12 @@ export default class ViewStateService extends Service {
     this.#setParam("hiddenNodes", null);
     this.#setParam("hiddenNodeTypes", null);
     this.#setParam("hiddenEdgeTypes", null);
+    // Glob filters are technically graph-agnostic — the same `**/*.test.ts`
+    // pattern would work on any codebase — but in practice they're
+    // tuned to a specific repo's labels, so a new graph load gets a
+    // fresh slate to avoid surprise "where did my nodes go" moments.
+    this.#setParam("includeGlobs", null);
+    this.#setParam("excludeGlobs", null);
   }
 
   /** Selected node id as it appears in the input JSON (string form), or null. */
