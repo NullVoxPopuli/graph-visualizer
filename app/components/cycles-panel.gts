@@ -153,19 +153,22 @@ export default class CyclesPanel extends Component {
   @service declare visualizer: VisualizerService;
 
   /**
-   * Memoize the *bundled* cycle list by graph + contraction inputs.
-   * `findAllCycles` is exponential in the worst case (Johnson on a
-   * dense SCC), so we absolutely cannot run it on every render — URL
-   * changes from selection, hover, etc. would otherwise lock the main
-   * thread for seconds at a time on a large graph. The per-cycle
-   * `displayed` projection (head + hidden marker + tail) sits *above*
-   * this cache so clicking the marker on one cycle doesn't trigger
-   * another `findBundledCyclesViaRaw` pass — only the cheap `.map`
-   * over the already-bundled list reruns.
+   * Memoize the *fully built* CycleEntry list (nodes + id + segments +
+   * containedLabel) keyed by graph identity and serialized contraction
+   * inputs. `findAllCycles` is exponential in the worst case, so we
+   * absolutely cannot re-run it on every render — but the post-pass
+   * (shortCycleId hashing, canonical-cycle map, segment build) was
+   * also surprisingly costly because it allocated fresh segment
+   * arrays for every cycle on every read, and a `cycles` reference
+   * change forces VerticalCollection to reconcile every visible row.
+   *
+   * Toggling the collapsed-headers / expanded-refs sets must not
+   * invalidate this cache — those flags are template-level state, not
+   * inputs to the cycle structure itself.
    */
   #lastGraph: LoadedGraph | null = null;
   #lastCycleKey = "";
-  #lastBundled: { nodes: CycleNode[]; key: string }[] = [];
+  #lastEntries: CycleEntry[] = [];
 
   /**
    * Set of cycle keys whose body (the inner node list) the user has
@@ -280,41 +283,43 @@ export default class CyclesPanel extends Component {
         bundled.push({ nodes, key: ck });
       }
 
+      // Pre-assign each cycle's short id (deterministic from its
+      // canonical key). Two passes are needed because the canonical
+      // cycle for each *node* is the short id of the smallest cycle
+      // that contains it, so we have to know every cycle's id before
+      // building the node → canonical map.
+      const usedIds = new Set<string>();
+      const cycleIds = bundled.map(({ key: ck }) => shortCycleId(ck, usedIds));
+
+      const canonical = new Map<string, string>();
+
+      for (let i = 0; i < bundled.length; i++) {
+        const id = cycleIds[i]!;
+
+        for (const node of bundled[i]!.nodes) {
+          if (!canonical.has(node.id)) canonical.set(node.id, id);
+        }
+      }
+
+      const entries: CycleEntry[] = bundled.map(({ nodes, key: ck }, idx) => {
+        const id = cycleIds[idx]!;
+        const segments = buildCycleSegments(nodes, id, canonical);
+
+        return {
+          nodes,
+          id,
+          segments,
+          containedLabel: formatContainedLabel(segments),
+          key: ck,
+        };
+      });
+
       this.#lastGraph = g;
       this.#lastCycleKey = key;
-      this.#lastBundled = bundled;
+      this.#lastEntries = entries;
     }
 
-    // Pre-assign each cycle's short id (deterministic from its
-    // canonical key). Two passes are needed because the canonical
-    // cycle for each *node* is the short id of the smallest cycle
-    // that contains it, so we have to know every cycle's id before
-    // building the node → canonical map.
-    const usedIds = new Set<string>();
-    const cycleIds = this.#lastBundled.map(({ key: ck }) => shortCycleId(ck, usedIds));
-
-    const canonical = new Map<string, string>();
-
-    for (let i = 0; i < this.#lastBundled.length; i++) {
-      const id = cycleIds[i]!;
-
-      for (const node of this.#lastBundled[i]!.nodes) {
-        if (!canonical.has(node.id)) canonical.set(node.id, id);
-      }
-    }
-
-    return this.#lastBundled.map(({ nodes, key: ck }, idx) => {
-      const id = cycleIds[idx]!;
-      const segments = buildCycleSegments(nodes, id, canonical);
-
-      return {
-        nodes,
-        id,
-        segments,
-        containedLabel: formatContainedLabel(segments),
-        key: ck,
-      };
-    });
+    return this.#lastEntries;
   }
 
   get selectedId(): string | null {

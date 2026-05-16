@@ -16,6 +16,7 @@ import {
 import { computeRadii } from "#lib/pack";
 
 import type { PanelGeometry } from "#lib/floating-panel";
+import type { LoadedGraph } from "#lib/types";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
@@ -83,6 +84,20 @@ export default class InfoPanel extends Component {
   @service declare viewState: ViewStateService;
   @service declare graph: GraphService;
   @service declare visualizer: VisualizerService;
+
+  /**
+   * Memoize the fully-built CycleEntry list keyed on every input that
+   * actually affects which cycles appear and how they render. Without
+   * this, `toggleCycleHeader` was triggering a full `findBundledCycles`
+   * re-enumeration: the toggle dirties `collapsedHeaders`, which
+   * invalidates `allCyclesCollapsed`, which reads `this.cycles`, which
+   * (untracked-cached) re-ran the exponential cycle search on every
+   * read. With the cache in place, only the per-cycle `{{#unless}}`
+   * predicates re-evaluate when the user collapses a cycle.
+   */
+  #lastGraph: LoadedGraph | null = null;
+  #lastCycleKey = "";
+  #lastEntries: CycleEntry[] = [];
 
   /**
    * Cycle keys whose body (node list + occurrences table) the user has
@@ -253,29 +268,54 @@ export default class InfoPanel extends Component {
 
     if (!info || !g) return [];
 
+    // Cache key: every input that actually changes which cycles
+    // appear or how they render. `collapsedHeaders` / `expandedRefs`
+    // are deliberately *not* in the key — those are template-level
+    // toggles and recomputing cycles when the user closes one cycle's
+    // body is exactly what made this getter slow.
+    const vs = this.viewState;
+    const hiddenTypesKey = serializeIntSet(vs.hiddenNodeTypes);
+    const hiddenEdgeTypesKey = serializeIntSet(vs.hiddenEdgeTypes);
+    const collapsedKey = serializeStringSet(vs.collapsedIds);
+    const hiddenIdsKey = serializeStringSet(vs.hiddenNodeIds);
+    const globKey = `${vs.includeGlobs.join("|")}::${vs.excludeGlobs.join("|")}`;
+    const cacheKey = `${info.index}|${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${globKey}`;
+
+    if (g === this.#lastGraph && cacheKey === this.#lastCycleKey) {
+      return this.#lastEntries;
+    }
+
     const radii = computeRadii(g.inDegree, g.outDegree);
     const contraction = buildContraction(
       g,
       radii,
-      this.viewState.hiddenNodeTypes,
-      this.viewState.collapsedIds,
-      this.viewState.effectiveHiddenNodeIds(g),
+      vs.hiddenNodeTypes,
+      vs.collapsedIds,
+      vs.effectiveHiddenNodeIds(g),
     );
     const remap = contraction?.nodeRemap ?? null;
 
     // Selected node is hidden — no bundled cycle goes through *this* node
-    // (its loops are absorbed into the owner). Bail.
-    if (remap !== null && remap[info.index]! !== info.index) return [];
+    // (its loops are absorbed into the owner). Bail. Still cache the
+    // empty result so subsequent reads with the same inputs skip the
+    // contraction work.
+    if (remap !== null && remap[info.index]! !== info.index) {
+      // eslint-disable-next-line ember/no-side-effects
+      this.#lastGraph = g;
+      // eslint-disable-next-line ember/no-side-effects
+      this.#lastCycleKey = cacheKey;
+      // eslint-disable-next-line ember/no-side-effects
+      this.#lastEntries = [];
+
+      return this.#lastEntries;
+    }
 
     // Bundled cycles: contracted, deduped by canonical sequence. Same
     // source the renderer uses for red rings, so the info-panel list
     // and the canvas can't disagree.
-    const bundledCycles = findBundledCyclesViaRaw(
-      g,
-      remap,
-      1000,
-      this.viewState.hiddenEdgeTypes,
-    ).filter((c) => c.includes(info.index));
+    const bundledCycles = findBundledCyclesViaRaw(g, remap, 1000, vs.hiddenEdgeTypes).filter((c) =>
+      c.includes(info.index),
+    );
 
     const entries: CycleEntry[] = [];
 
@@ -324,6 +364,13 @@ export default class InfoPanel extends Component {
       entry.segments = buildCycleSegments(entry.nodes, entry.id, canonical);
       entry.containedLabel = formatContainedLabel(entry.segments);
     }
+
+    // eslint-disable-next-line ember/no-side-effects
+    this.#lastGraph = g;
+    // eslint-disable-next-line ember/no-side-effects
+    this.#lastCycleKey = cacheKey;
+    // eslint-disable-next-line ember/no-side-effects
+    this.#lastEntries = entries;
 
     return entries;
   }
@@ -784,4 +831,16 @@ function notEq(a: unknown, b: unknown): boolean {
 
 function isExpanded(set: Set<string>, key: string): boolean {
   return set.has(key);
+}
+
+function serializeIntSet(set: Set<number>): string {
+  if (set.size === 0) return "";
+
+  return [...set].sort((a, b) => a - b).join(",");
+}
+
+function serializeStringSet(set: Set<string>): string {
+  if (set.size === 0) return "";
+
+  return [...set].sort().join(",");
 }
