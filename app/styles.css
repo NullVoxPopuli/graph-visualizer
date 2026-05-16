@@ -1780,16 +1780,29 @@ pre code {
   letter-spacing: 0.06em;
 }
 
-.docs__pre {
-  background: var(--input-bg);
+/* Wrapper around a Shiki-highlighted code block. Shiki produces its
+ * own `<pre class="shiki ...">` element with an inline background-color
+ * (from the theme); we add the rounded border + padding + scrollbar
+ * around it, and let the theme drive the colors. The descendant
+ * selector below reaches inside the shiki output to apply our typography. */
+.docs__code {
+  margin: 12px 0;
   border: 1px solid var(--line);
   border-radius: 6px;
+  overflow: hidden;
+}
+
+.docs__code pre.shiki {
+  margin: 0;
   padding: 12px 14px;
   overflow-x: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   line-height: 1.55;
-  color: var(--fg);
+}
+
+.docs__code pre.shiki code {
+  font-family: inherit;
 }
 
 .docs__dl dt {

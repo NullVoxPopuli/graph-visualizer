@@ -40,6 +40,8 @@
     "@embroider/router": "3.0.6",
     "@glimmer/component": "2.1.1",
     "@html-next/vertical-collection": "^5.0.5",
+    "@shikijs/core": "^4.0.2",
+    "@shikijs/engine-javascript": "^4.0.2",
     "comlink": "^4.4.2",
     "d3-force": "^3.0.0",
     "d3-polygon": "^3.0.1",
@@ -57,6 +59,7 @@
     "idb": "^8.0.0",
     "nvp.ui": "^0.5.3",
     "reactiveweb": "^1.9.1",
+    "shiki": "^4.0.2",
     "vite-ember-ssr": "0.1.0-alpha.13"
   },
   "devDependencies": {
