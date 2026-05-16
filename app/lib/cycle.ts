@@ -29,6 +29,68 @@ export function contractCycle(raw: number[], nodeRemap: Int32Array | null): numb
 }
 
 /**
+ * Result of contraction that also remembers which raw nodes folded
+ * into each bundled step. `bundled[i]` is the contracted rep at
+ * position `i`; `groups[i]` lists the raw node indices that
+ * contributed to it, in cycle-traversal order. Typically `groups[i]`
+ * has a single entry — multiple entries appear when consecutive raw
+ * nodes happened to share a rep (a chain of hidden files within the
+ * same owning package) or when the wrap-around trim folded the
+ * cycle's closing raw node back into the head step.
+ *
+ * The UI uses these groups to surface "package X · file foo.ts" rows
+ * when the user has hidden the file type — same package can appear
+ * twice in a contracted cycle because the underlying files are
+ * different, and that detail is exactly what gets lost otherwise.
+ */
+export interface BundledWithGroups {
+  bundled: number[];
+  groups: number[][];
+}
+
+export function contractCycleWithGroups(
+  raw: number[],
+  nodeRemap: Int32Array | null,
+): BundledWithGroups | null {
+  if (nodeRemap === null) {
+    return { bundled: raw.slice(), groups: raw.map((idx) => [idx]) };
+  }
+
+  const bundled: number[] = [];
+  const groups: number[][] = [];
+
+  for (const idx of raw) {
+    const r = nodeRemap[idx]!;
+
+    if (r < 0) return null;
+
+    if (bundled.length > 0 && bundled[bundled.length - 1] === r) {
+      groups[groups.length - 1]!.push(idx);
+      continue;
+    }
+
+    bundled.push(r);
+    groups.push([idx]);
+  }
+
+  // Wrap-around trim: same rationale as `contractCycle`. Merge the
+  // popped tail's raw indices into the head's group so the closing-
+  // edge file isn't silently dropped — it's the same package, but
+  // *which* file matters for the user trying to read the cycle.
+  while (bundled.length > 1 && bundled[0] === bundled[bundled.length - 1]) {
+    bundled.pop();
+
+    const tail = groups.pop()!;
+
+    groups[0] = [...tail, ...groups[0]!];
+  }
+
+  if (bundled.length < 2) return null;
+
+  return { bundled, groups };
+}
+
+/**
  * Rotate the cycle so the smallest node index is first, then stringify.
  * Two cycles that are rotations of each other (same nodes in the same
  * cyclic order) produce the same key — useful for deduping bundled
@@ -456,6 +518,25 @@ export function findBundledCyclesViaRaw(
 }
 
 /**
+ * Same enumerate-then-bundle pipeline as `findBundledCyclesViaRaw`,
+ * but each bundled cycle also carries the raw-node groups that
+ * collapsed into each step. Used by the info / cycles panels when a
+ * node type is hidden, so the UI can show "package X · file foo.ts"
+ * per step — same-package repeats inside a cycle are meaningful only
+ * when the user can tell which files are at the two positions.
+ */
+export function findBundledCyclesWithGroups(
+  graph: LoadedGraph,
+  nodeRemap: Int32Array | null,
+  maxCycles = 1000,
+  hiddenEdgeTypes?: ReadonlySet<number>,
+): BundledWithGroups[] {
+  const raw = findAllCycles(graph, null, maxCycles, hiddenEdgeTypes);
+
+  return bundleRawCyclesWithGroups(raw, nodeRemap);
+}
+
+/**
  * Contract every raw cycle through `nodeRemap`, dedupe by *visual key*,
  * and return shortest-first. Split out from `findBundledCyclesViaRaw`
  * so callers that need both the raw and bundled lists (the info panel)
@@ -492,6 +573,36 @@ export function bundleRawCycles(rawCycles: number[][], nodeRemap: Int32Array | n
   }
 
   out.sort((a, b) => a.length - b.length);
+
+  return out;
+}
+
+/**
+ * Group-preserving variant of `bundleRawCycles`. Same dedup rules
+ * (visual cycle key, shortest-first), but the per-step raw-node
+ * groups travel with the result so the panel UI can drill into which
+ * files actually form the cycle when their type is hidden.
+ */
+export function bundleRawCyclesWithGroups(
+  rawCycles: number[][],
+  nodeRemap: Int32Array | null,
+): BundledWithGroups[] {
+  const seen = new Set<string>();
+  const out: BundledWithGroups[] = [];
+
+  for (const r of rawCycles) {
+    const contracted = contractCycleWithGroups(r, nodeRemap);
+
+    if (contracted === null) continue;
+
+    const key = visualCycleKey(contracted.bundled);
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(contracted);
+  }
+
+  out.sort((a, b) => a.bundled.length - b.bundled.length);
 
   return out;
 }

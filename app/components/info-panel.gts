@@ -7,7 +7,7 @@ import { service } from "@ember/service";
 
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import { canonicalCycleKey, findBundledCyclesViaRaw, shortCycleId } from "#lib/cycle";
+import { canonicalCycleKey, findBundledCyclesWithGroups, shortCycleId } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -26,10 +26,27 @@ interface NeighborEntry {
   label: string;
 }
 
+interface RawCycleFile {
+  id: string;
+  label: string;
+}
+
+/**
+ * NeighborEntry plus the raw file(s) that contracted into this
+ * bundled step. `rawFiles` is empty when no contraction folded a file
+ * here (raw == bundled). Used so the cycles panel can surface the
+ * underlying file labels when a node type is hidden — same package
+ * can appear twice in one cycle, and seeing the file at each
+ * occurrence is what makes the cycle readable.
+ */
+interface CycleNodeEntry extends NeighborEntry {
+  rawFiles: RawCycleFile[];
+}
+
 interface DisplayedCycleNode {
   /** 1-based position in the bundled cycle. */
   index: number;
-  node: NeighborEntry;
+  node: CycleNodeEntry;
 }
 
 /**
@@ -54,7 +71,7 @@ interface CycleSegment {
 
 interface CycleEntry {
   /** Bundled cycle — the visible reps the canvas red-rings. */
-  nodes: NeighborEntry[];
+  nodes: CycleNodeEntry[];
   /**
    * Short deterministic id derived from the canonical cycle key
    * (`shortCycleId`). 8 lower-case hex chars, stable across reloads.
@@ -411,18 +428,29 @@ export default class InfoPanel extends Component {
     // Bundled cycles: contracted, deduped by canonical sequence. Same
     // source the renderer uses for red rings, so the info-panel list
     // and the canvas can't disagree.
-    const bundledCycles = findBundledCyclesViaRaw(g, remap, 1000, vs.hiddenEdgeTypes).filter((c) =>
-      c.includes(info.index),
+    const bundledCycles = findBundledCyclesWithGroups(g, remap, 1000, vs.hiddenEdgeTypes).filter(
+      (c) => c.bundled.includes(info.index),
     );
 
     const entries: CycleEntry[] = [];
 
     for (const bundled of bundledCycles) {
-      const bundledKey = canonicalCycleKey(bundled);
-      const nodes = bundled.map((idx) => ({
-        id: g.ids[idx]!,
-        label: g.labels[idx]!,
-      }));
+      const bundledKey = canonicalCycleKey(bundled.bundled);
+      const nodes: CycleNodeEntry[] = bundled.bundled.map((idx, i) => {
+        const group = bundled.groups[i]!;
+        // Only surface raw files that differ from the bundled rep —
+        // with no contraction (remap === null) every raw === bundled
+        // and `rawFiles` stays empty so the template renders the
+        // unchanged single-line layout.
+        const rawFiles: RawCycleFile[] = [];
+
+        for (const rawIdx of group) {
+          if (rawIdx === idx) continue;
+          rawFiles.push({ id: g.ids[rawIdx]!, label: g.labels[rawIdx]! });
+        }
+
+        return { id: g.ids[idx]!, label: g.labels[idx]!, rawFiles };
+      });
 
       entries.push({
         nodes,
@@ -797,6 +825,14 @@ export default class InfoPanel extends Component {
                                     {{#if (notEq entry.node.id entry.node.label)}}
                                       <code class="panel__neighbor-id">{{entry.node.id}}</code>
                                     {{/if}}
+                                    {{#if entry.node.rawFiles.length}}
+                                      <span class="panel__neighbor-raw">
+                                        {{#each entry.node.rawFiles key="id" as |file index|}}
+                                          {{#if index}}→{{else}}↳{{/if}}
+                                          {{file.label}}
+                                        {{/each}}
+                                      </span>
+                                    {{/if}}
                                   </button>
                                 </li>
                               {{/each}}
@@ -841,6 +877,14 @@ export default class InfoPanel extends Component {
                                             <code
                                               class="panel__neighbor-id"
                                             >{{entry.node.id}}</code>
+                                          {{/if}}
+                                          {{#if entry.node.rawFiles.length}}
+                                            <span class="panel__neighbor-raw">
+                                              {{#each entry.node.rawFiles key="id" as |file index|}}
+                                                {{#if index}}→{{else}}↳{{/if}}
+                                                {{file.label}}
+                                              {{/each}}
+                                            </span>
                                           {{/if}}
                                         </button>
                                       </li>
@@ -897,6 +941,14 @@ export default class InfoPanel extends Component {
                                   {{#if (notEq entry.node.id entry.node.label)}}
                                     <code class="panel__neighbor-id">{{entry.node.id}}</code>
                                   {{/if}}
+                                  {{#if entry.node.rawFiles.length}}
+                                    <span class="panel__neighbor-raw">
+                                      {{#each entry.node.rawFiles key="id" as |file index|}}
+                                        {{#if index}}→{{else}}↳{{/if}}
+                                        {{file.label}}
+                                      {{/each}}
+                                    </span>
+                                  {{/if}}
                                 </button>
                               </li>
                             {{/each}}
@@ -939,6 +991,14 @@ export default class InfoPanel extends Component {
                                         >{{entry.node.label}}</span>
                                         {{#if (notEq entry.node.id entry.node.label)}}
                                           <code class="panel__neighbor-id">{{entry.node.id}}</code>
+                                        {{/if}}
+                                        {{#if entry.node.rawFiles.length}}
+                                          <span class="panel__neighbor-raw">
+                                            {{#each entry.node.rawFiles key="id" as |file index|}}
+                                              {{#if index}}→{{else}}↳{{/if}}
+                                              {{file.label}}
+                                            {{/each}}
+                                          </span>
                                         {{/if}}
                                       </button>
                                     </li>
@@ -1004,7 +1064,7 @@ function formatContainedLabel(segments: CycleSegment[]): string {
  * carry their 1-based position alongside the `NeighborEntry`.
  */
 function buildCycleSegments(
-  nodes: NeighborEntry[],
+  nodes: CycleNodeEntry[],
   cycleId: string,
   canonical: Map<string, string>,
 ): CycleSegment[] {

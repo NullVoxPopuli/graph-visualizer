@@ -9,7 +9,12 @@ import { VerticalCollection } from "@html-next/vertical-collection";
 
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import { canonicalCycleKey, findBundledCyclesViaRaw, hasAnyCycle, shortCycleId } from "#lib/cycle";
+import {
+  canonicalCycleKey,
+  findBundledCyclesWithGroups,
+  hasAnyCycle,
+  shortCycleId,
+} from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -23,9 +28,24 @@ import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
 
+interface RawCycleFile {
+  id: string;
+  label: string;
+}
+
 interface CycleNode {
   id: string;
   label: string;
+  /**
+   * When contraction is active and the raw node at this bundled step
+   * differs from the bundled rep (i.e., the file got folded into its
+   * owning package), `rawFiles` lists the underlying file(s) in
+   * traversal order. Empty when the raw and bundled nodes match.
+   * Multiple entries appear in two cases: consecutive same-rep raw
+   * nodes collapsed into one bundled step (rare), or the cycle's
+   * wrap-around closing raw node landed back on the head package.
+   */
+  rawFiles: RawCycleFile[];
 }
 
 /**
@@ -259,7 +279,12 @@ export default class CyclesPanel extends Component {
         }
       }
 
-      const rawBundled = findBundledCyclesViaRaw(g, remap, 1000, this.viewState.hiddenEdgeTypes);
+      const rawBundled = findBundledCyclesWithGroups(
+        g,
+        remap,
+        1000,
+        this.viewState.hiddenEdgeTypes,
+      );
       // Dedupe by canonical node sequence — parallel raw edges between two
       // packages (e.g. lots of `file → file` imports) all contract to the
       // same bundled cycle, and listing the same `pkgA → pkgB` 13 times is
@@ -268,17 +293,28 @@ export default class CyclesPanel extends Component {
       const bundled: { nodes: CycleNode[]; key: string }[] = [];
 
       for (const cycle of rawBundled) {
-        if (scopeIdx >= 0 && !cycle.includes(scopeIdx)) continue;
+        if (scopeIdx >= 0 && !cycle.bundled.includes(scopeIdx)) continue;
 
-        const ck = canonicalCycleKey(cycle);
+        const ck = canonicalCycleKey(cycle.bundled);
 
         if (seen.has(ck)) continue;
         seen.add(ck);
 
-        const nodes: CycleNode[] = cycle.map((idx) => ({
-          id: g.ids[idx]!,
-          label: g.labels[idx]!,
-        }));
+        const nodes: CycleNode[] = cycle.bundled.map((idx, i) => {
+          const group = cycle.groups[i]!;
+          // Show the underlying raw file(s) only when the bundled rep
+          // differs from the raw node — i.e., contraction actually
+          // folded a file into its owner. Same raw == same node, no
+          // extra info needed. `groups[i]` is always non-empty.
+          const rawFiles: RawCycleFile[] = [];
+
+          for (const rawIdx of group) {
+            if (rawIdx === idx) continue;
+            rawFiles.push({ id: g.ids[rawIdx]!, label: g.labels[rawIdx]! });
+          }
+
+          return { id: g.ids[idx]!, label: g.labels[idx]!, rawFiles };
+        });
 
         bundled.push({ nodes, key: ck });
       }
@@ -480,6 +516,18 @@ export default class CyclesPanel extends Component {
                             {{#if (notEq node.id node.label)}}
                               <code class="cycles-panel__node-id">{{node.id}}</code>
                             {{/if}}
+                            {{#if node.rawFiles.length}}
+                              <span class="cycles-panel__node-raw">
+                                {{#each node.rawFiles key="id" as |file index|}}
+                                  {{#if index}}
+                                    →
+                                  {{else}}
+                                    ↳
+                                  {{/if}}
+                                  {{file.label}}
+                                {{/each}}
+                              </span>
+                            {{/if}}
                           </button>
                         </li>
                       {{/each}}
@@ -514,6 +562,18 @@ export default class CyclesPanel extends Component {
                                   <span class="cycles-panel__node-label">{{node.label}}</span>
                                   {{#if (notEq node.id node.label)}}
                                     <code class="cycles-panel__node-id">{{node.id}}</code>
+                                  {{/if}}
+                                  {{#if node.rawFiles.length}}
+                                    <span class="cycles-panel__node-raw">
+                                      {{#each node.rawFiles key="id" as |file index|}}
+                                        {{#if index}}
+                                          →
+                                        {{else}}
+                                          ↳
+                                        {{/if}}
+                                        {{file.label}}
+                                      {{/each}}
+                                    </span>
                                   {{/if}}
                                 </button>
                               </li>
