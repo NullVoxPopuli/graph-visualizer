@@ -1070,6 +1070,26 @@ pre code {
   transform: rotate(90deg);
 }
 
+/* Action chip inside a summary (e.g. "Collapse all" / "Expand all"
+ * inside the cycles section). Auto-margin pushes it to the right edge
+ * regardless of where the summary's gap-based flex puts the label
+ * span; the click handler stop-propagates so the parent <details>
+ * doesn't toggle while we mutate the per-cycle state. */
+.panel__subhead-action {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.panel__subhead-action:hover {
+  text-decoration: underline;
+}
+
 .panel__section[open] {
   /* Reduce the gap between summary and the list when open so the rows
      read as nested under the heading. */

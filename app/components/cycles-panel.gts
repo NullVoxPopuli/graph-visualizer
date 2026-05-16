@@ -58,6 +58,14 @@ interface CycleEntry {
   /** 1-based, shortest-first. Stable across renders for a given graph. */
   id: number;
   segments: CycleSegment[];
+  /**
+   * Comma-joined list of referenced cycle ids (`"cycle#1, cycle#3"`)
+   * computed from this cycle's ref segments — empty string when the
+   * cycle is wholly its own nodes. Pre-formatted as a string so the
+   * template can render it with a single mustache without a join
+   * helper or comma-between dance.
+   */
+  containedLabel: string;
   /** stable key for `{{#each}}` — concatenated ids, deterministic per cycle. */
   key: string;
 }
@@ -98,6 +106,24 @@ function buildCycleSegments(
   }
 
   return out;
+}
+
+/**
+ * Count the distinct ref-cycle ids in a cycle's segments and format
+ * as `"1 cycle"` / `"5 cycles"` for inline display in the header.
+ * Returns `""` when the cycle has no ref segments — its body is all
+ * own nodes, so there's nothing to advertise.
+ */
+function formatContainedLabel(segments: CycleSegment[]): string {
+  const seen = new Set<number>();
+
+  for (const seg of segments) {
+    if (seg.cycleId !== undefined) seen.add(seg.cycleId);
+  }
+
+  if (seen.size === 0) return "";
+
+  return `${seen.size} cycle${seen.size === 1 ? "" : "s"}`;
 }
 
 /**
@@ -272,11 +298,13 @@ export default class CyclesPanel extends Component {
 
     return this.#lastBundled.map(({ nodes, key: ck }, idx) => {
       const id = idx + 1;
+      const segments = buildCycleSegments(nodes, id, canonical);
 
       return {
         nodes,
         id,
-        segments: buildCycleSegments(nodes, id, canonical),
+        segments,
+        containedLabel: formatContainedLabel(segments),
         key: ck,
       };
     });
@@ -403,7 +431,7 @@ export default class CyclesPanel extends Component {
             @key="key"
             @estimateHeight={{120}}
             @bufferSize={{2}}
-            as |cycle i|
+            as |cycle|
           >
             <li class="cycles-panel__entry">
               <button
@@ -414,10 +442,11 @@ export default class CyclesPanel extends Component {
                 title="Toggle cycle details"
                 aria-expanded={{unless (has this.collapsedHeaders cycle.key) "true" "false"}}
               >
-                <span class="cycles-panel__entry-index">cycle#{{add i 1}}</span>
-                {{#unless (has this.collapsedHeaders cycle.key)}}
-                  <span class="cycles-panel__entry-summary">{{cycle.nodes.length}} nodes</span>
-                {{/unless}}
+                <span class="cycles-panel__entry-summary">{{cycle.nodes.length}} nodes</span>
+                {{#if cycle.containedLabel}}
+                  <span class="cycles-panel__entry-contains">contains
+                    {{cycle.containedLabel}}</span>
+                {{/if}}
               </button>
               {{#unless (has this.collapsedHeaders cycle.key)}}
                 <ol class="cycles-panel__nodes">
@@ -507,10 +536,6 @@ function serializeStringSet(set: Set<string>): string {
   if (set.size === 0) return "";
 
   return [...set].sort().join(",");
-}
-
-function add(a: number, b: number): number {
-  return a + b;
 }
 
 function eq(a: unknown, b: unknown): boolean {

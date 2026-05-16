@@ -165,6 +165,10 @@ function applyGeometryToElement(el: HTMLElement, g: PanelGeometry | null): void 
     el.style.bottom = "";
     el.style.width = "";
     el.style.height = "";
+    // Reset the inline cap overrides that drag/resize may have set
+    // so the CSS-default `max-*` rules take over again.
+    el.style.maxWidth = "";
+    el.style.maxHeight = "";
 
     return;
   }
@@ -176,8 +180,19 @@ function applyGeometryToElement(el: HTMLElement, g: PanelGeometry | null): void 
     el.style.bottom = "auto";
   }
 
-  if (g.width !== null) el.style.width = `${g.width}px`;
-  if (g.height !== null) el.style.height = `${g.height}px`;
+  // Inline `max-*: none` mirrors what the resize handles do during
+  // an active drag: a saved size larger than the CSS `max-height` /
+  // `max-width` would otherwise be clamped back down on remount,
+  // silently undoing the user's last sizing choice.
+  if (g.width !== null) {
+    el.style.width = `${g.width}px`;
+    el.style.maxWidth = "none";
+  }
+
+  if (g.height !== null) {
+    el.style.height = `${g.height}px`;
+    el.style.maxHeight = "none";
+  }
 }
 
 /**
@@ -314,6 +329,13 @@ export function createResizeModifier(opts: ResizeOptions) {
 
       panel.style.width = `${newWidth}px`;
       panel.style.height = `${newHeight}px`;
+      // The panel's CSS `max-height` / `max-width` (e.g.
+      // `min(96vh, max(50dvh, 500px))` on the info-panel) would
+      // otherwise clamp the resize once the user drags past it.
+      // Inline `none` here releases the cap so the resize handle
+      // actually tracks the pointer past the CSS limit.
+      panel.style.maxWidth = "none";
+      panel.style.maxHeight = "none";
 
       if (hasW) panel.style.left = `${newLeft}px`;
       if (hasN) panel.style.top = `${newTop}px`;

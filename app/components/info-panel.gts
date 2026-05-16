@@ -5,14 +5,9 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
-import { type Collapsed, collapseList, toggleInSet } from "#lib/collapse-list";
+import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import {
-  bundleRawCycles,
-  canonicalCycleKey,
-  contractCycle as sharedContractCycle,
-  findAllCycles,
-} from "#lib/cycle";
+import { canonicalCycleKey, findBundledCyclesViaRaw } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -28,11 +23,6 @@ import type VisualizerService from "#services/visualizer";
 interface NeighborEntry {
   id: string;
   label: string;
-}
-
-interface OccurrenceEntry extends NeighborEntry {
-  /** How many of this bundled cycle's underlying raw cycles include this node. */
-  count: number;
 }
 
 interface DisplayedCycleNode {
@@ -63,17 +53,12 @@ interface CycleEntry {
   id: number;
   segments: CycleSegment[];
   /**
-   * Same `head / hiddenCount / tail` collapse applied to the per-node
-   * occurrence counts. Empty `head` (and zero `hiddenCount`) when no
-   * contraction is active.
+   * `"1 cycle"` / `"5 cycles"` computed from this cycle's ref
+   * segments — empty string when the cycle is wholly its own nodes.
+   * Pre-formatted so the template can render the heading with a
+   * single mustache.
    */
-  occList: Collapsed<OccurrenceEntry>;
-  /**
-   * Full raw occurrence list — kept so the template can show the
-   * occurrence count in the section header even when the list is
-   * collapsed.
-   */
-  occurrencesLength: number;
+  containedLabel: string;
   /** stable key for `{{#each}}` — deterministic per bundled cycle. */
   key: string;
 }
@@ -108,14 +93,6 @@ export default class InfoPanel extends Component {
    */
   @tracked private expandedRefs: Set<string> = new Set();
 
-  /**
-   * Same `head / hiddenCount / tail` collapse-expand state for the
-   * occurrences table inside each cycle. Independent of the cycle's
-   * own node list, which now uses segment refs instead of a hidden
-   * marker.
-   */
-  @tracked private expandedOccLists: Set<string> = new Set();
-
   @action
   toggleCycleHeader(key: string): void {
     this.collapsedHeaders = toggleInSet(this.collapsedHeaders, key);
@@ -126,9 +103,45 @@ export default class InfoPanel extends Component {
     this.expandedRefs = toggleInSet(this.expandedRefs, segKey);
   }
 
+  /**
+   * True when every visible cycle's header has been collapsed (or the
+   * list is empty — handled separately at the call site). Drives the
+   * "Collapse all" ↔ "Expand all" label on the section header's
+   * toggle button.
+   */
+  get allCyclesCollapsed(): boolean {
+    const cycles = this.cycles;
+
+    if (cycles.length === 0) return false;
+
+    for (const cycle of cycles) {
+      if (!this.collapsedHeaders.has(cycle.key)) return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Bulk collapse / expand all cycles in this info-panel session.
+   * Lives inside the section `<summary>` so it intercepts the click
+   * (preventDefault + stopPropagation) — without that, the parent
+   * `<details>` would toggle the *section* open/closed as well.
+   */
   @action
-  toggleCycleOccList(key: string): void {
-    this.expandedOccLists = toggleInSet(this.expandedOccLists, key);
+  toggleAllCycles(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (this.allCyclesCollapsed) {
+      this.collapsedHeaders = new Set();
+
+      return;
+    }
+
+    const next = new Set<string>();
+
+    for (const cycle of this.cycles) next.add(cycle.key);
+    this.collapsedHeaders = next;
   }
 
   /**
@@ -246,89 +259,28 @@ export default class InfoPanel extends Component {
     // (its loops are absorbed into the owner). Bail.
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    // Raw cycles power both the bundled list (after contraction +
-    // dedupe) and the per-node occurrence counts, so we enumerate them
-    // once and reuse — `findAllCycles` is the exponential step and
-    // running it twice on a large graph is what previously made
-    // selecting a node feel slow.
-    const rawCycles = findAllCycles(g, null);
     // Bundled cycles: contracted, deduped by canonical sequence. Same
     // source the renderer uses for red rings, so the info-panel list
     // and the canvas can't disagree.
-    const bundledCycles = bundleRawCycles(rawCycles, remap).filter((c) => c.includes(info.index));
-
-    // Pre-index raw cycles by their bundled canonical key so each
-    // bundled cycle can grab its matching raw cycles in one lookup.
-    const rawsByBundle = new Map<string, number[][]>();
-
-    for (const r of rawCycles) {
-      const bundled = sharedContractCycle(r, remap);
-
-      if (bundled === null) continue;
-
-      const key = canonicalCycleKey(bundled);
-      let arr = rawsByBundle.get(key);
-
-      if (!arr) {
-        arr = [];
-        rawsByBundle.set(key, arr);
-      }
-
-      arr.push(r);
-    }
+    const bundledCycles = findBundledCyclesViaRaw(g, remap).filter((c) => c.includes(info.index));
 
     const entries: CycleEntry[] = [];
 
     for (const bundled of bundledCycles) {
       const bundledKey = canonicalCycleKey(bundled);
-      const raws = rawsByBundle.get(bundledKey) ?? [];
       const nodes = bundled.map((idx) => ({
         id: g.ids[idx]!,
         label: g.labels[idx]!,
       }));
-      // Aggregate raw node participation across every raw cycle that
-      // contracts to this bundled one. Skip when nothing is hidden —
-      // the bundled list already shows the same nodes.
-      const occurrences: OccurrenceEntry[] = [];
-
-      if (remap !== null) {
-        const counts = new Map<number, number>();
-
-        for (const rc of raws) {
-          // Each node in a raw cycle is counted at most once per raw
-          // cycle — we want "this raw node appears in N of the
-          // underlying loops," not "this raw node is visited N times
-          // across all loops."
-          const seenInThisCycle = new Set<number>();
-
-          for (const idx of rc) {
-            if (seenInThisCycle.has(idx)) continue;
-            seenInThisCycle.add(idx);
-            counts.set(idx, (counts.get(idx) ?? 0) + 1);
-          }
-        }
-
-        for (const [idx, count] of counts) {
-          occurrences.push({
-            id: g.ids[idx]!,
-            label: g.labels[idx]!,
-            count,
-          });
-        }
-
-        // High-count first; ties broken alphabetically so the list is
-        // stable across renders.
-        occurrences.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-      }
 
       entries.push({
         nodes,
-        // `id` and `segments` are filled in after sorting — the
-        // canonical-cycle map needs the final shortest-first order.
+        // `id`, `segments`, and `containedLabel` are filled in after
+        // sorting — the canonical-cycle map needs the final shortest-
+        // first order.
         id: 0,
         segments: [],
-        occList: collapseList(occurrences, this.expandedOccLists.has(bundledKey)),
-        occurrencesLength: occurrences.length,
+        containedLabel: "",
         key: bundledKey,
       });
     }
@@ -355,6 +307,7 @@ export default class InfoPanel extends Component {
 
       entry.id = i + 1;
       entry.segments = buildCycleSegments(entry.nodes, entry.id, canonical);
+      entry.containedLabel = formatContainedLabel(entry.segments);
     }
 
     return entries;
@@ -626,7 +579,17 @@ export default class InfoPanel extends Component {
           </details>
 
           <details class="panel__section" open={{this.cyclesOpen}}>
-            <summary class="panel__subhead" {{on "click" this.toggleCycles}}>cycles ({{this.cycles.length}})</summary>
+            <summary class="panel__subhead" {{on "click" this.toggleCycles}}>
+              <span>cycles ({{this.cycles.length}})</span>
+              {{#if this.cycles.length}}
+                <button
+                  type="button"
+                  class="panel__subhead-action"
+                  {{on "click" this.toggleAllCycles}}
+                  title="Collapse or expand every cycle's body in one go"
+                >{{if this.allCyclesCollapsed "Expand all" "Collapse all"}}</button>
+              {{/if}}
+            </summary>
             {{#if this.cycles.length}}
               <ol class="panel__cycles">
                 {{#each this.cycles key="key" as |cycle|}}
@@ -641,10 +604,10 @@ export default class InfoPanel extends Component {
                         "true"
                         "false"
                       }}
-                    >cycle#{{cycle.id}}{{#unless (isExpanded this.collapsedHeaders cycle.key)}}
-                        ·
-                        {{cycle.nodes.length}}
-                        nodes{{/unless}}</button>
+                    >{{cycle.nodes.length}}
+                      nodes{{#if cycle.containedLabel}}
+                        · contains
+                        {{cycle.containedLabel}}{{/if}}</button>
                     {{#unless (isExpanded this.collapsedHeaders cycle.key)}}
                       <ol class="panel__neighbors panel__neighbors--ordered">
                         {{#each cycle.segments key="key" as |seg|}}
@@ -714,82 +677,6 @@ export default class InfoPanel extends Component {
                           {{/if}}
                         {{/each}}
                       </ol>
-                      {{#if cycle.occurrencesLength}}
-                        <div class="panel__cycle-raws">
-                          <div class="panel__cycle-raws-head">occurrences in a cycle</div>
-                          <table class="panel__occurrence-table">
-                            <thead>
-                              <tr>
-                                <th scope="col">node</th>
-                                <th scope="col" class="panel__occurrence-count-col">in</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {{#each cycle.occList.head key="id" as |entry|}}
-                                <tr>
-                                  <td>
-                                    <button
-                                      type="button"
-                                      class="panel__occurrence-link"
-                                      title={{entry.id}}
-                                      {{on "click" (fn this.selectNeighbor entry.id)}}
-                                      {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                                      {{on "mouseleave" this.unhoverNeighbor}}
-                                    >{{entry.label}}</button>
-                                  </td>
-                                  <td class="panel__occurrence-count-col">{{entry.count}}</td>
-                                </tr>
-                              {{/each}}
-                              {{#if cycle.occList.hiddenCount}}
-                                <tr>
-                                  <td colspan="2">
-                                    <button
-                                      type="button"
-                                      class="cycle-hidden"
-                                      title="Show all {{cycle.occurrencesLength}} occurrences"
-                                      {{on "click" (fn this.toggleCycleOccList cycle.key)}}
-                                    >…
-                                      {{cycle.occList.hiddenCount}}
-                                      hidden — click to expand</button>
-                                  </td>
-                                </tr>
-                              {{/if}}
-                              {{#each cycle.occList.tail key="id" as |entry|}}
-                                <tr>
-                                  <td>
-                                    <button
-                                      type="button"
-                                      class="panel__occurrence-link"
-                                      title={{entry.id}}
-                                      {{on "click" (fn this.selectNeighbor entry.id)}}
-                                      {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                                      {{on "mouseleave" this.unhoverNeighbor}}
-                                    >{{entry.label}}</button>
-                                  </td>
-                                  <td class="panel__occurrence-count-col">{{entry.count}}</td>
-                                </tr>
-                              {{/each}}
-                              {{#if
-                                (and
-                                  (isExpanded this.expandedOccLists cycle.key)
-                                  (gt cycle.occurrencesLength 5)
-                                )
-                              }}
-                                <tr>
-                                  <td colspan="2">
-                                    <button
-                                      type="button"
-                                      class="cycle-hidden"
-                                      title="Collapse the occurrence list"
-                                      {{on "click" (fn this.toggleCycleOccList cycle.key)}}
-                                    >show less</button>
-                                  </td>
-                                </tr>
-                              {{/if}}
-                            </tbody>
-                          </table>
-                        </div>
-                      {{/if}}
                     {{/unless}}
                   </li>
                 {{/each}}
@@ -819,6 +706,23 @@ export default class InfoPanel extends Component {
       </aside>
     {{/if}}
   </template>
+}
+
+/**
+ * Count the distinct ref-cycle ids in a cycle's segments and format
+ * as `"1 cycle"` / `"5 cycles"`. Returns `""` when the cycle has no
+ * ref segments. Matches `formatContainedLabel` in `cycles-panel.gts`.
+ */
+function formatContainedLabel(segments: CycleSegment[]): string {
+  const seen = new Set<number>();
+
+  for (const seg of segments) {
+    if (seg.cycleId !== undefined) seen.add(seg.cycleId);
+  }
+
+  if (seen.size === 0) return "";
+
+  return `${seen.size} cycle${seen.size === 1 ? "" : "s"}`;
 }
 
 /**
@@ -856,14 +760,6 @@ function buildCycleSegments(
 
 function notEq(a: unknown, b: unknown): boolean {
   return a !== b;
-}
-
-function and(a: unknown, b: unknown): unknown {
-  return a && b;
-}
-
-function gt(a: number, b: number): boolean {
-  return a > b;
 }
 
 function isExpanded(set: Set<string>, key: string): boolean {
