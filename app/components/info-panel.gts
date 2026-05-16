@@ -7,7 +7,7 @@ import { service } from "@ember/service";
 
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import { canonicalCycleKey, findBundledCyclesViaRaw } from "#lib/cycle";
+import { canonicalCycleKey, findBundledCyclesViaRaw, shortCycleId } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -43,14 +43,22 @@ interface DisplayedCycleNode {
 interface CycleSegment {
   key: string;
   nodes: DisplayedCycleNode[];
-  cycleId?: number;
+  /**
+   * Short cycle id of the smaller cycle this segment's nodes belong
+   * to. `undefined` on `own` segments. Glint narrows on
+   * `{{#if seg.cycleId}}` in the template.
+   */
+  cycleId?: string;
 }
 
 interface CycleEntry {
   /** Bundled cycle — the visible reps the canvas red-rings. */
   nodes: NeighborEntry[];
-  /** 1-based, shortest-first index. Stable for a given selection. */
-  id: number;
+  /**
+   * Short deterministic id derived from the canonical cycle key
+   * (`shortCycleId`). 8 lower-case hex chars, stable across reloads.
+   */
+  id: string;
   segments: CycleSegment[];
   /**
    * `"1 cycle"` / `"5 cycles"` computed from this cycle's ref
@@ -277,8 +285,8 @@ export default class InfoPanel extends Component {
         nodes,
         // `id`, `segments`, and `containedLabel` are filled in after
         // sorting — the canonical-cycle map needs the final shortest-
-        // first order.
-        id: 0,
+        // first order and the short ids derive from the canonical key.
+        id: "",
         segments: [],
         containedLabel: "",
         key: bundledKey,
@@ -288,24 +296,26 @@ export default class InfoPanel extends Component {
     // Shortest bundled cycles first (matches the floating panel's order).
     entries.sort((a, b) => a.nodes.length - b.nodes.length);
 
-    // Each node's canonical cycle = the smallest cycle in this list
-    // that contains it. With entries sorted shortest-first, the first
-    // cycle a node appears in *is* that canonical, so a single pass
-    // here builds the map without checking sizes.
-    const canonical = new Map<string, number>();
+    // Assign each cycle its short, UUID-first-segment-style id
+    // (deterministic from the canonical key). `usedIds` is the
+    // collision-tracking Set that `shortCycleId` extends through if
+    // two cycles hash to the same 8 hex chars.
+    const usedIds = new Set<string>();
 
-    for (let i = 0; i < entries.length; i++) {
-      const cycleId = i + 1;
+    for (const entry of entries) entry.id = shortCycleId(entry.key, usedIds);
 
-      for (const node of entries[i]!.nodes) {
-        if (!canonical.has(node.id)) canonical.set(node.id, cycleId);
+    // Each node's canonical cycle id = the id of the smallest cycle
+    // in this list that contains it. Single pass since entries are
+    // already shortest-first.
+    const canonical = new Map<string, string>();
+
+    for (const entry of entries) {
+      for (const node of entry.nodes) {
+        if (!canonical.has(node.id)) canonical.set(node.id, entry.id);
       }
     }
 
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i]!;
-
-      entry.id = i + 1;
+    for (const entry of entries) {
       entry.segments = buildCycleSegments(entry.nodes, entry.id, canonical);
       entry.containedLabel = formatContainedLabel(entry.segments);
     }
@@ -604,10 +614,13 @@ export default class InfoPanel extends Component {
                         "true"
                         "false"
                       }}
-                    >{{cycle.nodes.length}}
-                      nodes{{#if cycle.containedLabel}}
-                        · contains
-                        {{cycle.containedLabel}}{{/if}}</button>
+                    >
+                      <span class="panel__cycle-head-text">{{cycle.nodes.length}}
+                        nodes{{#if cycle.containedLabel}}
+                          · contains
+                          {{cycle.containedLabel}}{{/if}}</span>
+                      <code class="cycle-id">{{cycle.id}}</code>
+                    </button>
                     {{#unless (isExpanded this.collapsedHeaders cycle.key)}}
                       <ol class="panel__neighbors panel__neighbors--ordered">
                         {{#each cycle.segments key="key" as |seg|}}
@@ -642,10 +655,12 @@ export default class InfoPanel extends Component {
                                   "true"
                                   "false"
                                 }}
-                                title="Toggle which nodes here belong to cycle#{{seg.cycleId}}"
+                                title="Toggle which nodes here belong to cycle {{seg.cycleId}}"
                               >
-                                … cycle#{{seg.cycleId}}
-                                ({{seg.nodes.length}}) — click to expand …
+                                <span class="cycle-ref__label">
+                                  … ({{seg.nodes.length}}) — click to expand …
+                                </span>
+                                <code class="cycle-id">{{seg.cycleId}}</code>
                               </button>
                               {{#if (isExpanded this.expandedRefs seg.key)}}
                                 <ol
@@ -714,7 +729,7 @@ export default class InfoPanel extends Component {
  * ref segments. Matches `formatContainedLabel` in `cycles-panel.gts`.
  */
 function formatContainedLabel(segments: CycleSegment[]): string {
-  const seen = new Set<number>();
+  const seen = new Set<string>();
 
   for (const seg of segments) {
     if (seg.cycleId !== undefined) seen.add(seg.cycleId);
@@ -733,8 +748,8 @@ function formatContainedLabel(segments: CycleSegment[]): string {
  */
 function buildCycleSegments(
   nodes: NeighborEntry[],
-  cycleId: number,
-  canonical: Map<string, number>,
+  cycleId: string,
+  canonical: Map<string, string>,
 ): CycleSegment[] {
   const out: CycleSegment[] = [];
   let current: CycleSegment | null = null;

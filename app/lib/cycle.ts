@@ -100,6 +100,45 @@ function buildCsr(graph: LoadedGraph, nodeRemap: Int32Array | null): CsrOut {
 }
 
 /**
+ * Short, UUID-first-segment-style identifier for a cycle. Derived
+ * deterministically from the cycle's canonical key via FNV-1a 32-bit
+ * hashing and rendered as 8 lower-case hex chars — same canonical key
+ * always maps to the same id, so a cycle's id is stable across
+ * reloads and shared URLs.
+ *
+ * If the generated id collides with one already in `used`, the key is
+ * re-hashed with an attempt-number suffix until a free slot is found.
+ * Birthday math on 8 hex chars vs. ~1000 cycles makes the conflict
+ * branch almost never run in practice; it's there so we can promise
+ * "unique within the current cycle list."
+ */
+export function shortCycleId(canonicalKey: string, used: Set<string>): string {
+  let id = fnv1aHex(canonicalKey);
+  let attempt = 0;
+
+  while (used.has(id)) {
+    attempt++;
+    id = fnv1aHex(`${canonicalKey}:${attempt}`);
+    if (attempt > 100) break;
+  }
+
+  used.add(id);
+
+  return id;
+}
+
+function fnv1aHex(input: string): string {
+  let h = 0x811c9dc5;
+
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
  * Cheap "does the graph contain any directed cycle?" answer. A 3-color
  * iterative DFS that returns as soon as it sees a back edge — so a
  * mostly-DAG resolves in roughly O(depth-to-first-cycle) rather than

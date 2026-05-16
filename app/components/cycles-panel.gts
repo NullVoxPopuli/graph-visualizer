@@ -9,7 +9,7 @@ import { VerticalCollection } from "@html-next/vertical-collection";
 
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import { canonicalCycleKey, findBundledCyclesViaRaw, hasAnyCycle } from "#lib/cycle";
+import { canonicalCycleKey, findBundledCyclesViaRaw, hasAnyCycle, shortCycleId } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -44,19 +44,23 @@ export interface CycleSegment {
   key: string;
   nodes: CycleNode[];
   /**
-   * Set on segments whose nodes belong to a smaller cycle — the
-   * template renders these as a `cycle#N` chip. `undefined` on
-   * "own" segments (the cycle's unique nodes). A presence check
-   * narrows the type for Glint inside the `{{#if seg.cycleId}}`
-   * branch, which is why we don't use a discriminated `kind` union.
+   * Short cycle id of the *smaller* cycle this segment's nodes belong
+   * to — the template renders it as a chip on the right of the
+   * "click to expand" row. `undefined` on "own" segments (the cycle's
+   * unique nodes). A presence check narrows the type for Glint inside
+   * the `{{#if seg.cycleId}}` branch.
    */
-  cycleId?: number;
+  cycleId?: string;
 }
 
 interface CycleEntry {
   nodes: CycleNode[];
-  /** 1-based, shortest-first. Stable across renders for a given graph. */
-  id: number;
+  /**
+   * Short, deterministic id derived from the canonical cycle key
+   * (see `shortCycleId`). Looks like a UUID's first segment — 8
+   * lower-case hex chars, e.g. `a3f2b1c8`. Stable across reloads.
+   */
+  id: string;
   segments: CycleSegment[];
   /**
    * Comma-joined list of referenced cycle ids (`"cycle#1, cycle#3"`)
@@ -84,8 +88,8 @@ interface CycleEntry {
  */
 function buildCycleSegments(
   nodes: CycleNode[],
-  cycleId: number,
-  canonical: Map<string, number>,
+  cycleId: string,
+  canonical: Map<string, string>,
 ): CycleSegment[] {
   const out: CycleSegment[] = [];
   let current: CycleSegment | null = null;
@@ -115,7 +119,7 @@ function buildCycleSegments(
  * own nodes, so there's nothing to advertise.
  */
 function formatContainedLabel(segments: CycleSegment[]): string {
-  const seen = new Set<number>();
+  const seen = new Set<string>();
 
   for (const seg of segments) {
     if (seg.cycleId !== undefined) seen.add(seg.cycleId);
@@ -279,25 +283,26 @@ export default class CyclesPanel extends Component {
       this.#lastBundled = bundled;
     }
 
-    // Compute each node's canonical cycle id — the smallest cycle in
-    // the current bundled list that contains it. `bundled` is already
-    // sorted shortest-first, so the first cycle a node appears in is
-    // its canonical one. Cached implicitly via `#lastBundled`'s cache
-    // — recomputing this map on every render is cheap (linear in the
-    // total node-count across cycles) compared with the bundling we
-    // just avoided.
-    const canonical = new Map<string, number>();
+    // Pre-assign each cycle's short id (deterministic from its
+    // canonical key). Two passes are needed because the canonical
+    // cycle for each *node* is the short id of the smallest cycle
+    // that contains it, so we have to know every cycle's id before
+    // building the node → canonical map.
+    const usedIds = new Set<string>();
+    const cycleIds = this.#lastBundled.map(({ key: ck }) => shortCycleId(ck, usedIds));
+
+    const canonical = new Map<string, string>();
 
     for (let i = 0; i < this.#lastBundled.length; i++) {
-      const cycleId = i + 1;
+      const id = cycleIds[i]!;
 
       for (const node of this.#lastBundled[i]!.nodes) {
-        if (!canonical.has(node.id)) canonical.set(node.id, cycleId);
+        if (!canonical.has(node.id)) canonical.set(node.id, id);
       }
     }
 
     return this.#lastBundled.map(({ nodes, key: ck }, idx) => {
-      const id = idx + 1;
+      const id = cycleIds[idx]!;
       const segments = buildCycleSegments(nodes, id, canonical);
 
       return {
@@ -447,6 +452,7 @@ export default class CyclesPanel extends Component {
                   <span class="cycles-panel__entry-contains">contains
                     {{cycle.containedLabel}}</span>
                 {{/if}}
+                <code class="cycle-id">{{cycle.id}}</code>
               </button>
               {{#unless (has this.collapsedHeaders cycle.key)}}
                 <ol class="cycles-panel__nodes">
@@ -478,10 +484,12 @@ export default class CyclesPanel extends Component {
                           class="cycle-ref"
                           {{on "click" (fn this.toggleCycleRef seg.key)}}
                           aria-expanded={{if (has this.expandedRefs seg.key) "true" "false"}}
-                          title="Toggle which nodes here belong to cycle#{{seg.cycleId}}"
+                          title="Toggle which nodes here belong to cycle {{seg.cycleId}}"
                         >
-                          … cycle#{{seg.cycleId}}
-                          ({{seg.nodes.length}}) — click to expand …
+                          <span class="cycle-ref__label">
+                            … ({{seg.nodes.length}}) — click to expand …
+                          </span>
+                          <code class="cycle-id">{{seg.cycleId}}</code>
                         </button>
                         {{#if (has this.expandedRefs seg.key)}}
                           <ol class="cycles-panel__nodes cycles-panel__nodes--nested">

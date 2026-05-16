@@ -1138,7 +1138,12 @@ pre code {
 }
 
 .panel__cycle-head {
-  display: block;
+  /* Flex row so the `cycle-id` chip can sit pinned to the right via
+     `margin-left: auto`. The text span takes the natural flow at
+     the start of the row. */
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -1152,6 +1157,11 @@ pre code {
   font-variant-numeric: tabular-nums;
   padding: 4px 6px;
   margin-bottom: 4px;
+}
+
+.panel__cycle-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .panel__cycle-head:hover {
@@ -1300,7 +1310,9 @@ pre code {
  * truncated head/hidden/tail rendering) — refs are about *grouping*
  * shared nodes, not eliding them. */
 .cycle-ref {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   background: transparent;
   border: 1px dashed var(--line);
@@ -1313,6 +1325,29 @@ pre code {
   font-style: italic;
   text-align: left;
   cursor: pointer;
+}
+
+.cycle-ref__label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Short cycle id chip — small monospace label rendered on the
+ * right-hand side of every cycle heading and every `cycle-ref`. The
+ * `margin-left: auto` pushes it to the trailing edge of whichever
+ * flex container (cycle entry header / cycle-ref / panel cycle head)
+ * it lands in, so the rule works uniformly across all three. */
+.cycle-id {
+  margin-left: auto;
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+  background: var(--code-bg);
+  border-radius: 3px;
 }
 
 .cycle-ref:hover {
