@@ -41,13 +41,16 @@ export default class OrphansPanel extends Component {
   @service declare visualizer: VisualizerService;
 
   /**
-   * Memoize the orphans list by `graph.current` identity. Orphan
-   * analysis is O(N + E) so a re-run on every render isn't actually
-   * dangerous, but skipping it when nothing has changed keeps the
-   * panel's render path predictable when the user clicks around. The
-   * resulting array is sorted by label for stable display.
+   * Memoize the orphans list by `graph.current` identity *and* the
+   * serialized hidden-edge-type set. Orphan analysis is O(N + E) so
+   * re-running on every render isn't catastrophic, but skipping it
+   * when nothing changed keeps the panel's render path predictable as
+   * the user clicks around. Hidden-edge-types feeds directly into
+   * `findOrphans` (visible edges only), so any change to the set must
+   * invalidate the cache.
    */
   #lastGraph: LoadedGraph | null = null;
+  #lastHiddenEdgeTypesKey = "";
   #lastOrphans: OrphanEntry[] = [];
 
   get orphans(): OrphanEntry[] {
@@ -60,12 +63,15 @@ export default class OrphansPanel extends Component {
 
     if (!g) return [];
 
-    if (g !== this.#lastGraph) {
+    const hiddenEdgeTypes = this.viewState.hiddenEdgeTypes;
+    const hiddenEdgeTypesKey = serializeIntSet(hiddenEdgeTypes);
+
+    if (g !== this.#lastGraph || hiddenEdgeTypesKey !== this.#lastHiddenEdgeTypesKey) {
       // Cache miss: re-run the analysis. Same write-inside-the-branch
       // shape as the cycles panel's getter so the eslint
       // `ember/no-side-effects` rule reads this as a memoized
       // computation rather than an unconditional mutation.
-      const entries: OrphanEntry[] = findOrphans(g).map((idx) => ({
+      const entries: OrphanEntry[] = findOrphans(g, hiddenEdgeTypes).map((idx) => ({
         index: idx,
         id: g.ids[idx]!,
         label: g.labels[idx]!,
@@ -78,6 +84,8 @@ export default class OrphansPanel extends Component {
       // is the whole point.
       // eslint-disable-next-line ember/no-side-effects
       this.#lastGraph = g;
+      // eslint-disable-next-line ember/no-side-effects
+      this.#lastHiddenEdgeTypesKey = hiddenEdgeTypesKey;
       // eslint-disable-next-line ember/no-side-effects
       this.#lastOrphans = entries;
     }
@@ -231,4 +239,10 @@ function eq(a: unknown, b: unknown): boolean {
 
 function notEq(a: unknown, b: unknown): boolean {
   return a !== b;
+}
+
+function serializeIntSet(set: Set<number>): string {
+  if (set.size === 0) return "";
+
+  return [...set].sort((a, b) => a - b).join(",");
 }

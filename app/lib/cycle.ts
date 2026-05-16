@@ -58,8 +58,12 @@ interface CsrOut {
   outAdj: Int32Array;
 }
 
-function buildCsr(graph: LoadedGraph, nodeRemap: Int32Array | null): CsrOut {
-  const { edgesFlat } = graph;
+function buildCsr(
+  graph: LoadedGraph,
+  nodeRemap: Int32Array | null,
+  hiddenEdgeTypes: ReadonlySet<number> | null,
+): CsrOut {
+  const { edgesFlat, edgeTypeIds } = graph;
   const N = graph.ids.length;
   const E = edgesFlat.length / 2;
   const outIdx = new Int32Array(N + 1);
@@ -68,6 +72,11 @@ function buildCsr(graph: LoadedGraph, nodeRemap: Int32Array | null): CsrOut {
   let M = 0;
 
   for (let i = 0; i < E; i++) {
+    // Edge-type filter: skip anything the user has hidden so cycle
+    // analysis matches the rendered graph. `hiddenEdgeTypes` is
+    // `null` when the caller has no filter active (fast path).
+    if (hiddenEdgeTypes !== null && hiddenEdgeTypes.has(edgeTypeIds[i]!)) continue;
+
     let a = edgesFlat[2 * i]!;
     let b = edgesFlat[2 * i + 1]!;
 
@@ -149,26 +158,36 @@ function fnv1aHex(input: string): string {
  * function skips length-1 cycles, so a UI showing "There are no
  * cycles" alongside the full enumeration agrees with itself.
  */
-export function hasAnyCycle(graph: LoadedGraph): boolean {
+export function hasAnyCycle(graph: LoadedGraph, hiddenEdgeTypes?: ReadonlySet<number>): boolean {
   const N = graph.ids.length;
 
   if (N === 0) return false;
+
+  const filterTypes = hiddenEdgeTypes && hiddenEdgeTypes.size > 0 ? hiddenEdgeTypes : null;
 
   // Inline CSR build (mirrors `buildCsr` but skips the remap branch
   // we don't need here — this function only ever runs on the raw
   // graph). Kept here so the fast-path can't be slowed down by
   // refactoring the more-general helper.
-  const { edgesFlat } = graph;
+  const { edgesFlat, edgeTypeIds } = graph;
   const E = edgesFlat.length / 2;
   const outIdx = new Int32Array(N + 1);
+  let visibleCount = 0;
 
-  for (let i = 0; i < E; i++) outIdx[edgesFlat[2 * i]! + 1]!++;
+  for (let i = 0; i < E; i++) {
+    if (filterTypes !== null && filterTypes.has(edgeTypeIds[i]!)) continue;
+    outIdx[edgesFlat[2 * i]! + 1]!++;
+    visibleCount++;
+  }
+
   for (let i = 0; i < N; i++) outIdx[i + 1]! += outIdx[i]!;
 
-  const outAdj = new Int32Array(E);
+  const outAdj = new Int32Array(visibleCount);
   const filled = new Int32Array(N);
 
   for (let i = 0; i < E; i++) {
+    if (filterTypes !== null && filterTypes.has(edgeTypeIds[i]!)) continue;
+
     const a = edgesFlat[2 * i]!;
     const b = edgesFlat[2 * i + 1]!;
 
@@ -254,7 +273,7 @@ export function findShortestCycleThrough(
   if (N === 0 || source < 0 || source >= N) return null;
   if (nodeRemap !== null && nodeRemap[source]! !== source) return null;
 
-  const { outIdx, outAdj } = buildCsr(graph, nodeRemap);
+  const { outIdx, outAdj } = buildCsr(graph, nodeRemap, null);
 
   return shortestCycleFromSource(source, N, outIdx, outAdj, null);
 }
@@ -429,8 +448,9 @@ export function findBundledCyclesViaRaw(
   graph: LoadedGraph,
   nodeRemap: Int32Array | null,
   maxCycles = 1000,
+  hiddenEdgeTypes?: ReadonlySet<number>,
 ): number[][] {
-  const raw = findAllCycles(graph, null, maxCycles);
+  const raw = findAllCycles(graph, null, maxCycles, hiddenEdgeTypes);
 
   return bundleRawCycles(raw, nodeRemap);
 }
@@ -536,12 +556,14 @@ export function findAllCycles(
   graph: LoadedGraph,
   nodeRemap: Int32Array | null = null,
   maxCycles = 1000,
+  hiddenEdgeTypes?: ReadonlySet<number>,
 ): number[][] {
   const N = graph.ids.length;
 
   if (N === 0) return [];
 
-  const { outIdx, outAdj } = buildCsr(graph, nodeRemap);
+  const filterTypes = hiddenEdgeTypes && hiddenEdgeTypes.size > 0 ? hiddenEdgeTypes : null;
+  const { outIdx, outAdj } = buildCsr(graph, nodeRemap, filterTypes);
   const sccs = tarjanScc(N, outIdx, outAdj, 0, nodeRemap);
   const cycles: number[][] = [];
 

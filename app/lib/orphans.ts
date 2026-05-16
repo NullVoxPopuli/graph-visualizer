@@ -24,28 +24,58 @@ import type { LoadedGraph } from "./types.ts";
  * node is correctly excluded — matching the rest of the codebase's
  * "self-loops aren't cycles, but they aren't orphans either"
  * convention.
+ *
+ * `hiddenEdgeTypes` (optional) restricts the analysis to edges whose
+ * `edgeTypeIds[i]` is *not* in the set — same way the renderer hides
+ * filtered-out edge types. With a filter active we recompute in/out
+ * adjacency over the visible edges; without one, the pre-cached
+ * `graph.inDegree` is used directly.
  */
-export function findOrphans(graph: LoadedGraph): number[] {
+export function findOrphans(graph: LoadedGraph, hiddenEdgeTypes?: ReadonlySet<number>): number[] {
   const N = graph.ids.length;
 
   if (N === 0) return [];
 
-  // Working copy — we decrement as we peel each orphan off the
-  // graph. The cached `graph.inDegree` is read-only.
-  const inDegree = new Int32Array(graph.inDegree);
-
-  const { edgesFlat } = graph;
+  const { edgesFlat, edgeTypeIds } = graph;
   const E = edgesFlat.length / 2;
-  // Outgoing CSR so each peeled node can reach its successors quickly.
-  const outIdx = new Int32Array(N + 1);
+  const filterTypes = hiddenEdgeTypes && hiddenEdgeTypes.size > 0 ? hiddenEdgeTypes : null;
 
-  for (let i = 0; i < E; i++) outIdx[edgesFlat[2 * i]! + 1]!++;
+  // Working copy of `inDegree`. With no edge-type filter we can clone
+  // the pre-cached values; otherwise we recompute against the visible
+  // edges only.
+  let inDegree: Int32Array;
+
+  if (filterTypes === null) {
+    inDegree = new Int32Array(graph.inDegree);
+  } else {
+    inDegree = new Int32Array(N);
+
+    for (let i = 0; i < E; i++) {
+      if (filterTypes.has(edgeTypeIds[i]!)) continue;
+      inDegree[edgesFlat[2 * i + 1]!]!++;
+    }
+  }
+
+  // Outgoing CSR over the visible edges so each peeled node can reach
+  // its successors quickly. Two-pass: count visible edges per source
+  // for the prefix-sum, then place them.
+  const outIdx = new Int32Array(N + 1);
+  let visibleCount = 0;
+
+  for (let i = 0; i < E; i++) {
+    if (filterTypes !== null && filterTypes.has(edgeTypeIds[i]!)) continue;
+    outIdx[edgesFlat[2 * i]! + 1]!++;
+    visibleCount++;
+  }
+
   for (let i = 0; i < N; i++) outIdx[i + 1]! += outIdx[i]!;
 
-  const outAdj = new Int32Array(E);
+  const outAdj = new Int32Array(visibleCount);
   const filled = new Int32Array(N);
 
   for (let i = 0; i < E; i++) {
+    if (filterTypes !== null && filterTypes.has(edgeTypeIds[i]!)) continue;
+
     const a = edgesFlat[2 * i]!;
     const b = edgesFlat[2 * i + 1]!;
 
@@ -79,15 +109,38 @@ export function findOrphans(graph: LoadedGraph): number[] {
 
 /**
  * Cheap "does the graph contain any orphan?" check. The first in-
- * degree-zero node is enough — anything with no incoming edges is
- * automatically an orphan, so the more involved transitive computation
- * in `findOrphans` is never needed just to answer this yes/no.
+ * degree-zero node (against visible edges) is enough.
+ *
+ * Fast path with no filter: reads the pre-cached `graph.inDegree`.
+ * Slow path: scans `edgesFlat` once to mark every node with at least
+ * one visible incoming edge, then any unmarked node is an orphan.
  */
-export function hasAnyOrphan(graph: LoadedGraph): boolean {
-  const inDegree = graph.inDegree;
+export function hasAnyOrphan(graph: LoadedGraph, hiddenEdgeTypes?: ReadonlySet<number>): boolean {
+  const N = graph.ids.length;
 
-  for (let i = 0; i < inDegree.length; i++) {
-    if (inDegree[i] === 0) return true;
+  if (N === 0) return false;
+
+  if (!hiddenEdgeTypes || hiddenEdgeTypes.size === 0) {
+    const inDegree = graph.inDegree;
+
+    for (let i = 0; i < inDegree.length; i++) {
+      if (inDegree[i] === 0) return true;
+    }
+
+    return false;
+  }
+
+  const { edgesFlat, edgeTypeIds } = graph;
+  const E = edgesFlat.length / 2;
+  const hasIncoming = new Uint8Array(N);
+
+  for (let i = 0; i < E; i++) {
+    if (hiddenEdgeTypes.has(edgeTypeIds[i]!)) continue;
+    hasIncoming[edgesFlat[2 * i + 1]!] = 1;
+  }
+
+  for (let i = 0; i < N; i++) {
+    if (hasIncoming[i] === 0) return true;
   }
 
   return false;

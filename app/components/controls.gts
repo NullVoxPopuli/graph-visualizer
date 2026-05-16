@@ -228,7 +228,7 @@ export default class Controls extends Component<Signature> {
 
     if (!g) return false;
 
-    return hasAnyOrphan(g);
+    return hasAnyOrphan(g, this.viewState.hiddenEdgeTypes);
   }
 
   /**
@@ -273,7 +273,7 @@ export default class Controls extends Component<Signature> {
 
     if (!g) return false;
 
-    return hasAnyCycle(g);
+    return hasAnyCycle(g, this.viewState.hiddenEdgeTypes);
   }
 
   /**

@@ -270,7 +270,12 @@ export default class InfoPanel extends Component {
     // Bundled cycles: contracted, deduped by canonical sequence. Same
     // source the renderer uses for red rings, so the info-panel list
     // and the canvas can't disagree.
-    const bundledCycles = findBundledCyclesViaRaw(g, remap).filter((c) => c.includes(info.index));
+    const bundledCycles = findBundledCyclesViaRaw(
+      g,
+      remap,
+      1000,
+      this.viewState.hiddenEdgeTypes,
+    ).filter((c) => c.includes(info.index));
 
     const entries: CycleEntry[] = [];
 

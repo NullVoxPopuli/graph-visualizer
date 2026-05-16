@@ -209,7 +209,7 @@ export default class CyclesPanel extends Component {
 
     if (!g) return "graph";
 
-    return hasAnyCycle(g) ? "scoped" : "graph";
+    return hasAnyCycle(g, this.viewState.hiddenEdgeTypes) ? "scoped" : "graph";
   }
 
   get cycles(): CycleEntry[] {
@@ -224,9 +224,10 @@ export default class CyclesPanel extends Component {
 
     const selectedId = this.viewState.selectedId;
     const hiddenTypesKey = serializeIntSet(this.viewState.hiddenNodeTypes);
+    const hiddenEdgeTypesKey = serializeIntSet(this.viewState.hiddenEdgeTypes);
     const collapsedKey = serializeStringSet(this.viewState.collapsedIds);
     const hiddenIdsKey = serializeStringSet(this.viewState.hiddenNodeIds);
-    const key = `${hiddenTypesKey}|${collapsedKey}|${hiddenIdsKey}|${selectedId ?? ""}`;
+    const key = `${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${selectedId ?? ""}`;
 
     if (g !== this.#lastGraph || key !== this.#lastCycleKey) {
       const radii = computeRadii(g.inDegree, g.outDegree);
@@ -254,7 +255,7 @@ export default class CyclesPanel extends Component {
         }
       }
 
-      const rawBundled = findBundledCyclesViaRaw(g, remap);
+      const rawBundled = findBundledCyclesViaRaw(g, remap, 1000, this.viewState.hiddenEdgeTypes);
       // Dedupe by canonical node sequence — parallel raw edges between two
       // packages (e.g. lots of `file → file` imports) all contract to the
       // same bundled cycle, and listing the same `pkgA → pkgB` 13 times is
