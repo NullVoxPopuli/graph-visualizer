@@ -1297,14 +1297,26 @@ pre code {
 
 .cycles-panel__list {
   margin: 0;
-  padding: 6px 10px 0;
+  padding: 0 10px 6px;
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  /* Plain block-flow on purpose: `vertical-collection`'s occluded-content
+     placeholders set an inline `height` and rely on normal block stacking
+     to reserve the virtual scroll height. Wrapping the list in `display:
+     flex; flex-direction: column` collapsed those placeholders to ~0px,
+     which made the scrollbar treat 1000 items like only the handful
+     that were currently rendered. */
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+}
+
+/* `+ .cycles-panel__entry` is unreliable here because vertical-collection
+ * may splice occluded-content placeholder `<li>`s between rendered
+ * entries — `margin-top` on every entry gives a consistent gap even when
+ * the previous sibling is a placeholder. The top spacing matches because
+ * the OL has no `padding-top`. */
+.cycles-panel__entry {
+  margin-top: 6px;
 }
 
 .cycles-panel__empty {

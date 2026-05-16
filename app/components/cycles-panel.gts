@@ -5,6 +5,8 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import { VerticalCollection } from "@html-next/vertical-collection";
+
 import { type Collapsed, collapseList, toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
 import { canonicalCycleKey, findBundledCyclesViaRaw, hasAnyCycle } from "#lib/cycle";
@@ -272,7 +274,13 @@ export default class CyclesPanel extends Component {
           </p>
         {{/unless}}
         <ol class="cycles-panel__list">
-          {{#each this.cycles key="key" as |cycle i|}}
+          <VerticalCollection
+            @items={{this.cycles}}
+            @key="key"
+            @estimateHeight={{120}}
+            @bufferSize={{2}}
+            as |cycle i|
+          >
             <li class="cycles-panel__entry">
               <button
                 type="button"
@@ -340,7 +348,7 @@ export default class CyclesPanel extends Component {
                 {{/if}}
               </ol>
             </li>
-          {{/each}}
+          </VerticalCollection>
         </ol>
       </aside>
     {{/if}}
