@@ -456,11 +456,36 @@ pre code {
     mix-blend-mode: normal;
   }
 
-  /* Panel exits/enters with a scale anchored at top-left (which is
-   * exactly where the gear is/will be), so it collapses into the
-   * gear's corner / emerges from it. Quick fade keeps it from
-   * lingering at a tiny size that would look like a squished mini-
-   * panel. */
+  /* `backdrop-filter` only works on the *group*: the captured old/new
+   * images don't carry it, and the surrounding
+   * `::view-transition-image-pair` is `isolation: isolate`, so a blur
+   * on the snapshots samples an empty backdrop. `border-radius` clips
+   * the blur to each shell's shape so it doesn't blur as a hard
+   * rectangle past the rounded corners.
+   *
+   * The browser positions each group with a UA-set `transform` (the
+   * panel/gear are `position: fixed` at 12px,64px). Overriding the
+   * group's `animation` with a `transform` keyframe wipes that, so the
+   * group snapped to the viewport's corner. So: the scale/fade runs on
+   * the inner snapshot (the group keeps its UA transform → it still
+   * collapses into the gear's corner), and the group's blur box is
+   * shrunk with an animated `clip-path` instead — clip-path never
+   * touches `transform`, so positioning is preserved. The :root
+   * direction class (set by `setControlsOpen`) is what tells an open
+   * from a close, since one group selector can't. */
+  ::view-transition-group(controls-panel-shell) {
+    backdrop-filter: blur(6px);
+    border-radius: 6px;
+  }
+
+  ::view-transition-group(controls-gear-shell) {
+    backdrop-filter: blur(6px);
+    border-radius: 50%;
+  }
+
+  /* Panel exits/enters with a scale anchored at top-left — exactly
+   * where the gear is/will be — so it collapses into / emerges from
+   * the gear's corner. */
   ::view-transition-old(controls-panel-shell) {
     animation: 100ms cubic-bezier(0.4, 0, 1, 1) both controls-panel-shrink;
     transform-origin: top left;
@@ -473,9 +498,6 @@ pre code {
     mix-blend-mode: normal;
   }
 
-  /* Gear is small enough that a fade alone reads cleanly; a slight
-   * scale-from-center on entry gives a subtle "pop" without needing
-   * the snapshot to land at a different size. */
   ::view-transition-old(controls-gear-shell) {
     animation: 100ms cubic-bezier(0.4, 0, 1, 1) both controls-gear-out;
     mix-blend-mode: normal;
@@ -484,6 +506,37 @@ pre code {
   ::view-transition-new(controls-gear-shell) {
     animation: 100ms cubic-bezier(0.22, 1, 0.36, 1) both controls-gear-in;
     mix-blend-mode: normal;
+  }
+
+  /* Shrink/grow the live blur box in lockstep with the panel snapshot
+   * (same easing/duration, same top-left anchor), so the frosted area
+   * tracks the panel instead of lingering at full size. clip-path
+   * leaves the group's UA transform alone. inset(0 85% 85% 0) keeps
+   * the top-left ~15% box — matching the snapshot's 0.15 end scale. */
+  :root.controls-closing::view-transition-group(controls-panel-shell) {
+    animation: 100ms cubic-bezier(0.4, 0, 1, 1) both controls-panel-clip-in;
+  }
+
+  :root.controls-opening::view-transition-group(controls-panel-shell) {
+    animation: 100ms cubic-bezier(0, 0, 0.2, 1) both controls-panel-clip-out;
+  }
+}
+
+@keyframes controls-panel-clip-in {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(0 85% 85% 0);
+  }
+}
+
+@keyframes controls-panel-clip-out {
+  from {
+    clip-path: inset(0 85% 85% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
   }
 }
 

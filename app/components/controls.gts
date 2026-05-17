@@ -458,16 +458,37 @@ export default class Controls extends Component<Signature> {
     // for the "new" snapshot. Each shell carries its own
     // view-transition-name in styles.css, so the panel and gear get
     // independent enter/exit animations (no shared-name snapshot
-    // stretching) — nothing extra to inject here.
+    // stretching).
+    //
+    // The directional class on :root is what lets the stylesheet
+    // animate the `::view-transition-group` (not the inner snapshot):
+    // the group is the only place a live `backdrop-filter` works
+    // (the image-pair is `isolation: isolate`), but a single group
+    // selector can't tell an open from a close, so the class encodes
+    // it. Animating the group means the blurred box scales/fades with
+    // the panel instead of the blur lingering at full size.
     const doc = document as Document & {
-      startViewTransition?: (cb: () => Promise<void> | void) => unknown;
+      startViewTransition?: (cb: () => Promise<void> | void) => {
+        finished?: Promise<unknown>;
+      };
     };
 
     if (typeof doc.startViewTransition === "function") {
-      doc.startViewTransition(async () => {
+      const root = document.documentElement;
+      const dirClass = next ? "controls-opening" : "controls-closing";
+
+      root.classList.add(dirClass);
+
+      const transition = doc.startViewTransition(async () => {
         this.viewState.controlsOpen = next;
         await this.viewState.flushPending();
       });
+
+      const done = (): void => root.classList.remove(dirClass);
+
+      // `finished` resolves when the animation ends (or rejects if the
+      // transition is skipped/aborted) — clean the class up either way.
+      transition.finished?.then(done, done);
     } else {
       this.viewState.controlsOpen = next;
     }
