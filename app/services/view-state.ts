@@ -591,14 +591,24 @@ export default class ViewStateService extends Service {
   }
 
   /**
-   * Whether the top-left controls panel is expanded. On by default — only
-   * the collapsed state is encoded so a fresh URL still shows the panel.
+   * Whether the top-left controls panel is expanded. With no explicit
+   * choice in the URL it defaults to *open* on roomy screens but
+   * *collapsed* on small / portrait ones, where the panel would
+   * otherwise cover most of the viewport. Because the default is
+   * screen-size dependent, "open" can no longer be represented by an
+   * absent param — both states are encoded explicitly once the user
+   * toggles.
    */
   get controlsOpen(): boolean {
-    return this.#qps["controls"] !== "0";
+    const v = this.#qps["controls"];
+
+    if (v === "0") return false;
+    if (v === "1") return true;
+
+    return !isSmallScreen();
   }
   set controlsOpen(v: boolean) {
-    this.#setParam("controls", v ? null : "0");
+    this.#setParam("controls", v ? "1" : "0");
   }
 
   /**
@@ -668,6 +678,18 @@ export default class ViewStateService extends Service {
   set orphansPanelGeometry(g: PanelGeometry | null) {
     this.#setParam("orphansPanel", serializePanelGeometry(g));
   }
+}
+
+/**
+ * Matches the `max-width: 768px` breakpoint the stylesheet uses to
+ * drop the HUD cycle status — keep the two in sync so "small screen"
+ * means the same thing in CSS and in the controls-default logic.
+ * SSR-safe: no `window` during prerender, so treat that as roomy.
+ */
+const SMALL_SCREEN_MAX = 768;
+
+function isSmallScreen(): boolean {
+  return typeof window !== "undefined" && window.innerWidth <= SMALL_SCREEN_MAX;
 }
 
 function parseTri(v: string | null | undefined): boolean | null {

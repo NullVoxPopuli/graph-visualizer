@@ -441,8 +441,16 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
-  toggleControls(): void {
-    const next = !this.viewState.controlsOpen;
+  setControlsOpen(next: boolean): void {
+    // Each caller passes the target state explicitly rather than
+    // inverting `controlsOpen`: that getter is a *derived* value (URL
+    // param OR a screen-size default when the param is absent), so on
+    // a fresh small-screen load the param is unset and the default is
+    // "collapsed" — resizing larger flips the default to "open" while
+    // the panel is still visually collapsed. Inverting the getter then
+    // computes the wrong target. The two buttons have unambiguous
+    // intent (the gear only renders while collapsed, the in-panel
+    // toggle only while open), so we drive the state directly.
     // View Transitions handle the swap if available. Inside the
     // callback rAFs are paused, so the setter's rAF-batched router
     // transition would deadlock — `flushPending` forces it through
@@ -471,7 +479,7 @@ export default class Controls extends Component<Signature> {
         <button
           type="button"
           class="controls__toggle"
-          {{on "click" this.toggleControls}}
+          {{on "click" (fn this.setControlsOpen false)}}
           title="Hide controls"
           aria-expanded="true"
           aria-label="Hide controls"
@@ -783,15 +791,6 @@ export default class Controls extends Component<Signature> {
             >Recenter panels</button>
           {{/if}}
         </div>
-        {{#if this.graph.current}}
-          <p class="controls__cycles-status">
-            {{#if this.hasAnyCycles}}
-              There is at least one cycle.
-            {{else}}
-              There are no cycles.
-            {{/if}}
-          </p>
-        {{/if}}
         <p class="controls__hint">
           drag / wheel: pan · ctrl+wheel / pinch: zoom · click: select · right-click: clear
         </p>
@@ -800,7 +799,7 @@ export default class Controls extends Component<Signature> {
       <button
         type="button"
         class="controls__open"
-        {{on "click" this.toggleControls}}
+        {{on "click" (fn this.setControlsOpen true)}}
         title="Show controls"
         aria-expanded="false"
         aria-label="Show controls"
