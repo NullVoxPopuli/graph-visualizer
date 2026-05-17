@@ -3,3 +3,8 @@ dist/
 dist-*/
 .eslintcache
 .ssg-tmp/
+
+# Rust / wasm-pack build artifacts — regenerate with `pnpm build:wasm`
+crates/layout-wasm/target/
+crates/layout-wasm/pkg-node/
+app/lib/wasm/

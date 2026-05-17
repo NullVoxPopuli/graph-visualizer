@@ -19,3 +19,7 @@ public/
 
 # ember-try
 /.node_modules.ember-try/
+
+# Rust crate + wasm-pack output
+crates/
+app/lib/wasm/

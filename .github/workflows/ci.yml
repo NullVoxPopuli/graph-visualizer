@@ -18,6 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: wyvox/action-setup-pnpm@v3
+      # lint:types / typed eslint resolve `#lib/wasm/*`, which only exists
+      # after the Rust crate is built. Same toolchain block in every job.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/layout-wasm"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - run: pnpm build:wasm
       - run: pnpm lint
   test:
     name: "Tests"
@@ -25,6 +35,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: wyvox/action-setup-pnpm@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/layout-wasm"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - run: pnpm build:wasm
       - run: pnpm test
 
   build_prod:
@@ -34,7 +52,15 @@ jobs:
 
     steps:
       - uses: wyvox/action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/layout-wasm"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - run: echo ${{ github.event.number }} > ./pr-number.txt
+      - run: pnpm build:wasm
       - run: pnpm build
       - run: ls -la ./dist
       # Used for faster deploy so we don't need to checkout the repo

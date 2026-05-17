@@ -317,6 +317,27 @@ function startAnalyze(
  * `terminate()` a still-running layout when a new slider value arrives,
  * so we don't burn CPU on results nobody is going to see.
  */
+/**
+ * Whether to route layout through the Rust/WASM worker. WASM is the
+ * default — it's ~3.5× faster than the JS d3-force path with an
+ * equivalent layout. Opt back into JS with `?layout=js` (one-off) or
+ * `localStorage.layout = "js"` (sticky); `?layout=wasm` is still honored.
+ * Defensive try/catch so a locked-down `localStorage` (private mode,
+ * some embeds) can't break layout entirely — it just falls back to the
+ * WASM default.
+ */
+function useWasmLayout(): boolean {
+  try {
+    const qp = new URLSearchParams(globalThis.location?.search ?? "").get("layout");
+
+    if (qp) return qp !== "js";
+
+    return globalThis.localStorage?.getItem("layout") !== "js";
+  } catch {
+    return true;
+  }
+}
+
 function startLayout(
   graph: LoadedGraph,
   communities: Int32Array,
@@ -324,9 +345,16 @@ function startLayout(
   params: { repulsion: number; nodeDistance: number; clusterDistance: number },
   onProgress?: (tick: number, total: number) => void,
 ): { worker: Worker; result: Promise<Float32Array> } {
-  const worker = new Worker(new URL("../lib/layout.worker.ts", import.meta.url), {
-    type: "module",
-  });
+  // WASM is the default layout backend (~3.5× faster, equivalent layout);
+  // `?layout=js` / `localStorage.layout = "js"` opts back into the JS
+  // d3-force worker. Both workers expose the identical Comlink
+  // `LayoutEngine`, so this is the only site that needs to know which one
+  // is running. The two `new URL(...)` literals are kept separate (not a
+  // computed path) so the bundler can statically discover and build each
+  // worker.
+  const worker = useWasmLayout()
+    ? new Worker(new URL("../lib/layout-wasm.worker.ts", import.meta.url), { type: "module" })
+    : new Worker(new URL("../lib/layout.worker.ts", import.meta.url), { type: "module" });
   const layout = Comlink.wrap<LayoutEngine>(worker);
   const init: LayoutInit = {
     nodeCount: graph.ids.length,
