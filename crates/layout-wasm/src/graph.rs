@@ -162,6 +162,183 @@ pub fn parse(json: &str) -> Result<ParsedGraph, String> {
     })
 }
 
+/// Build outgoing CSR (`idx[N+1]`, `adj`) over the visible edges.
+/// `hidden_edge_types[edgeTypeId] == true` filters an edge out.
+fn build_out_csr(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    hidden_edge_types: Option<&[bool]>,
+) -> (Vec<i32>, Vec<i32>) {
+    let e = edges_flat.len() / 2;
+    let mut idx = vec![0i32; n + 1];
+    let visible = |i: usize| match hidden_edge_types {
+        Some(h) => {
+            let t = edge_type_ids.get(i).copied().unwrap_or(0) as usize;
+            !h.get(t).copied().unwrap_or(false)
+        }
+        None => true,
+    };
+    let mut count = 0usize;
+    for i in 0..e {
+        if !visible(i) {
+            continue;
+        }
+        idx[edges_flat[2 * i] as usize + 1] += 1;
+        count += 1;
+    }
+    for i in 0..n {
+        idx[i + 1] += idx[i];
+    }
+    let mut adj = vec![0i32; count];
+    let mut filled = vec![0i32; n];
+    for i in 0..e {
+        if !visible(i) {
+            continue;
+        }
+        let a = edges_flat[2 * i] as usize;
+        let b = edges_flat[2 * i + 1];
+        adj[(idx[a] + filled[a]) as usize] = b;
+        filled[a] += 1;
+    }
+    (idx, adj)
+}
+
+/// Port of `cycle.ts` `hasAnyCycle`: iterative coloured DFS, self-loops
+/// are not cycles, a back edge into an on-stack node means a cycle.
+pub fn has_any_cycle(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    hidden_edge_types: Option<&[bool]>,
+) -> bool {
+    if n == 0 {
+        return false;
+    }
+    let (idx, adj) = build_out_csr(n, edges_flat, edge_type_ids, hidden_edge_types);
+    let mut color = vec![0u8; n]; // 0 unseen, 1 on-stack, 2 done
+    let mut stack = vec![0i32; n];
+    let mut cursor = vec![0i32; n];
+    for start in 0..n {
+        if color[start] != 0 {
+            continue;
+        }
+        let mut depth = 0i32;
+        stack[0] = start as i32;
+        cursor[0] = idx[start];
+        color[start] = 1;
+        while depth >= 0 {
+            let v = stack[depth as usize] as usize;
+            let end = idx[v + 1];
+            if cursor[depth as usize] >= end {
+                color[v] = 2;
+                depth -= 1;
+                continue;
+            }
+            let j = cursor[depth as usize];
+            let w = adj[j as usize];
+            cursor[depth as usize] = j + 1;
+            if w as usize == v {
+                continue; // self-loop
+            }
+            match color[w as usize] {
+                1 => return true,
+                0 => {
+                    depth += 1;
+                    stack[depth as usize] = w;
+                    cursor[depth as usize] = idx[w as usize];
+                    color[w as usize] = 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+/// Port of `orphans.ts` `findOrphans`: Kahn topological peel; nodes
+/// whose ancestor set contains no cycle. `roots[i] == true` are never
+/// peeled. Returns orphan node indices in peel order.
+pub fn find_orphans(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    in_degree: &[i32],
+    hidden_edge_types: Option<&[bool]>,
+    roots: Option<&[bool]>,
+) -> Vec<i32> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let e = edges_flat.len() / 2;
+    let mut indeg: Vec<i32> = if hidden_edge_types.is_none() {
+        in_degree.to_vec()
+    } else {
+        let h = hidden_edge_types.unwrap();
+        let mut d = vec![0i32; n];
+        for i in 0..e {
+            let t = edge_type_ids.get(i).copied().unwrap_or(0) as usize;
+            if h.get(t).copied().unwrap_or(false) {
+                continue;
+            }
+            d[edges_flat[2 * i + 1] as usize] += 1;
+        }
+        d
+    };
+    let (idx, adj) = build_out_csr(n, edges_flat, edge_type_ids, hidden_edge_types);
+    let is_root = |i: usize| roots.map(|r| r.get(i).copied().unwrap_or(false)).unwrap_or(false);
+    let mut orphans = Vec::new();
+    let mut queue = Vec::new();
+    for i in 0..n {
+        if indeg[i] == 0 && !is_root(i) {
+            queue.push(i as i32);
+        }
+    }
+    let mut head = 0;
+    while head < queue.len() {
+        let u = queue[head] as usize;
+        head += 1;
+        orphans.push(u as i32);
+        for j in idx[u]..idx[u + 1] {
+            let v = adj[j as usize] as usize;
+            indeg[v] -= 1;
+            if indeg[v] == 0 && !is_root(v) {
+                queue.push(v as i32);
+            }
+        }
+    }
+    orphans
+}
+
+/// Port of `orphans.ts` `hasAnyOrphan`: any node with no visible
+/// incoming edge.
+pub fn has_any_orphan(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    in_degree: &[i32],
+    hidden_edge_types: Option<&[bool]>,
+) -> bool {
+    if n == 0 {
+        return false;
+    }
+    match hidden_edge_types {
+        None => in_degree.iter().any(|&d| d == 0),
+        Some(h) => {
+            let e = edges_flat.len() / 2;
+            let mut has_in = vec![false; n];
+            for i in 0..e {
+                let t = edge_type_ids.get(i).copied().unwrap_or(0) as usize;
+                if h.get(t).copied().unwrap_or(false) {
+                    continue;
+                }
+                has_in[edges_flat[2 * i + 1] as usize] = true;
+            }
+            has_in.iter().any(|&v| !v)
+        }
+    }
+}
+
 /// Port of `pack.ts` `computeRadii`: `max(5, 2 + 1.6·√max(in,out))`.
 pub fn compute_radii(in_degree: &[i32], out_degree: &[i32]) -> Vec<f32> {
     in_degree

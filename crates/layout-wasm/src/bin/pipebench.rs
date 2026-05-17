@@ -39,4 +39,26 @@ fn main() {
     println!("  louvain      {louv_ms:8.1} ms   (JS ~219)");
     println!("  computeRadii {rad_ms:8.3} ms");
     println!("  radii range  [{rmin:.2}, {rmax:.2}]");
+
+    let t = Instant::now();
+    let cyc = graph::has_any_cycle(n, &g.edges_flat, &g.edge_type_ids, None);
+    let cyc_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let orphans = graph::find_orphans(
+        n,
+        &g.edges_flat,
+        &g.edge_type_ids,
+        &g.in_degree,
+        None,
+        None,
+    );
+    let orph_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let any_orphan = graph::has_any_orphan(n, &g.edges_flat, &g.edge_type_ids, &g.in_degree, None);
+
+    println!("  hasAnyCycle  {cyc_ms:8.3} ms   -> {cyc}");
+    println!(
+        "  findOrphans  {orph_ms:8.3} ms   -> {} orphans (hasAnyOrphan={any_orphan})",
+        orphans.len()
+    );
 }
