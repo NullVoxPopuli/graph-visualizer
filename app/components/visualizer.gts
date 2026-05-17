@@ -1,4 +1,5 @@
 import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { htmlSafe, type SafeString } from "@ember/template";
@@ -1018,8 +1019,43 @@ export default class Visualizer extends Component {
       this.dirty = false;
     }
 
+    // Cadence pulse — vsync-aligned (this rAF fires at the real display
+    // refresh, incl. 240Hz). The worker draws iff dirty/selected.
+    this.renderer?.tick();
+    this.sampleFps();
+
     this.rafHandle = requestAnimationFrame(this.loop);
   };
+
+  /**
+   * On-screen FPS = frames the *render worker actually drew* per second
+   * (it posts a `frame` per real draw; `framesRendered` is the running
+   * count). Sampled over ~500ms so the readout is steady, not jittery.
+   */
+  @tracked fps = 0;
+  #fpsAt = 0;
+  #fpsFrames = 0;
+
+  private sampleFps(): void {
+    const now = performance.now();
+
+    if (this.#fpsAt === 0) {
+      this.#fpsAt = now;
+      this.#fpsFrames = this.renderer?.framesRendered ?? 0;
+
+      return;
+    }
+
+    const elapsed = now - this.#fpsAt;
+
+    if (elapsed >= 500) {
+      const total = this.renderer?.framesRendered ?? 0;
+
+      this.fps = Math.round(((total - this.#fpsFrames) * 1000) / elapsed);
+      this.#fpsFrames = total;
+      this.#fpsAt = now;
+    }
+  }
 
   private teardown(): void {
     if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
@@ -1037,6 +1073,10 @@ export default class Visualizer extends Component {
 
   <template>
     <canvas class="visualizer__canvas" {{this.setupCanvas}}></canvas>
+    <div class="visualizer__fps" title="Frames per second drawn by the render worker">
+      {{this.fps}}
+      fps
+    </div>
     {{#if this.visualizer.state.isLoading}}
       <div class="visualizer__loading" role="status">
         <span class="visualizer__loading-label">Computing layout&hellip;</span>

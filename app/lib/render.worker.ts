@@ -22,7 +22,11 @@ type InMsg =
   | { t: "show"; hulls: boolean; arrows: boolean }
   | { t: "selected"; v: boolean }
   | { t: "upload"; kind: UploadKind; buffer: ArrayBuffer; count: number }
-  | { t: "dirty" };
+  | { t: "dirty" }
+  // Cadence pulse from the main thread's rAF (vsync-aligned — fires at
+  // the real display refresh, 240Hz on a 240Hz panel). Replaces the old
+  // fixed-60 setTimeout self-loop so frame rate tracks the display.
+  | { t: "tick" };
 
 let renderer: Renderer | null = null;
 let dirty = true;
@@ -30,19 +34,17 @@ let dirty = true;
 // `performance.now()` in the node shader and would otherwise freeze.
 let selected = false;
 
-// Dedicated workers have no requestAnimationFrame; self-schedule at
-// ~60fps. The loop only issues GL when something changed (or while a
-// node is selected, for the animated halo), so an idle graph costs a
-// bare timer tick.
-const FRAME_MS = 1000 / 60;
-
-function frame(): void {
-  setTimeout(frame, FRAME_MS);
+// Draw at most once per main-thread rAF tick, and only when something
+// changed (or a node is selected, for the animated halo). Each real
+// draw posts a `frame` back so the main thread can show the true
+// rendered-frames-per-second.
+function onTick(): void {
   if (!renderer) return;
 
   if (dirty || selected) {
     renderer.draw();
     if (!selected) dirty = false;
+    (self as DedicatedWorkerGlobalScope).postMessage({ t: "frame" });
   }
 }
 
@@ -85,7 +87,6 @@ self.onmessage = (e: MessageEvent<InMsg>): void => {
       renderer = new Renderer(m.canvas);
       renderer.resize(m.cssW, m.cssH, m.dpr);
       dirty = true;
-      frame();
 
       break;
     case "resize":
@@ -115,6 +116,10 @@ self.onmessage = (e: MessageEvent<InMsg>): void => {
       break;
     case "dirty":
       dirty = true;
+
+      break;
+    case "tick":
+      onTick();
 
       break;
   }

@@ -264,6 +264,25 @@ pre code {
   height: 100vh;
 }
 
+.visualizer__fps {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--dim);
+  font:
+    600 11px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
 .visualizer__loading,
 .visualizer__error {
   position: fixed;

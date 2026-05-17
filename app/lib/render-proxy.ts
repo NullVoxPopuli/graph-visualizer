@@ -23,9 +23,21 @@ export class RenderProxy {
   #worker: Worker;
   #showHulls = false;
   #showArrows = true;
+  /** Monotonic count of frames the worker reports actually drawn. The
+   *  component samples the delta over time for the on-screen FPS. */
+  framesRendered = 0;
 
   constructor(worker: Worker) {
     this.#worker = worker;
+    this.#worker.addEventListener("message", (e: MessageEvent) => {
+      if ((e.data as { t?: string } | null)?.t === "frame") this.framesRendered++;
+    });
+  }
+
+  /** Cadence pulse — call once per main-thread rAF; the worker draws
+   *  this frame iff something changed (or a node is selected). */
+  tick(): void {
+    this.#worker.postMessage({ t: "tick" });
   }
 
   #upload(kind: Kind, data: Float32Array, count: number): void {
