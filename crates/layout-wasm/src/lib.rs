@@ -170,9 +170,44 @@ pub fn run_layout(
     cohesion: f64,
     progress: Option<js_sys::Function>,
 ) -> Vec<f32> {
+    let radii_f64: Vec<f64> = radii.iter().map(|&v| v as f64).collect();
+    simulate(
+        node_count,
+        edges,
+        communities,
+        &radii_f64,
+        spread_factor,
+        repulsion,
+        node_distance,
+        cluster_distance,
+        cohesion,
+        None,
+        progress.as_ref(),
+    )
+}
+
+/// Shared simulation core. `warm` (flat `[x,y,…]` of length `n*2`), when
+/// given, seeds from those positions instead of the community sunflower
+/// — a warm start so a slider tweak re-relaxes from the current layout
+/// instead of reseeding. Used by both the legacy `run_layout` free
+/// function and the resident `GraphSession`.
+#[allow(clippy::too_many_arguments)]
+fn simulate(
+    node_count: usize,
+    edges: &[i32],
+    communities_in: &[i32],
+    radii_in: &[f64],
+    spread_factor: f64,
+    repulsion: f64,
+    node_distance: f64,
+    cluster_distance: f64,
+    cohesion: f64,
+    warm: Option<&[f32]>,
+    progress: Option<&js_sys::Function>,
+) -> Vec<f32> {
     let n = node_count;
-    let radii: Vec<f64> = radii.iter().map(|&v| v as f64).collect();
-    let communities: Vec<i32> = communities.to_vec();
+    let radii: Vec<f64> = radii_in.to_vec();
+    let communities: Vec<i32> = communities_in.to_vec();
 
     // Mirror layout-core: inter-cluster spring distance scales with sqrt(n).
     let inter_distance_scale = (1.0f64).max((n as f64 / 200.0).sqrt());
@@ -202,7 +237,15 @@ pub fn run_layout(
         vx: vec![0.0; n],
         vy: vec![0.0; n],
     };
-    seed_by_community(&mut nodes, &communities, &radii);
+    match warm {
+        Some(prev) if prev.len() == n * 2 => {
+            for i in 0..n {
+                nodes.x[i] = prev[2 * i] as f64;
+                nodes.y[i] = prev[2 * i + 1] as f64;
+            }
+        }
+        _ => seed_by_community(&mut nodes, &communities, &radii),
+    }
 
     // Per-node force parameters (forceManyBody / forceCollide initialize()).
     let mut charge = vec![0.0; n];
@@ -230,7 +273,7 @@ pub fn run_layout(
 
     let log_alpha_min = ALPHA_MIN.ln();
     let report = |it: usize, alpha: f64| {
-        if let Some(f) = progress.as_ref() {
+        if let Some(f) = progress {
             // Same 0..1000 progress as layout-core: the further along of
             // alpha decay and the iteration cap.
             let by_alpha = if alpha <= ALPHA_MIN {
@@ -304,6 +347,137 @@ pub fn run_layout(
         out[2 * i + 1] = sim.nodes.y[i] as f32;
     }
     out
+}
+
+/// Resident graph session: the user's JSON crosses into WASM **once**,
+/// then everything expensive (parse, Louvain, radii, cycle/orphan,
+/// layout) runs in Rust and the JS side drives it with cheap queries.
+/// `set_resolution` re-clusters in place; `layout(warm=true)` re-relaxes
+/// from the current positions instead of reseeding (instant-feel slider
+/// tweaks).
+#[wasm_bindgen]
+pub struct GraphSession {
+    parsed: graph::ParsedGraph,
+    communities: Vec<i32>,
+    radii: Vec<f64>,
+    resolution: f64,
+    last_positions: Option<Vec<f32>>,
+}
+
+#[wasm_bindgen]
+impl GraphSession {
+    /// Parse + radii + Louvain (resolution 1). The big JSON is consumed
+    /// here and never crosses the worker boundary again.
+    pub fn load(json: &str) -> Result<GraphSession, JsValue> {
+        let parsed = graph::parse(json).map_err(|e| JsValue::from_str(&e))?;
+        let radii: Vec<f64> = graph::compute_radii(&parsed.in_degree, &parsed.out_degree)
+            .iter()
+            .map(|&v| v as f64)
+            .collect();
+        let communities = graph::louvain(parsed.ids.len(), &parsed.edges_flat, 1.0);
+        Ok(GraphSession {
+            parsed,
+            communities,
+            radii,
+            resolution: 1.0,
+            last_positions: None,
+        })
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.parsed.ids.len()
+    }
+
+    /// One-time transfer of node ids (selection mapping lives in JS).
+    pub fn ids_json(&self) -> String {
+        serde_json::to_string(&self.parsed.ids).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Flat (from,to,…) edges — one transfer for the renderer.
+    pub fn edges_flat(&self) -> Vec<i32> {
+        self.parsed.edges_flat.clone()
+    }
+
+    pub fn communities(&self) -> Vec<i32> {
+        self.communities.clone()
+    }
+
+    pub fn radii(&self) -> Vec<f32> {
+        self.radii.iter().map(|&v| v as f32).collect()
+    }
+
+    /// Re-cluster only (graph already resident) — what the resolution
+    /// slider needs, instead of re-parsing + re-marshaling.
+    pub fn set_resolution(&mut self, resolution: f64) {
+        if (resolution - self.resolution).abs() < f64::EPSILON {
+            return;
+        }
+        self.resolution = resolution;
+        self.communities =
+            graph::louvain(self.parsed.ids.len(), &self.parsed.edges_flat, resolution);
+    }
+
+    pub fn has_any_cycle(&self) -> bool {
+        graph::has_any_cycle(
+            self.parsed.ids.len(),
+            &self.parsed.edges_flat,
+            &self.parsed.edge_type_ids,
+            None,
+        )
+    }
+
+    pub fn has_any_orphan(&self) -> bool {
+        graph::has_any_orphan(
+            self.parsed.ids.len(),
+            &self.parsed.edges_flat,
+            &self.parsed.edge_type_ids,
+            &self.parsed.in_degree,
+            None,
+        )
+    }
+
+    pub fn find_orphans(&self) -> Vec<i32> {
+        graph::find_orphans(
+            self.parsed.ids.len(),
+            &self.parsed.edges_flat,
+            &self.parsed.edge_type_ids,
+            &self.parsed.in_degree,
+            None,
+            None,
+        )
+    }
+
+    /// Run the layout on the resident graph. `warm` re-relaxes from the
+    /// last result (slider tweak) instead of reseeding. Returns and
+    /// stores the flat positions buffer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn layout(
+        &mut self,
+        spread_factor: f64,
+        repulsion: f64,
+        node_distance: f64,
+        cluster_distance: f64,
+        cohesion: f64,
+        warm: bool,
+        progress: Option<js_sys::Function>,
+    ) -> Vec<f32> {
+        let warm_seed = if warm { self.last_positions.as_deref() } else { None };
+        let out = simulate(
+            self.parsed.ids.len(),
+            &self.parsed.edges_flat,
+            &self.communities,
+            &self.radii,
+            spread_factor,
+            repulsion,
+            node_distance,
+            cluster_distance,
+            cohesion,
+            warm_seed,
+            progress.as_ref(),
+        );
+        self.last_positions = Some(out.clone());
+        out
+    }
 }
 
 impl Sim {

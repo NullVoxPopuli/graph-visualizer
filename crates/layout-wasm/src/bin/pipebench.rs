@@ -7,7 +7,56 @@
 
 use std::time::Instant;
 
-use layout_wasm::graph;
+use layout_wasm::{graph, GraphSession};
+
+/// Same cluster-separation quality proxy as the JS bench.
+fn cluster_sep(pos: &[f32], comm: &[i32]) -> f64 {
+    use std::collections::HashMap;
+    let mut order: HashMap<i32, usize> = HashMap::new();
+    for &c in comm {
+        let next = order.len();
+        order.entry(c).or_insert(next);
+    }
+    let k = order.len();
+    if k < 2 {
+        return f64::INFINITY;
+    }
+    let (mut sx, mut sy, mut cnt) = (vec![0f64; k], vec![0f64; k], vec![0f64; k]);
+    for (i, &c) in comm.iter().enumerate() {
+        let ci = order[&c];
+        sx[ci] += pos[2 * i] as f64;
+        sy[ci] += pos[2 * i + 1] as f64;
+        cnt[ci] += 1.0;
+    }
+    for c in 0..k {
+        sx[c] /= cnt[c].max(1.0);
+        sy[c] /= cnt[c].max(1.0);
+    }
+    let mut spread = vec![0f64; k];
+    for (i, &c) in comm.iter().enumerate() {
+        let ci = order[&c];
+        let dx = pos[2 * i] as f64 - sx[ci];
+        let dy = pos[2 * i + 1] as f64 - sy[ci];
+        spread[ci] += (dx * dx + dy * dy).sqrt();
+    }
+    for c in 0..k {
+        spread[c] /= cnt[c].max(1.0);
+    }
+    let mut sum = 0.0;
+    for a in 0..k {
+        let mut nearest = f64::INFINITY;
+        for b in 0..k {
+            if a == b {
+                continue;
+            }
+            let dx = sx[a] - sx[b];
+            let dy = sy[a] - sy[b];
+            nearest = nearest.min((dx * dx + dy * dy).sqrt());
+        }
+        sum += nearest / spread[a].max(1.0);
+    }
+    sum / k as f64
+}
 
 fn main() {
     let path = std::env::args()
@@ -61,4 +110,28 @@ fn main() {
         "  findOrphans  {orph_ms:8.3} ms   -> {} orphans (hasAnyOrphan={any_orphan})",
         orphans.len()
     );
+
+    println!("--- resident GraphSession ---");
+    let t = Instant::now();
+    let mut s = GraphSession::load(&json).expect("session load");
+    let load_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let pos = s.layout(1.0, 6.0, 18.0, 180.0, 0.12, false, None);
+    let lay_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let sep = cluster_sep(&pos, &s.communities());
+
+    // Slider tweak: re-cluster + warm relayout from the current positions.
+    let t = Instant::now();
+    s.set_resolution(1.4);
+    let recluster_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let t = Instant::now();
+    let pos2 = s.layout(1.0, 9.0, 18.0, 180.0, 0.12, true, None);
+    let warm_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let sep2 = cluster_sep(&pos2, &s.communities());
+
+    println!("  load (parse+radii+louvain) {load_ms:8.1} ms");
+    println!("  layout (cold)              {lay_ms:8.1} ms   cluster-sep {sep:.2}");
+    println!("  set_resolution(1.4)        {recluster_ms:8.1} ms");
+    println!("  layout (warm, new params)  {warm_ms:8.1} ms   cluster-sep {sep2:.2}");
 }
