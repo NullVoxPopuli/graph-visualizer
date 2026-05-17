@@ -13,7 +13,7 @@ import { buildContraction } from "#lib/contract";
 import { findBundledCyclesViaRaw } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
-import { Renderer } from "#lib/renderer";
+import { RenderProxy } from "#lib/render-proxy";
 
 import Controls from "./controls.gts";
 import CyclesPanel from "./cycles-panel.gts";
@@ -40,7 +40,12 @@ export default class Visualizer extends Component {
   @service declare visualizer: VisualizerService;
   @service declare viewState: ViewStateService;
 
-  private renderer: Renderer | null = null;
+  // `renderer` is a thin proxy that forwards to the render worker (which
+  // owns the OffscreenCanvas, GL, and the draw loop). The method shape
+  // matches the old in-process `Renderer` so `repack*` is unchanged.
+  private renderer: RenderProxy | null = null;
+  #renderWorker: Worker | null = null;
+  #workerSelected = false;
   // Camera owns d3-zoom on the DOM canvas (main-thread input). Its
   // transform is pushed into the renderer via `setCamera` so the
   // renderer itself stays input-/DOM-free (worker-ready).
@@ -194,7 +199,21 @@ export default class Visualizer extends Component {
   // Keep this body free of viewState/visualizer reads — the rAF loop and
   // `reactToScene` handle reactive sync against the renderer.
   setupCanvas = modifier((canvas: HTMLCanvasElement) => {
-    this.renderer = new Renderer(canvas);
+    // Hand the canvas to the render worker; GL + the draw loop run there.
+    const worker = new Worker(new URL("../lib/render.worker.ts", import.meta.url), {
+      type: "module",
+    });
+    const off = canvas.transferControlToOffscreen();
+    const dpr = window.devicePixelRatio || 1;
+
+    worker.postMessage(
+      { t: "init", canvas: off, cssW: window.innerWidth, cssH: window.innerHeight, dpr },
+      [off],
+    );
+    this.#renderWorker = worker;
+    this.renderer = new RenderProxy(worker);
+    // Camera stays on the main thread (d3-zoom needs the DOM canvas);
+    // its transform is streamed to the worker via `renderer.setCamera`.
     this.camera = new Camera(canvas);
     this.handleResize();
     window.addEventListener("resize", this.resizeHandler);
@@ -977,19 +996,25 @@ export default class Visualizer extends Component {
       this.reactToScene(scene);
       this.maybeReactToHover(scene);
       this.maybeHandleFocus(scene);
-      // Keep redrawing while a node is selected — the halo around the
-      // selected node animates and would otherwise freeze the moment the
-      // dirty flag clears.
-      if (this.viewState.selectedId !== null) this.dirty = true;
+
+      // The render worker owns the draw loop and animates the selection
+      // halo itself (off `performance.now()`); just tell it whether a
+      // node is selected so it keeps drawing every frame for the halo.
+      const selNow = this.viewState.selectedId !== null;
+
+      if (selNow !== this.#workerSelected) {
+        this.#workerSelected = selNow;
+        this.renderer?.setSelected(selNow);
+      }
 
       if (this.dirty && this.renderer) {
-        this.renderer.draw();
+        this.renderer.markDirty();
         this.dirty = false;
       }
     } else if (this.dirty && this.renderer) {
       // Clear the canvas while the pipeline is still working so we don't
       // leave a previous scene visible behind the loading overlay.
-      this.renderer.draw();
+      this.renderer.markDirty();
       this.dirty = false;
     }
 
@@ -1006,6 +1031,8 @@ export default class Visualizer extends Component {
     this.camera?.destroy();
     this.camera = null;
     this.renderer = null;
+    this.#renderWorker?.terminate();
+    this.#renderWorker = null;
   }
 
   <template>
