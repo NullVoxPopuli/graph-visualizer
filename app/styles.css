@@ -321,6 +321,11 @@ pre code {
   left: 12px;
   padding: 10px 12px;
   min-width: 240px;
+  /* Keep the panel *and* its outboard toggle button on-screen on
+   * narrow / portrait viewports. Reserved horizontal space: 12px left
+   * offset + 6px toggle gap + 26px toggle width + a symmetric 12px
+   * right gutter = 56px. */
+  max-width: calc(100dvw - 56px);
   font-size: 13px;
   gap: 8px;
   transform-origin: top left;
