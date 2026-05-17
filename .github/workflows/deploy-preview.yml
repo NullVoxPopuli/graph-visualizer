@@ -52,11 +52,6 @@ concurrency:
   group: deploy-preview-${{ github.event.workflow_run.pull_requests[0].number }}
   cancel-in-progress: true
 
-env:
-  TURBO_API: http://127.0.0.1:9080
-  TURBO_TOKEN: this-is-not-a-secret
-  TURBO_TEAM: myself
-
 jobs:
   # This is the only job that needs access to the source code
   Build:
@@ -71,10 +66,6 @@ jobs:
           # and in a job that doesn't have access to our secrets.
           repository: ${{ github.event.workflow_run.head_repository.full_name }}
           ref: ${{ github.event.workflow_run.head_branch }}
-      - name: TurboRepo local server
-        uses: felixmosh/turborepo-gh-artifacts@v4
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: wyvox/action-setup-pnpm@v4
       # The Rust/WASM layout backend lives in `crates/layout-wasm` and is
       # only present on refs that include that change. This workflow runs
@@ -97,13 +88,21 @@ jobs:
           tool: wasm-pack
       - run: pnpm build:wasm
         if: ${{ hashFiles('crates/layout-wasm/Cargo.toml') != '' }}
-      - run: pnpm turbo build:prod
+      # This project is a single Vite app — not a Turbo monorepo — so build
+      # with the same command CI's `build_prod` job uses. (The previous
+      # `pnpm turbo build:prod` failed: `turbo` isn't a dependency, and the
+      # `./apps/**/dist` artifact glob never matched this single-app `dist/`.)
+      - run: pnpm build
       - uses: actions/upload-artifact@v7
         with:
           name: deploy-prep-dist
           if-no-files-found: error
+          # Mirrors ci.yml: upload-artifact uses the matched files' common
+          # ancestor as the artifact root, so `dist/**/*` strips the
+          # `dist/` prefix — the existing DeployPreview job then deploys
+          # the site root unchanged.
           path: |
-            ./apps/**/dist/**/*
+            dist/**/*
             !node_modules/
             !./**/node_modules/
 
