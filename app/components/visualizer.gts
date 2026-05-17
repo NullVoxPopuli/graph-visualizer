@@ -121,6 +121,54 @@ export default class Visualizer extends Component {
   #allCyclesGraph: ProcessedScene["graph"] | null = null;
   #allCyclesRemap: Int32Array | null = null;
 
+  // Per-scene edge incidence (CSR by raw node index): `#incEdges` lists
+  // every edge index touching node v in `[#incIdx[v], #incIdx[v+1])`.
+  // Lets the "edges hidden, node selected" repack iterate the selected
+  // node's edges only — O(degree) — instead of scanning all graph edges
+  // on every click. Memoized by graph identity.
+  #incGraph: ProcessedScene["graph"] | null = null;
+  #incIdx: Int32Array | null = null;
+  #incEdges: Int32Array | null = null;
+
+  /** Incident edge-index list for `node`, or null when contraction is
+   *  active (the fast path is only valid with `nodeRemap === null`). */
+  private incidentEdges(scene: ProcessedScene, node: number): Int32Array | null {
+    if (this.nodeRemap !== null || node < 0) return null;
+
+    if (this.#incGraph !== scene.graph || this.#incIdx === null) {
+      const ef = scene.graph.edgesFlat;
+      const E = ef.length / 2;
+      const N = scene.communities.length;
+      const idx = new Int32Array(N + 1);
+
+      for (let i = 0; i < E; i++) {
+        idx[ef[2 * i]! + 1]!++;
+        idx[ef[2 * i + 1]! + 1]!++;
+      }
+
+      for (let i = 0; i < N; i++) idx[i + 1]! += idx[i]!;
+
+      const edges = new Int32Array(2 * E);
+      const filled = new Int32Array(N);
+
+      for (let i = 0; i < E; i++) {
+        const a = ef[2 * i]!;
+        const b = ef[2 * i + 1]!;
+
+        edges[idx[a]! + filled[a]!] = i;
+        filled[a]!++;
+        edges[idx[b]! + filled[b]!] = i;
+        filled[b]!++;
+      }
+
+      this.#incGraph = scene.graph;
+      this.#incIdx = idx;
+      this.#incEdges = edges;
+    }
+
+    return this.#incEdges!.subarray(this.#incIdx[node], this.#incIdx[node + 1]);
+  }
+
   // ember-modifier auto-tracks reads inside the function body, so any tracked
   // value read here would tear down + re-run the renderer on every change.
   // Keep this body free of viewState/visualizer reads — the rAF loop and
@@ -502,6 +550,7 @@ export default class Visualizer extends Component {
       this.viewState.hiddenEdgeTypes,
       this.nodeRemap,
       restrict,
+      restrict >= 0 ? this.incidentEdges(scene, restrict) : null,
     );
 
     this.edgeBuf = buffer;
@@ -535,6 +584,7 @@ export default class Visualizer extends Component {
       this.viewState.hiddenEdgeTypes,
       this.nodeRemap,
       restrict,
+      restrict >= 0 ? this.incidentEdges(scene, restrict) : null,
     );
 
     this.arrowBuf = buffer;
