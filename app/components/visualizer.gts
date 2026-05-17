@@ -459,18 +459,29 @@ export default class Visualizer extends Component {
 
     const edges = scene.graph.edgesFlat;
     const remap = this.nodeRemap;
+    const incident = this.incidentEdges(scene, selected);
 
-    for (let k = 0; k < edges.length; k += 2) {
-      if (edges[k] !== selected) continue;
+    if (incident !== null) {
+      // Fast path (no contraction): only the selected node's incident
+      // edges, O(degree) instead of scanning the whole edge list.
+      for (let t = 0; t < incident.length; t++) {
+        const i = incident[t]!;
 
-      let b = edges[k + 1]!;
-
-      if (remap !== null) {
-        b = remap[b]!;
-        if (b < 0) continue;
+        if (edges[2 * i]! === selected) dim[edges[2 * i + 1]!] = 0;
       }
+    } else {
+      for (let k = 0; k < edges.length; k += 2) {
+        if (edges[k] !== selected) continue;
 
-      dim[b] = 0;
+        let b = edges[k + 1]!;
+
+        if (remap !== null) {
+          b = remap[b]!;
+          if (b < 0) continue;
+        }
+
+        dim[b] = 0;
+      }
     }
 
     if (cycleMask !== null) {
