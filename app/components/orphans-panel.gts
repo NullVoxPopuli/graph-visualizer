@@ -10,6 +10,7 @@ import {
   createResizeModifier,
 } from "#lib/floating-panel";
 import { findOrphans } from "#lib/orphans";
+import IconX from "~icons/ph/x";
 
 import type { PanelGeometry } from "#lib/floating-panel";
 import type { LoadedGraph } from "#lib/types";
@@ -200,7 +201,7 @@ export default class OrphansPanel extends Component {
             aria-label="Close orphans panel"
             title="Close"
             {{on "click" this.close}}
-          >×</button>
+          ><IconX /></button>
         </div>
         {{#if this.orphans.length}}
           <ol class="cycles-panel__list">

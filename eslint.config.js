@@ -12,6 +12,9 @@ import { configs } from "@nullvoxpopuli/eslint-configs";
 export default [
   ...configs.ember(import.meta.dirname),
   {
+    ignores: [".ssg*", "dist/", "dist-*", "tmp", "node_modules", "public"],
+  },
+  {
     // typed-array hot paths in the renderer / layout pipeline and the UI
     // glue that reads them use `array[i]!` assertions because TS's
     // `noUncheckedIndexedAccess` widens index reads to `T | undefined`,

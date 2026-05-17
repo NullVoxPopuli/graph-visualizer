@@ -5,6 +5,8 @@ import { service } from "@ember/service";
 
 import { hasAnyCycle } from "#lib/cycle";
 import { hasAnyOrphan } from "#lib/orphans";
+import IconCaretRight from "~icons/ph/caret-right";
+import IconX from "~icons/ph/x";
 
 import Search from "./search.gts";
 
@@ -506,7 +508,9 @@ export default class Controls extends Component<Signature> {
           </div>
         {{/if}}
         <details class="controls__section controls__details" open>
-          <summary class="controls__section-label">filters</summary>
+          <summary class="controls__section-label"><IconCaretRight
+              class="summary-caret"
+            />filters</summary>
           {{#if this.edgeTypes.length}}
             <div class="controls__filter-group">
               <div class="controls__filter-label">edge types</div>
@@ -550,7 +554,7 @@ export default class Controls extends Component<Signature> {
                       class="controls__glob-remove"
                       title="Remove this include pattern"
                       {{on "click" (fn this.removeIncludeGlob pattern)}}
-                    >×</button>
+                    ><IconX /></button>
                   </li>
                 {{/each}}
               </ul>
@@ -581,7 +585,7 @@ export default class Controls extends Component<Signature> {
                       class="controls__glob-remove"
                       title="Remove this exclude pattern"
                       {{on "click" (fn this.removeExcludeGlob pattern)}}
-                    >×</button>
+                    ><IconX /></button>
                   </li>
                 {{/each}}
               </ul>
@@ -591,6 +595,7 @@ export default class Controls extends Component<Signature> {
         {{#if this.hiddenNodes.length}}
           <details class="controls__section controls__details">
             <summary class="controls__section-head">
+              <IconCaretRight class="summary-caret" />
               <span class="controls__section-label">hidden nodes ({{this.hiddenNodes.length}})</span>
               <button
                 type="button"
@@ -617,7 +622,9 @@ export default class Controls extends Component<Signature> {
           </details>
         {{/if}}
         <details class="controls__section controls__details">
-          <summary class="controls__section-label">layout</summary>
+          <summary class="controls__section-label"><IconCaretRight
+              class="summary-caret"
+            />layout</summary>
           <label class="controls__slider">
             <span class="controls__slider-name">node distance</span>
             <input

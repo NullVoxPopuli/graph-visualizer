@@ -12,6 +12,10 @@ import {
   createResizeModifier,
 } from "#lib/floating-panel";
 import { computeRadii } from "#lib/pack";
+import IconArrowElbowDownRight from "~icons/ph/arrow-elbow-down-right";
+import IconArrowRight from "~icons/ph/arrow-right";
+import IconCaretRight from "~icons/ph/caret-right";
+import IconX from "~icons/ph/x";
 
 import type { PanelGeometry } from "#lib/floating-panel";
 import type { LoadedGraph } from "#lib/types";
@@ -695,7 +699,7 @@ export default class InfoPanel extends Component {
             class="panel__close"
             {{on "click" this.close}}
             aria-label="Close"
-          >×</button>
+          ><IconX /></button>
         </div>
         <div class="panel__body">
           <p class="panel__id">id: <code>{{this.info.id}}</code></p>
@@ -715,7 +719,9 @@ export default class InfoPanel extends Component {
           </p>
 
           <details class="panel__section" open={{this.inOpen}}>
-            <summary class="panel__subhead" {{on "click" this.toggleIn}}>in ({{this.inNeighbors.length}})</summary>
+            <summary class="panel__subhead" {{on "click" this.toggleIn}}><IconCaretRight
+                class="summary-caret"
+              />in ({{this.inNeighbors.length}})</summary>
             {{#if this.inNeighbors.length}}
               <ul class="panel__neighbors">
                 {{#each this.inNeighbors as |entry|}}
@@ -740,7 +746,9 @@ export default class InfoPanel extends Component {
           </details>
 
           <details class="panel__section" open={{this.outOpen}}>
-            <summary class="panel__subhead" {{on "click" this.toggleOut}}>out ({{this.outNeighbors.length}})</summary>
+            <summary class="panel__subhead" {{on "click" this.toggleOut}}><IconCaretRight
+                class="summary-caret"
+              />out ({{this.outNeighbors.length}})</summary>
             {{#if this.outNeighbors.length}}
               <ul class="panel__neighbors">
                 {{#each this.outNeighbors as |entry|}}
@@ -766,6 +774,7 @@ export default class InfoPanel extends Component {
 
           <details class="panel__section" open={{this.cyclesOpen}}>
             <summary class="panel__subhead" {{on "click" this.toggleCycles}}>
+              <IconCaretRight class="summary-caret" />
               <span>cycles ({{this.cycles.length}})</span>
               {{#if this.cycles.length}}
                 <button
@@ -823,7 +832,8 @@ export default class InfoPanel extends Component {
                                     {{#if entry.node.rawFiles.length}}
                                       <span class="panel__neighbor-raw">
                                         {{#each entry.node.rawFiles key="id" as |file index|}}
-                                          {{#if index}}→{{else}}↳{{/if}}
+                                          {{#if index}}<IconArrowRight
+                                            />{{else}}<IconArrowElbowDownRight />{{/if}}
                                           {{file.label}}
                                         {{/each}}
                                       </span>
@@ -876,7 +886,8 @@ export default class InfoPanel extends Component {
                                           {{#if entry.node.rawFiles.length}}
                                             <span class="panel__neighbor-raw">
                                               {{#each entry.node.rawFiles key="id" as |file index|}}
-                                                {{#if index}}→{{else}}↳{{/if}}
+                                                {{#if index}}<IconArrowRight
+                                                  />{{else}}<IconArrowElbowDownRight />{{/if}}
                                                 {{file.label}}
                                               {{/each}}
                                             </span>
@@ -939,7 +950,8 @@ export default class InfoPanel extends Component {
                                   {{#if entry.node.rawFiles.length}}
                                     <span class="panel__neighbor-raw">
                                       {{#each entry.node.rawFiles key="id" as |file index|}}
-                                        {{#if index}}→{{else}}↳{{/if}}
+                                        {{#if index}}<IconArrowRight
+                                          />{{else}}<IconArrowElbowDownRight />{{/if}}
                                         {{file.label}}
                                       {{/each}}
                                     </span>
@@ -990,7 +1002,8 @@ export default class InfoPanel extends Component {
                                         {{#if entry.node.rawFiles.length}}
                                           <span class="panel__neighbor-raw">
                                             {{#each entry.node.rawFiles key="id" as |file index|}}
-                                              {{#if index}}→{{else}}↳{{/if}}
+                                              {{#if index}}<IconArrowRight
+                                                />{{else}}<IconArrowElbowDownRight />{{/if}}
                                               {{file.label}}
                                             {{/each}}
                                           </span>

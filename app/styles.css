@@ -773,16 +773,14 @@ pre code {
   gap: 6px;
 }
 
-.controls__details summary::before {
-  content: "▶";
-  display: inline-block;
+.controls__details summary .summary-caret {
+  flex: none;
   font-size: 14px;
-  line-height: 1;
   color: var(--muted);
   transition: transform 0.12s ease;
 }
 
-.controls__details[open] summary::before {
+.controls__details[open] summary .summary-caret {
   transform: rotate(90deg);
 }
 
@@ -1137,16 +1135,14 @@ pre code {
   display: none;
 }
 
-.panel__section > summary.panel__subhead::before {
-  content: "▶";
-  display: inline-block;
+.panel__section > summary.panel__subhead .summary-caret {
+  flex: none;
   font-size: 11px;
-  line-height: 1;
   color: var(--dim);
   transition: transform 0.12s ease;
 }
 
-.panel__section[open] > summary.panel__subhead::before {
+.panel__section[open] > summary.panel__subhead .summary-caret {
   transform: rotate(90deg);
 }
 
@@ -1503,8 +1499,8 @@ pre code {
 /* Raw-file line shown under a cycle node when contraction has folded
  * a file into its owning package. Slightly muted + monospaced so the
  * file id stands apart from the package label above it. The leading
- * `↳` glyph (or `→` between chained entries) is part of the template
- * content, not CSS. */
+ * arrow icon (corner-down-right, or arrow-right between chained
+ * entries) is rendered by the <Icon> component in the template. */
 .panel__neighbor-raw,
 .cycles-panel__node-raw {
   color: var(--muted);

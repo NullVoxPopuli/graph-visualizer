@@ -2,10 +2,12 @@ import { defineConfig } from "vite";
 import { extensions, ember } from "@embroider/vite";
 import { emberSsg } from "vite-ember-ssr/vite-plugin";
 import { babel } from "@rollup/plugin-babel";
+import Icons from "unplugin-icons/vite";
 
 export default defineConfig({
   plugins: [
     ember(),
+    Icons({ compiler: "ember" }),
     emberSsg({
       routes: ["index", "docs"],
       ssrEntry: "app/app-ssr.ts",

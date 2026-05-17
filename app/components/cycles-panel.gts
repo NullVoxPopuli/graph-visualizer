@@ -19,6 +19,9 @@ import {
   createResizeModifier,
 } from "#lib/floating-panel";
 import { computeRadii } from "#lib/pack";
+import IconArrowElbowDownRight from "~icons/ph/arrow-elbow-down-right";
+import IconArrowRight from "~icons/ph/arrow-right";
+import IconX from "~icons/ph/x";
 
 import type { PanelGeometry } from "#lib/floating-panel";
 import type { LoadedGraph } from "#lib/types";
@@ -264,7 +267,7 @@ export default class CyclesPanel extends Component {
       // When a node is selected, scope the list to cycles whose bundled
       // form involves the selection (or its visible owner, when the
       // selection is a hidden file folded into a package). Without this,
-      // selecting `@acme/billing` would also surface `utils → db` cycles
+      // selecting `@acme/billing` would also surface `utils <IconArrowRight /> db` cycles
       // that have nothing to do with billing — accurate for the whole
       // graph but noise for someone investigating one node.
       let scopeIdx = -1;
@@ -284,8 +287,8 @@ export default class CyclesPanel extends Component {
         this.viewState.hiddenEdgeTypes,
       );
       // Dedupe by canonical node sequence — parallel raw edges between two
-      // packages (e.g. lots of `file → file` imports) all contract to the
-      // same bundled cycle, and listing the same `pkgA → pkgB` 13 times is
+      // packages (e.g. lots of `file <IconArrowRight /> file` imports) all contract to the
+      // same bundled cycle, and listing the same `pkgA <IconArrowRight /> pkgB` 13 times is
       // just noise.
       const seen = new Set<string>();
       const bundled: { nodes: CycleNode[]; key: string }[] = [];
@@ -321,7 +324,7 @@ export default class CyclesPanel extends Component {
       // canonical key). Two passes are needed because the canonical
       // cycle for each *node* is the short id of the smallest cycle
       // that contains it, so we have to know every cycle's id before
-      // building the node → canonical map.
+      // building the node <IconArrowRight /> canonical map.
       const usedIds = new Set<string>();
       const cycleIds = bundled.map(({ key: ck }) => shortCycleId(ck, usedIds));
 
@@ -459,7 +462,7 @@ export default class CyclesPanel extends Component {
             aria-label="Close cycles panel"
             title="Close"
             {{on "click" this.close}}
-          >×</button>
+          ><IconX /></button>
         </div>
         {{#unless this.cycles.length}}
           <p class="cycles-panel__empty">
@@ -518,9 +521,9 @@ export default class CyclesPanel extends Component {
                               <span class="cycles-panel__node-raw">
                                 {{#each node.rawFiles key="id" as |file index|}}
                                   {{#if index}}
-                                    →
+                                    <IconArrowRight />
                                   {{else}}
-                                    ↳
+                                    <IconArrowElbowDownRight />
                                   {{/if}}
                                   {{file.label}}
                                 {{/each}}
@@ -565,9 +568,9 @@ export default class CyclesPanel extends Component {
                                     <span class="cycles-panel__node-raw">
                                       {{#each node.rawFiles key="id" as |file index|}}
                                         {{#if index}}
-                                          →
+                                          <IconArrowRight />
                                         {{else}}
-                                          ↳
+                                          <IconArrowElbowDownRight />
                                         {{/if}}
                                         {{file.label}}
                                       {{/each}}
