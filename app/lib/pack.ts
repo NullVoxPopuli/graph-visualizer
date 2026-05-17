@@ -101,9 +101,18 @@ export function packEdges(
   hiddenTypes: Set<number> | null = null,
   nodeRemap: Int32Array | null = null,
   restrictToNode: number = -1,
+  /**
+   * When restricting to a node, the caller can pass a precomputed list
+   * of that node's incident edge indices so we iterate O(degree) instead
+   * of scanning all `E` edges (and size the buffer to the degree, not the
+   * whole graph). Only valid with `nodeRemap === null`; ignored otherwise.
+   */
+  restrictEdges: Int32Array | null = null,
 ): { buffer: Float32Array; vertexCount: number } {
   const E = edgesFlat.length / 2;
-  const need = E * 12;
+  const useList = restrictEdges !== null && nodeRemap === null;
+  const iterN = useList ? restrictEdges.length : E;
+  const need = iterN * 12;
 
   if (out.length < need) out = new Float32Array(need);
 
@@ -115,7 +124,9 @@ export function packEdges(
   let k = 0;
   let drawn = 0;
 
-  for (let i = 0; i < E; i++) {
+  for (let t = 0; t < iterN; t++) {
+    const i = useList ? restrictEdges[t]! : t;
+
     if (filter && hiddenTypes.has(edgeTypeIds[i]!)) continue;
 
     let a = edgesFlat[2 * i]!;
@@ -184,9 +195,13 @@ export function packArrows(
   hiddenTypes: Set<number> | null = null,
   nodeRemap: Int32Array | null = null,
   restrictToNode: number = -1,
+  /** See `packEdges` — incident-edge list for the O(degree) restricted path. */
+  restrictEdges: Int32Array | null = null,
 ): { buffer: Float32Array; count: number } {
   const E = edgesFlat.length / 2;
-  const need = E * 9;
+  const useList = restrictEdges !== null && nodeRemap === null;
+  const iterN = useList ? restrictEdges.length : E;
+  const need = iterN * 9;
 
   if (out.length < need) out = new Float32Array(need);
 
@@ -197,7 +212,9 @@ export function packArrows(
   const color: [number, number, number] = [0, 0, 0];
   let count = 0;
 
-  for (let i = 0; i < E; i++) {
+  for (let t = 0; t < iterN; t++) {
+    const i = useList ? restrictEdges[t]! : t;
+
     if (filter && hiddenTypes.has(edgeTypeIds[i]!)) continue;
 
     let a = edgesFlat[2 * i]!;
