@@ -16,17 +16,22 @@ module("Integration | controls", function (hooks) {
     stubRouterTransitions(this.owner);
   });
 
-  test("shows the cycle-status footer when a graph is loaded", async function (assert) {
+  // Cycle status is surfaced by the presence of the "Show cycles" button
+  // (rendered only when `showCyclesPanelButton` — i.e. a graph is loaded
+  // and it has at least one directed cycle), not a text footer. The
+  // panel is closed by default in these tests, so the button carries
+  // `title="Open the cycle list panel"` and reads "Show cycles".
+  test("does not surface the cycles button when the graph has no cycles", async function (assert) {
     loadGraph(this.owner, {
       nodes: [{ id: "a" }, { id: "b" }],
     });
 
     await render(<template><Controls @onResetView={{NOOP}} /></template>);
 
-    assert.dom(".controls__cycles-status").includesText("no cycles");
+    assert.dom('[title="Open the cycle list panel"]').doesNotExist();
   });
 
-  test("reports a cycle in the footer when one exists", async function (assert) {
+  test("surfaces the cycles button when the graph has a cycle", async function (assert) {
     loadGraph(this.owner, {
       nodes: [
         { id: "a", edges: ["b"] },
@@ -36,7 +41,7 @@ module("Integration | controls", function (hooks) {
 
     await render(<template><Controls @onResetView={{NOOP}} /></template>);
 
-    assert.dom(".controls__cycles-status").includesText("at least one cycle");
+    assert.dom('[title="Open the cycle list panel"]').hasText("Show cycles");
   });
 
   test("edge-type filters list each distinct edge type with its count", async function (assert) {
