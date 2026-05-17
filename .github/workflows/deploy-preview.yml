@@ -76,6 +76,27 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: wyvox/action-setup-pnpm@v4
+      # The Rust/WASM layout backend lives in `crates/layout-wasm` and is
+      # only present on refs that include that change. This workflow runs
+      # from main's copy for *every* PR (workflow_run always uses the
+      # default branch's definition) while building an arbitrary head ref,
+      # so gate every Rust step on the crate actually being checked out:
+      # absent → step skipped (green), not errored. Activates automatically
+      # once the crate is on the ref being built (its own PR preview, and
+      # main once that PR merges). `hashFiles` is evaluated post-checkout
+      # and returns '' when the path doesn't exist.
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ hashFiles('crates/layout-wasm/Cargo.toml') != '' }}
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ hashFiles('crates/layout-wasm/Cargo.toml') != '' }}
+        with:
+          workspaces: "crates/layout-wasm"
+      - uses: taiki-e/install-action@v2
+        if: ${{ hashFiles('crates/layout-wasm/Cargo.toml') != '' }}
+        with:
+          tool: wasm-pack
+      - run: pnpm build:wasm
+        if: ${{ hashFiles('crates/layout-wasm/Cargo.toml') != '' }}
       - run: pnpm turbo build:prod
       - uses: actions/upload-artifact@v7
         with:
