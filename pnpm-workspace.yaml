@@ -1,0 +1,16 @@
+minimumReleaseAgeExclude:
+  - "@glimmer/*"
+  - "@glint/*"
+  - "@embroider/*"
+  - ember-source
+  - eslint-plugin-ember
+  - ember-eslint-parser
+  - ember-estree
+  - oxc-parser
+
+overrides:
+  eslint-plugin-ember: "13.3.0"
+
+peerDependencyRules:
+  allowedVersions:
+    "vite-ember-ssr>vite": "8"

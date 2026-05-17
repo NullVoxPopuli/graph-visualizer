@@ -1,7 +1,5 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { fn } from "@ember/helper";
-import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
@@ -794,13 +792,10 @@ export default class InfoPanel extends Component {
                           "true"
                           "false"
                         }}
-                        title="Referenced by {{ref.count}} other cycle{{if
-                          (notEq ref.count 1)
-                          's'
-                        }}"
+                        title="Referenced by {{ref.count}} other cycle{{if (neq ref.count 1) 's'}}"
                       >
                         <span class="panel__cycle-head-text">referenced by
-                          {{ref.count}}{{if (notEq ref.count 1) " cycles" " cycle"}}
+                          {{ref.count}}{{if (neq ref.count 1) " cycles" " cycle"}}
                           ·
                           {{ref.entry.nodes.length}}
                           nodes</span>
@@ -822,7 +817,7 @@ export default class InfoPanel extends Component {
                                     {{on "mouseleave" this.unhoverNeighbor}}
                                   >
                                     <span class="panel__neighbor-label">{{entry.node.label}}</span>
-                                    {{#if (notEq entry.node.id entry.node.label)}}
+                                    {{#if (neq entry.node.id entry.node.label)}}
                                       <code class="panel__neighbor-id">{{entry.node.id}}</code>
                                     {{/if}}
                                     {{#if entry.node.rawFiles.length}}
@@ -873,7 +868,7 @@ export default class InfoPanel extends Component {
                                           <span
                                             class="panel__neighbor-label"
                                           >{{entry.node.label}}</span>
-                                          {{#if (notEq entry.node.id entry.node.label)}}
+                                          {{#if (neq entry.node.id entry.node.label)}}
                                             <code
                                               class="panel__neighbor-id"
                                             >{{entry.node.id}}</code>
@@ -938,7 +933,7 @@ export default class InfoPanel extends Component {
                                   {{on "mouseleave" this.unhoverNeighbor}}
                                 >
                                   <span class="panel__neighbor-label">{{entry.node.label}}</span>
-                                  {{#if (notEq entry.node.id entry.node.label)}}
+                                  {{#if (neq entry.node.id entry.node.label)}}
                                     <code class="panel__neighbor-id">{{entry.node.id}}</code>
                                   {{/if}}
                                   {{#if entry.node.rawFiles.length}}
@@ -989,7 +984,7 @@ export default class InfoPanel extends Component {
                                         <span
                                           class="panel__neighbor-label"
                                         >{{entry.node.label}}</span>
-                                        {{#if (notEq entry.node.id entry.node.label)}}
+                                        {{#if (neq entry.node.id entry.node.label)}}
                                           <code class="panel__neighbor-id">{{entry.node.id}}</code>
                                         {{/if}}
                                         {{#if entry.node.rawFiles.length}}
@@ -1088,10 +1083,6 @@ function buildCycleSegments(
   }
 
   return out;
-}
-
-function notEq(a: unknown, b: unknown): boolean {
-  return a !== b;
 }
 
 function isExpanded(set: Set<string>, key: string): boolean {

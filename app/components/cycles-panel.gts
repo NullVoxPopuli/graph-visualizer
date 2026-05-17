@@ -1,7 +1,5 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { fn } from "@ember/helper";
-import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
@@ -513,7 +511,7 @@ export default class CyclesPanel extends Component {
                             {{on "mouseleave" this.unhoverNode}}
                           >
                             <span class="cycles-panel__node-label">{{node.label}}</span>
-                            {{#if (notEq node.id node.label)}}
+                            {{#if (neq node.id node.label)}}
                               <code class="cycles-panel__node-id">{{node.id}}</code>
                             {{/if}}
                             {{#if node.rawFiles.length}}
@@ -560,7 +558,7 @@ export default class CyclesPanel extends Component {
                                   {{on "mouseleave" this.unhoverNode}}
                                 >
                                   <span class="cycles-panel__node-label">{{node.label}}</span>
-                                  {{#if (notEq node.id node.label)}}
+                                  {{#if (neq node.id node.label)}}
                                     <code class="cycles-panel__node-id">{{node.id}}</code>
                                   {{/if}}
                                   {{#if node.rawFiles.length}}
@@ -613,14 +611,6 @@ function serializeStringSet(set: Set<string>): string {
   return [...set].sort().join(",");
 }
 
-function eq(a: unknown, b: unknown): boolean {
-  return a === b;
-}
-
 function has(set: Set<string>, key: string): boolean {
   return set.has(key);
-}
-
-function notEq(a: unknown, b: unknown): boolean {
-  return a !== b;
 }

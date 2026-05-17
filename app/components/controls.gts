@@ -1,7 +1,5 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { fn } from "@ember/helper";
-import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
@@ -749,8 +747,4 @@ export default class Controls extends Component<Signature> {
       </button>
     {{/if}}
   </template>
-}
-
-function not(v: unknown): boolean {
-  return !v;
 }

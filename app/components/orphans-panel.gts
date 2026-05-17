@@ -1,6 +1,4 @@
 import Component from "@glimmer/component";
-import { fn } from "@ember/helper";
-import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
@@ -223,7 +221,7 @@ export default class OrphansPanel extends Component {
                   {{on "mouseleave" this.unhoverNode}}
                 >
                   <span class="cycles-panel__node-label">{{entry.label}}</span>
-                  {{#if (notEq entry.id entry.label)}}
+                  {{#if (neq entry.id entry.label)}}
                     <code class="cycles-panel__node-id">{{entry.id}}</code>
                   {{/if}}
                 </button>
@@ -244,14 +242,6 @@ export default class OrphansPanel extends Component {
       </aside>
     {{/if}}
   </template>
-}
-
-function eq(a: unknown, b: unknown): boolean {
-  return a === b;
-}
-
-function notEq(a: unknown, b: unknown): boolean {
-  return a !== b;
 }
 
 function serializeIntSet(set: Set<number>): string {

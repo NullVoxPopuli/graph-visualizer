@@ -55,8 +55,8 @@
     "flatbush": "^4.5.1",
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
-    "graphology-types": "^0.24.7",
-    "idb": "^8.0.0",
+    "graphology-types": "^0.24.8",
+    "idb": "^8.0.3",
     "nvp.ui": "^0.5.3",
     "reactiveweb": "^1.9.1",
     "shiki": "^4.0.2",
@@ -72,9 +72,9 @@
     "@ember/test-waiters": "4.1.1",
     "@embroider/core": "4.4.7",
     "@embroider/vite": "1.7.2",
-    "@glint/ember-tsc": "1.6.2",
+    "@glint/ember-tsc": "1.7.1",
     "@glint/template": "1.7.7",
-    "@glint/tsserver-plugin": "2.4.3",
+    "@glint/tsserver-plugin": "2.5.1",
     "@nullvoxpopuli/eslint-configs": "5.5.0",
     "@rollup/plugin-babel": "7.0.0",
     "@types/d3-force": "^3.0.10",
@@ -101,11 +101,5 @@
   "ember": {
     "edition": "octane"
   },
-  "pnpm": {
-    "peerDependencyRules": {
-      "allowedVersions": {
-        "vite-ember-ssr>vite": "8"
-      }
-    }
-  }
+  "packageManager": "pnpm@10.33.4"
 }
