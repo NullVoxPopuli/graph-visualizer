@@ -266,9 +266,10 @@ pre code {
 
 .visualizer__fps {
   position: fixed;
-  top: 8px;
+  /* Clear the sticky `.app-header` (≈44px: 10px×2 padding + content). */
+  top: 52px;
   right: 8px;
-  z-index: 10;
+  z-index: 9;
   padding: 2px 7px;
   border-radius: 5px;
   background: rgba(0, 0, 0, 0.55);
