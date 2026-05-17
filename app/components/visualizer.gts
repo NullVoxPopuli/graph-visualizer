@@ -111,6 +111,16 @@ export default class Visualizer extends Component {
    */
   private nodeRemap: Int32Array | null = null;
 
+  // Memoized whole-graph bundled cycles. `findBundledCyclesViaRaw` is
+  // graph-wide elementary-cycle enumeration — expensive on big cyclic
+  // graphs — and its result depends only on the graph + contraction
+  // remap, NOT on the selection. Without this it was re-enumerated on
+  // every node click (the reported >10k-node click lag); now a click
+  // only re-filters the cached array by the selected node.
+  #allCycles: number[][] | null = null;
+  #allCyclesGraph: ProcessedScene["graph"] | null = null;
+  #allCyclesRemap: Int32Array | null = null;
+
   // ember-modifier auto-tracks reads inside the function body, so any tracked
   // value read here would tear down + re-run the renderer on every change.
   // Keep this body free of viewState/visualizer reads — the rAF loop and
@@ -302,13 +312,27 @@ export default class Visualizer extends Component {
     }
 
     const N = scene.communities.length;
+
     // Bundled cycles that are *backed by a raw elementary cycle*. Pure
     // contracted-graph cycles (two unrelated cross-package edges that
     // happen to close a loop after contraction) used to render as
     // misleading red rings on packages whose files have no actual
     // circular dependency. `findBundledCyclesViaRaw` filters those out.
-    const allCycles = findBundledCyclesViaRaw(scene.graph, this.nodeRemap);
-    const cycles = allCycles.filter((c) => c.includes(selected));
+    // Recompute the graph-wide cycle set only when the graph or the
+    // contraction remap actually changes — not on selection. Both are
+    // replaced by reference when filters/contraction change, so identity
+    // comparison is a correct (and cheap) cache key.
+    if (
+      this.#allCycles === null ||
+      this.#allCyclesGraph !== scene.graph ||
+      this.#allCyclesRemap !== this.nodeRemap
+    ) {
+      this.#allCycles = findBundledCyclesViaRaw(scene.graph, this.nodeRemap);
+      this.#allCyclesGraph = scene.graph;
+      this.#allCyclesRemap = this.nodeRemap;
+    }
+
+    const cycles = this.#allCycles.filter((c) => c.includes(selected));
     let cycleMask: Uint8Array | null = null;
 
     if (cycles.length > 0) {
