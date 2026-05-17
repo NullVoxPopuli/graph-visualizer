@@ -33,7 +33,9 @@
     "build:test": "EMBER_ENV=test vite build --mode development",
     "test:ci": "testem ci --port 0",
     "test": "pnpm build:test && pnpm test:ci",
-    "lint:types": "ember-tsc --noEmit"
+    "lint:types": "ember-tsc --noEmit",
+    "bench:layout": "tsx bench/layout.bench.ts",
+    "build:wasm": "wasm-pack build crates/layout-wasm --release --target web --out-dir ../../app/lib/wasm --out-name layout_wasm && wasm-pack build crates/layout-wasm --release --target nodejs --out-dir pkg-node --out-name layout_wasm"
   },
   "dependencies": {
     "@embroider/macros": "1.20.2",
@@ -87,12 +89,14 @@
     "concurrently": "9.2.1",
     "ember-qunit": "9.0.4",
     "eslint": "9.39.4",
+    "mitata": "^1.0.34",
     "prettier": "3.8.3",
     "prettier-plugin-ember-template-tag": "2.1.6",
     "qunit": "2.25.0",
     "qunit-dom": "3.5.1",
     "qunit-theme-ember": "1.0.0",
     "testem": "3.20.0",
+    "tsx": "^4.22.1",
     "typescript": "6.0.3",
     "unplugin-icons": "^23.0.1",
     "vite": "8.0.13"

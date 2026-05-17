@@ -317,6 +317,25 @@ function startAnalyze(
  * `terminate()` a still-running layout when a new slider value arrives,
  * so we don't burn CPU on results nobody is going to see.
  */
+/**
+ * Whether to route layout through the Rust/WASM worker. Reads `?layout=`
+ * first (one-off override), then `localStorage.layout` (sticky). Anything
+ * other than `"wasm"` — including the absence of both — keeps the JS
+ * worker. Defensive try/catch so a locked-down `localStorage` (private
+ * mode, some embeds) can't break layout entirely.
+ */
+function useWasmLayout(): boolean {
+  try {
+    const qp = new URLSearchParams(globalThis.location?.search ?? "").get("layout");
+
+    if (qp) return qp === "wasm";
+
+    return globalThis.localStorage?.getItem("layout") === "wasm";
+  } catch {
+    return false;
+  }
+}
+
 function startLayout(
   graph: LoadedGraph,
   communities: Int32Array,
@@ -324,9 +343,16 @@ function startLayout(
   params: { repulsion: number; nodeDistance: number; clusterDistance: number },
   onProgress?: (tick: number, total: number) => void,
 ): { worker: Worker; result: Promise<Float32Array> } {
-  const worker = new Worker(new URL("../lib/layout.worker.ts", import.meta.url), {
-    type: "module",
-  });
+  // Opt into the experimental Rust/WASM layout backend with
+  // `?layout=wasm` (or persistently via `localStorage.layout = "wasm"`).
+  // Both workers expose the identical Comlink `LayoutEngine`, so this is
+  // the only site that needs to know which one is running. JS stays the
+  // default until the WASM port has had more real-world mileage. The two
+  // `new URL(...)` literals are kept separate (not a computed path) so the
+  // bundler can statically discover and build each worker.
+  const worker = useWasmLayout()
+    ? new Worker(new URL("../lib/layout-wasm.worker.ts", import.meta.url), { type: "module" })
+    : new Worker(new URL("../lib/layout.worker.ts", import.meta.url), { type: "module" });
   const layout = Comlink.wrap<LayoutEngine>(worker);
   const init: LayoutInit = {
     nodeCount: graph.ids.length,

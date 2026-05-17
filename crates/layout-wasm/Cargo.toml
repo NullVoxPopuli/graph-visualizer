@@ -1,0 +1,22 @@
+[package]
+name = "layout-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Faithful Rust/WASM port of the d3-force layout pipeline used by graph-visualizer's layout worker"
+license = "AGPL-3.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+# A force layout is a tight numeric loop — optimize hard. `lto` + a single
+# codegen unit measurably shrink the per-tick cost, and `opt-level = 3`
+# (not "s") keeps the quadtree traversal fast.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
