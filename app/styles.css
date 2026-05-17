@@ -1750,6 +1750,34 @@ pre code {
   overflow-wrap: anywhere;
 }
 
+.orphans-panel__row {
+  display: flex;
+  align-items: center;
+}
+
+.orphans-panel__row .cycles-panel__node {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.orphans-panel__root-btn {
+  flex: none;
+  margin: 0 8px;
+  padding: 2px 7px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 10.5px;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.orphans-panel__root-btn:hover {
+  background: rgba(106, 167, 255, 0.14);
+}
+
 /* ---------- docs ---------- */
 
 .docs {

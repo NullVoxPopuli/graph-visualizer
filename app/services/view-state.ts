@@ -358,6 +358,38 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Ids of nodes the user has declared intentional *roots* for orphan
+   * detection (via the orphans-panel "declare root" button). A root is
+   * treated as always present: it's never reported as an orphan, and
+   * anything reachable only through it stops being reported too.
+   * Independent of `hiddenNodeIds` — a root still renders on the canvas
+   * and participates in every other analysis. Ids containing a literal
+   * `,` cannot round-trip through this URL encoding.
+   */
+  get rootNodeIds(): Set<string> {
+    const raw = this.#qps["rootNodes"];
+
+    if (!raw) return EMPTY_STRING_SET;
+
+    return new Set(raw.split(",").filter((s) => s.length > 0));
+  }
+
+  toggleRootNodeId(id: string): void {
+    const next = new Set(this.rootNodeIds);
+
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+
+    const serialized = next.size === 0 ? null : [...next].join(",");
+
+    this.#setParam("rootNodes", serialized);
+  }
+
+  clearRootNodes(): void {
+    this.#setParam("rootNodes", null);
+  }
+
+  /**
    * Label glob include / exclude lists. A label is shown when it
    * matches any include glob (or the include list is empty) AND does
    * not match any exclude glob. Encoded in the URL as pipe-separated
@@ -450,6 +482,7 @@ export default class ViewStateService extends Service {
     this.#setParam("selected", null);
     this.#setParam("collapsed", null);
     this.#setParam("hiddenNodes", null);
+    this.#setParam("rootNodes", null);
     this.#setParam("hiddenNodeTypes", null);
     this.#setParam("hiddenEdgeTypes", null);
     // Glob filters are technically graph-agnostic — the same `**/*.test.ts`

@@ -374,6 +374,44 @@ export default class Controls extends Component<Signature> {
     this.viewState.clearHiddenNodes();
   }
 
+  /**
+   * Nodes the user has declared intentional roots (orphans-panel
+   * "declare root" button). Same id→label resolution as `hiddenNodes`
+   * so the controls panel can list them readably and offer an undo.
+   */
+  get roots(): { id: string; label: string }[] {
+    const ids = this.viewState.rootNodeIds;
+
+    if (ids.size === 0) return [];
+
+    const g = this.graph.current;
+    const out: { id: string; label: string }[] = [];
+
+    for (const id of ids) {
+      const idx = g?.idToIndex.get(id);
+
+      out.push({ id, label: idx !== undefined ? (g!.labels[idx] ?? id) : id });
+    }
+
+    out.sort((a, b) => a.label.localeCompare(b.label));
+
+    return out;
+  }
+
+  @action
+  undeclareRoot(id: string): void {
+    this.viewState.toggleRootNodeId(id);
+  }
+
+  @action
+  clearRoots(event: MouseEvent): void {
+    // Same rationale as `clearHiddenNodes`: the button sits in the
+    // section's `<summary>`, so swallow the click to keep it from
+    // toggling the parent `<details>`.
+    event.stopPropagation();
+    this.viewState.clearRootNodes();
+  }
+
   @action
   setRepulsion(ev: Event): void {
     const v = Number.parseFloat((ev.target as HTMLInputElement).value);
@@ -615,6 +653,35 @@ export default class Controls extends Component<Signature> {
                   >
                     <span class="controls__hidden-label">{{h.label}}</span>
                     <code class="controls__hidden-id">{{h.id}}</code>
+                  </button>
+                </li>
+              {{/each}}
+            </ul>
+          </details>
+        {{/if}}
+        {{#if this.roots.length}}
+          <details class="controls__section controls__details">
+            <summary class="controls__section-head">
+              <IconCaretRight class="summary-caret" />
+              <span class="controls__section-label">roots ({{this.roots.length}})</span>
+              <button
+                type="button"
+                class="controls__section-action"
+                {{on "click" this.clearRoots}}
+                title="Clear every declared root"
+              >clear</button>
+            </summary>
+            <ul class="controls__hidden-list">
+              {{#each this.roots as |r|}}
+                <li class="controls__hidden">
+                  <button
+                    type="button"
+                    class="controls__hidden-row"
+                    title="Undeclare {{r.label}} as a root"
+                    {{on "click" (fn this.undeclareRoot r.id)}}
+                  >
+                    <span class="controls__hidden-label">{{r.label}}</span>
+                    <code class="controls__hidden-id">{{r.id}}</code>
                   </button>
                 </li>
               {{/each}}

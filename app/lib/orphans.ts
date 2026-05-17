@@ -30,8 +30,18 @@ import type { LoadedGraph } from "./types.ts";
  * filtered-out edge types. With a filter active we recompute in/out
  * adjacency over the visible edges; without one, the pre-cached
  * `graph.inDegree` is used directly.
+ *
+ * `rootIds` (optional, node indices) are nodes the user has declared
+ * intentional roots: they're never peeled, so neither they nor the
+ * subtree reachable only through them is reported as an orphan — even
+ * when their in-degree is (or drops to) zero. A root with real
+ * incoming edges is a no-op since it wouldn't have been peeled anyway.
  */
-export function findOrphans(graph: LoadedGraph, hiddenEdgeTypes?: ReadonlySet<number>): number[] {
+export function findOrphans(
+  graph: LoadedGraph,
+  hiddenEdgeTypes?: ReadonlySet<number>,
+  rootIds?: ReadonlySet<number>,
+): number[] {
   const N = graph.ids.length;
 
   if (N === 0) return [];
@@ -83,12 +93,13 @@ export function findOrphans(graph: LoadedGraph, hiddenEdgeTypes?: ReadonlySet<nu
     filled[a]!++;
   }
 
+  const roots = rootIds && rootIds.size > 0 ? rootIds : null;
   const orphans: number[] = [];
   const queue: number[] = [];
   let head = 0;
 
   for (let i = 0; i < N; i++) {
-    if (inDegree[i]! === 0) queue.push(i);
+    if (inDegree[i]! === 0 && !roots?.has(i)) queue.push(i);
   }
 
   while (head < queue.length) {
@@ -100,7 +111,7 @@ export function findOrphans(graph: LoadedGraph, hiddenEdgeTypes?: ReadonlySet<nu
       const v = outAdj[j]!;
 
       inDegree[v]!--;
-      if (inDegree[v]! === 0) queue.push(v);
+      if (inDegree[v]! === 0 && !roots?.has(v)) queue.push(v);
     }
   }
 

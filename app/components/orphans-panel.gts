@@ -72,14 +72,29 @@ export default class OrphansPanel extends Component {
 
     const hiddenEdgeTypes = this.viewState.hiddenEdgeTypes;
     const effectiveHidden = this.viewState.effectiveHiddenNodeIds(g);
-    const cacheKey = `${serializeIntSet(hiddenEdgeTypes)}|${serializeStringSet(effectiveHidden)}`;
+    const rootNodeIds = this.viewState.rootNodeIds;
+    const cacheKey = `${serializeIntSet(hiddenEdgeTypes)}|${serializeStringSet(effectiveHidden)}|${serializeStringSet(rootNodeIds)}`;
 
     if (g !== this.#lastGraph || cacheKey !== this.#lastCacheKey) {
       // Cache miss: re-run the analysis. Same write-inside-the-branch
       // shape as the cycles panel's getter so the eslint
       // `ember/no-side-effects` rule reads this as a memoized
       // computation rather than an unconditional mutation.
-      const rawOrphans = findOrphans(g, hiddenEdgeTypes);
+      // Map the user's declared-root ids to node indices for the peel.
+      // Skipped entirely when nothing's declared.
+      let rootIndices: Set<number> | undefined;
+
+      if (rootNodeIds.size > 0) {
+        rootIndices = new Set<number>();
+
+        for (const id of rootNodeIds) {
+          const idx = g.idToIndex.get(id);
+
+          if (idx !== undefined) rootIndices.add(idx);
+        }
+      }
+
+      const rawOrphans = findOrphans(g, hiddenEdgeTypes, rootIndices);
       const entries: OrphanEntry[] = [];
 
       for (const idx of rawOrphans) {
@@ -123,6 +138,11 @@ export default class OrphansPanel extends Component {
   @action
   unhoverNode(): void {
     this.visualizer.externalHoverId = null;
+  }
+
+  @action
+  declareRoot(id: string): void {
+    this.viewState.toggleRootNodeId(id);
   }
 
   @action
@@ -212,7 +232,7 @@ export default class OrphansPanel extends Component {
               @bufferSize={{2}}
               as |entry|
             >
-              <li>
+              <li class="orphans-panel__row">
                 <button
                   type="button"
                   class="cycles-panel__node {{if (eq entry.id this.selectedId) 'is-selected'}}"
@@ -226,6 +246,12 @@ export default class OrphansPanel extends Component {
                     <code class="cycles-panel__node-id">{{entry.id}}</code>
                   {{/if}}
                 </button>
+                <button
+                  type="button"
+                  class="orphans-panel__root-btn"
+                  title="Declare this node an intentional root: exclude it (and anything reachable only through it) from orphan detection"
+                  {{on "click" (fn this.declareRoot entry.id)}}
+                >declare root</button>
               </li>
             </VerticalCollection>
           </ol>
