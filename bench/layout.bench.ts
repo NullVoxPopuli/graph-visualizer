@@ -69,17 +69,25 @@ async function runJs(init: LayoutInit): Promise<Float32Array> {
 }
 
 async function smoke(sizes: number[], wasm: WasmLayout | null): Promise<void> {
+  // `BENCH_WASM_ONLY=1` skips the (slow) JS baseline — for quick WASM-only
+  // probing (per-phase profiling builds, parallel-vs-serial sweeps).
+  const wasmOnly = process.env["BENCH_WASM_ONLY"] === "1";
+
   for (const size of sizes) {
     const init = generateLayoutInit({ nodeCount: size });
 
     console.info(`\n${describeGraph(init)}`);
 
-    const t0 = performance.now();
-    const jsPos = await runJs(init);
-    const jsMs = performance.now() - t0;
+    let jsMs = NaN;
 
-    assertSanePositions(jsPos, size, `JS@${size}`);
-    console.info(`  JS    ${jsMs.toFixed(1).padStart(9)} ms`);
+    if (!wasmOnly) {
+      const t0 = performance.now();
+      const jsPos = await runJs(init);
+
+      jsMs = performance.now() - t0;
+      assertSanePositions(jsPos, size, `JS@${size}`);
+      console.info(`  JS    ${jsMs.toFixed(1).padStart(9)} ms`);
+    }
 
     if (wasm) {
       const t1 = performance.now();
@@ -87,9 +95,10 @@ async function smoke(sizes: number[], wasm: WasmLayout | null): Promise<void> {
       const wasmMs = performance.now() - t1;
 
       assertSanePositions(wasmPos, size, `WASM@${size}`);
-      console.info(
-        `  WASM  ${wasmMs.toFixed(1).padStart(9)} ms   (${(jsMs / wasmMs).toFixed(2)}× vs JS)`,
-      );
+
+      const vs = Number.isFinite(jsMs) ? `   (${(jsMs / wasmMs).toFixed(2)}× vs JS)` : "";
+
+      console.info(`  WASM  ${wasmMs.toFixed(1).padStart(9)} ms${vs}`);
     }
   }
 }
@@ -106,7 +115,8 @@ async function main(): Promise<void> {
   }
 
   if (arg === "smoke") {
-    await smoke(sizes, wasm);
+    // `smoke` alone → default sizes; `smoke 3000,5000` → those sizes.
+    await smoke(parseSizes(process.argv[3]), wasm);
 
     return;
   }
