@@ -16,11 +16,14 @@ let wasmReady: Promise<unknown> | null = null;
 
 const layoutEngine = {
   /**
-   * Run the Rust/WASM port of the d3-force pipeline. The simulation runs
-   * to completion synchronously inside WASM (it can't cooperatively yield
-   * the way the JS worker does between batches), so progress is reported
-   * as a single 0→done transition. Cancellation still works: the service
-   * `terminate()`s the whole worker, which kills the WASM run outright.
+   * Run the Rust/WASM port of the d3-force pipeline. WASM can't
+   * cooperatively yield mid-run, but it calls `progress` once per batch
+   * so the progress bar still advances during the (multi-second on big
+   * graphs) layout. Uses the `fast` approximation schedule — steeper
+   * alpha decay + single collide pass — for a large speedup at a small,
+   * measured layout difference (`?layout=js` keeps the faithful path).
+   * Cancellation still works: the service `terminate()`s the whole
+   * worker, killing the WASM run outright.
    */
   async run(
     layoutInit: LayoutInit,
@@ -46,6 +49,7 @@ const layoutEngine = {
       layoutInit.nodeDistance,
       layoutInit.clusterDistance,
       layoutInit.cohesion,
+      onProgress ? (tick: number, total: number) => onProgress(tick, total) : undefined,
     );
 
     onProgress?.(1000, 1000);

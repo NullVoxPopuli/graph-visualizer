@@ -25,7 +25,6 @@ const MAX_INDEXED_COMM: usize = 200_000;
 const MAX_TICKS: usize = 500;
 const BATCH: usize = 8;
 const ALPHA_MIN: f64 = 0.001;
-const ALPHA_DECAY: f64 = 0.02;
 const ALPHA_TARGET: f64 = 0.0;
 // d3's `velocityDecay(_)` setter stores `1 - _`; layout-core calls
 // `.velocityDecay(0.35)`, so the value used in the integrator is 0.65.
@@ -36,7 +35,19 @@ const CENTER_STRENGTH: f64 = 0.005;
 const INTRA_STRENGTH: f64 = 0.5;
 const INTER_STRENGTH: f64 = 0.12;
 const COLLIDE_STRENGTH: f64 = 0.85;
-const COLLIDE_ITERATIONS: usize = 2;
+// Single fast schedule (no faithful/config option by design): a steep
+// alpha decay reaches alphaMin in ~150 ticks and collide runs one
+// iteration. Combined with the quiescence early-exit below, the layout
+// settles in a fraction of d3's ~342-tick schedule. We optimize for
+// "communities + layout look good, fast" — not for matching d3.
+const ALPHA_DECAY: f64 = 0.045;
+const COLLIDE_ITERATIONS: usize = 1;
+// Quiescence: stop once the furthest a node moves across a whole batch
+// drops below QUIET_REL × (RMS layout radius) for QUIET_WINDOWS batches
+// in a row ("2 iterations of nodes barely moving"). Net per-batch
+// movement (not per-tick) so a slow global crawl still counts as motion.
+const QUIET_REL: f64 = 1.0e-3;
+const QUIET_WINDOWS: usize = 2;
 
 /// d3-force's `lcg.js`, shared across forces for the whole run (the
 /// simulation creates one `random` and hands the same instance to every
@@ -135,7 +146,16 @@ impl Links {
     }
 }
 
+/// Run the layout. Single fast schedule + quiescence early-exit (stops
+/// once nodes are barely moving for two batches running) — no faithful
+/// mode by design; we optimize for a good-looking layout, fast.
+///
+/// `progress`, when provided, is called once per batch with
+/// `(permille, 1000)` (same 0..1000 convention as the JS worker) so a
+/// long run can drive a progress bar — the WASM run is otherwise a
+/// single synchronous call.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn run_layout(
     node_count: usize,
     edges: &[i32],
@@ -146,6 +166,7 @@ pub fn run_layout(
     node_distance: f64,
     cluster_distance: f64,
     cohesion: f64,
+    progress: Option<js_sys::Function>,
 ) -> Vec<f32> {
     let n = node_count;
     let radii: Vec<f64> = radii.iter().map(|&v| v as f64).collect();
@@ -205,8 +226,31 @@ pub fn run_layout(
         rng: Lcg::new(),
     };
 
+    let log_alpha_min = ALPHA_MIN.ln();
+    let report = |it: usize, alpha: f64| {
+        if let Some(f) = progress.as_ref() {
+            // Same 0..1000 progress as layout-core: the further along of
+            // alpha decay and the iteration cap.
+            let by_alpha = if alpha <= ALPHA_MIN {
+                1.0
+            } else {
+                (alpha.ln() / log_alpha_min).max(0.0)
+            };
+            let by_iter = it as f64 / MAX_TICKS as f64;
+            let p = by_alpha.max(by_iter).clamp(0.0, 1.0);
+            let _ = f.call2(
+                &wasm_bindgen::JsValue::NULL,
+                &wasm_bindgen::JsValue::from_f64((p * 1000.0).round()),
+                &wasm_bindgen::JsValue::from_f64(1000.0),
+            );
+        }
+    };
+
     let mut alpha = 1.0f64;
     let mut it = 0usize;
+    let mut quiet = 0usize;
+    let mut prev_x = sim.nodes.x.clone();
+    let mut prev_y = sim.nodes.y.clone();
     while it < MAX_TICKS {
         let end = (it + BATCH).min(MAX_TICKS);
         while it < end {
@@ -218,10 +262,39 @@ pub fn run_layout(
         if (sim.spread_factor - 1.0).abs() > f64::EPSILON {
             apply_cluster_spread(&mut sim);
         }
+        report(it, alpha);
+
+        // Quiescence: furthest net node move over this batch vs RMS scale.
+        let mut sum_r2 = 0.0f64;
+        let mut max_move2 = 0.0f64;
+        for i in 0..n {
+            let x = sim.nodes.x[i];
+            let y = sim.nodes.y[i];
+            sum_r2 += x * x + y * y;
+            let dx = x - prev_x[i];
+            let dy = y - prev_y[i];
+            let m2 = dx * dx + dy * dy;
+            if m2 > max_move2 {
+                max_move2 = m2;
+            }
+        }
+        let scale = (sum_r2 / n.max(1) as f64).sqrt().max(1.0);
+        if max_move2.sqrt() < QUIET_REL * scale {
+            quiet += 1;
+            if quiet >= QUIET_WINDOWS {
+                break;
+            }
+        } else {
+            quiet = 0;
+        }
+        prev_x.copy_from_slice(&sim.nodes.x);
+        prev_y.copy_from_slice(&sim.nodes.y);
+
         if alpha <= ALPHA_MIN {
             break;
         }
     }
+    report(MAX_TICKS, ALPHA_MIN);
 
     let mut out = vec![0.0f32; n * 2];
     for i in 0..n {

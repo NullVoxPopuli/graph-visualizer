@@ -24,6 +24,7 @@ interface WasmModule {
     nodeDistance: number,
     clusterDistance: number,
     cohesion: number,
+    progress: ((tick: number, total: number) => void) | undefined,
   ): Float32Array;
 }
 
@@ -50,6 +51,7 @@ export async function loadWasmLayout(): Promise<WasmLayout | null> {
           init.nodeDistance,
           init.clusterDistance,
           init.cohesion,
+          undefined,
         );
       },
     };

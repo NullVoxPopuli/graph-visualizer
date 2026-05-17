@@ -16,6 +16,7 @@ import { bench, group, run, summary } from "mitata";
 
 import { type LayoutInit, runLayoutCore } from "#lib/layout-core";
 
+import { loadAllExamples } from "./examples.ts";
 import { describeGraph, generateLayoutInit } from "./graph-gen.ts";
 import { loadWasmLayout, type WasmLayout } from "./wasm-backend.ts";
 
@@ -68,15 +69,106 @@ async function runJs(init: LayoutInit): Promise<Float32Array> {
   return runLayoutCore(init, { yieldBetweenBatches: false });
 }
 
-async function smoke(sizes: number[], wasm: WasmLayout | null): Promise<void> {
+/**
+ * Layout quality proxy: how cleanly communities separate in the result.
+ * For each community we take its centroid and mean node→centroid radius
+ * (spread); separation = (mean distance to the nearest *other* community
+ * centroid) / (mean community spread). >1 means clusters are, on
+ * average, farther apart than they are wide — i.e. visually distinct.
+ * Bigger is better. This is the "are the communities good" check.
+ */
+function clusterSeparation(positions: Float32Array, communities: Int32Array): number {
+  const n = communities.length;
+  const ids = [...new Set(Array.from(communities))];
+  const idx = new Map(ids.map((c, i) => [c, i]));
+  const k = ids.length;
+
+  if (k < 2) return Infinity;
+
+  const sx = new Float64Array(k);
+  const sy = new Float64Array(k);
+  const cnt = new Int32Array(k);
+
+  for (let i = 0; i < n; i++) {
+    const ci = idx.get(communities[i]!)!;
+
+    sx[ci]! += positions[2 * i]!;
+    sy[ci]! += positions[2 * i + 1]!;
+    cnt[ci]!++;
+  }
+
+  for (let c = 0; c < k; c++) {
+    sx[c]! /= cnt[c]! || 1;
+    sy[c]! /= cnt[c]! || 1;
+  }
+
+  const spread = new Float64Array(k);
+
+  for (let i = 0; i < n; i++) {
+    const ci = idx.get(communities[i]!)!;
+    const dx = positions[2 * i]! - sx[ci]!;
+    const dy = positions[2 * i + 1]! - sy[ci]!;
+
+    spread[ci]! += Math.sqrt(dx * dx + dy * dy);
+  }
+
+  for (let c = 0; c < k; c++) spread[c]! /= cnt[c]! || 1;
+
+  let ratioSum = 0;
+
+  for (let a = 0; a < k; a++) {
+    let nearest = Infinity;
+
+    for (let b = 0; b < k; b++) {
+      if (a === b) continue;
+
+      const dx = sx[a]! - sx[b]!;
+      const dy = sy[a]! - sy[b]!;
+
+      nearest = Math.min(nearest, Math.sqrt(dx * dx + dy * dy));
+    }
+
+    ratioSum += nearest / (spread[a]! || 1);
+  }
+
+  return ratioSum / k;
+}
+
+interface Case {
+  label: string;
+  init: LayoutInit;
+}
+
+/**
+ * Benchmark cases. Default = the real shipped examples (parsed + Louvain
+ * + radii, exactly as the app builds them) so the bench measures what
+ * users actually run, the 5k "large" graph included. A numeric arg
+ * (`200,3000`) switches to the synthetic generator for clean size sweeps.
+ */
+function buildCases(arg: string | undefined): Case[] {
+  if (arg && arg !== "smoke" && /\d/.test(arg)) {
+    return parseSizes(arg).map((n) => {
+      const init = generateLayoutInit({ nodeCount: n });
+
+      return { label: describeGraph(init), init };
+    });
+  }
+
+  return loadAllExamples().map((e) => ({
+    label: `${e.label} — ${describeGraph(e.init)}`,
+    init: e.init,
+  }));
+}
+
+async function smoke(cases: Case[], wasm: WasmLayout | null): Promise<void> {
   // `BENCH_WASM_ONLY=1` skips the (slow) JS baseline — for quick WASM-only
-  // probing (per-phase profiling builds, parallel-vs-serial sweeps).
+  // probing (per-phase profiling, approximation sweeps).
   const wasmOnly = process.env["BENCH_WASM_ONLY"] === "1";
 
-  for (const size of sizes) {
-    const init = generateLayoutInit({ nodeCount: size });
+  for (const { label, init } of cases) {
+    const n = init.nodeCount;
 
-    console.info(`\n${describeGraph(init)}`);
+    console.info(`\n${label}`);
 
     let jsMs = NaN;
 
@@ -85,7 +177,7 @@ async function smoke(sizes: number[], wasm: WasmLayout | null): Promise<void> {
       const jsPos = await runJs(init);
 
       jsMs = performance.now() - t0;
-      assertSanePositions(jsPos, size, `JS@${size}`);
+      assertSanePositions(jsPos, n, `JS@${label}`);
       console.info(`  JS    ${jsMs.toFixed(1).padStart(9)} ms`);
     }
 
@@ -94,18 +186,20 @@ async function smoke(sizes: number[], wasm: WasmLayout | null): Promise<void> {
       const wasmPos = wasm.run(init);
       const wasmMs = performance.now() - t1;
 
-      assertSanePositions(wasmPos, size, `WASM@${size}`);
+      assertSanePositions(wasmPos, n, `WASM@${label}`);
 
+      const sep = clusterSeparation(wasmPos, init.communities);
       const vs = Number.isFinite(jsMs) ? `   (${(jsMs / wasmMs).toFixed(2)}× vs JS)` : "";
 
-      console.info(`  WASM  ${wasmMs.toFixed(1).padStart(9)} ms${vs}`);
+      console.info(
+        `  WASM  ${wasmMs.toFixed(1).padStart(9)} ms${vs}   cluster-sep ${sep.toFixed(2)}`,
+      );
     }
   }
 }
 
 async function main(): Promise<void> {
   const arg = process.argv[2];
-  const sizes = parseSizes(arg);
   // The WASM backend is optional: until `pnpm build:wasm` has produced the
   // pkg, this resolves to null and the bench just reports the JS baseline.
   const wasm = await loadWasmLayout();
@@ -115,23 +209,20 @@ async function main(): Promise<void> {
   }
 
   if (arg === "smoke") {
-    // `smoke` alone → default sizes; `smoke 3000,5000` → those sizes.
-    await smoke(parseSizes(process.argv[3]), wasm);
+    await smoke(buildCases(process.argv[3]), wasm);
 
     return;
   }
 
-  for (const size of sizes) {
-    const init = generateLayoutInit({ nodeCount: size });
-
-    group(describeGraph(init), () => {
+  for (const { label, init } of buildCases(arg)) {
+    group(label, () => {
       summary(() => {
-        bench(`JS    @ ${size}`, async () => {
+        bench("JS  ", async () => {
           await runJs(init);
         });
 
         if (wasm) {
-          bench(`WASM  @ ${size}`, () => {
+          bench("WASM", () => {
             wasm.run(init);
           });
         }
