@@ -3,6 +3,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { htmlSafe, type SafeString } from "@ember/template";
 
+import * as Comlink from "comlink";
 import { modifier } from "ember-modifier";
 import Flatbush from "flatbush";
 
@@ -19,6 +20,7 @@ import Hud from "./hud.gts";
 import InfoPanel from "./info-panel.gts";
 import OrphansPanel from "./orphans-panel.gts";
 
+import type { RenderPackEngine } from "#lib/render-pack.worker";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
 import type { ProcessedScene } from "#services/visualizer";
@@ -130,6 +132,19 @@ export default class Visualizer extends Component {
   #incIdx: Int32Array | null = null;
   #incEdges: Int32Array | null = null;
 
+  // Off-main-thread vertex packing. The worker owns a copy of the scene
+  // arrays; selection/filter changes get a transferable buffer back so
+  // the (potentially large) edge/arrow pack never blocks the main
+  // thread. Only used when `nodeRemap === null` (no node contraction) —
+  // the contracted case stays on the synchronous main-thread path.
+  // Sequence counters discard out-of-order async results when the
+  // selection changes faster than the worker replies.
+  #packEngine: Comlink.Remote<RenderPackEngine> | null = null;
+  #packWorker: Worker | null = null;
+  #packSceneGraph: ProcessedScene["graph"] | null = null;
+  #packEdgeSeq = 0;
+  #packArrowSeq = 0;
+
   /** Incident edge-index list for `node`, or null when contraction is
    *  active (the fast path is only valid with `nodeRemap === null`). */
   private incidentEdges(scene: ProcessedScene, node: number): Int32Array | null {
@@ -187,6 +202,16 @@ export default class Visualizer extends Component {
       canvas.removeEventListener("pointerdown", this.onPointerDown);
       canvas.removeEventListener("contextmenu", this.onContextMenu);
       canvas.removeEventListener("dblclick", this.onDblClick);
+    });
+
+    this.#packWorker = new Worker(new URL("../lib/render-pack.worker.ts", import.meta.url), {
+      type: "module",
+    });
+    this.#packEngine = Comlink.wrap<RenderPackEngine>(this.#packWorker);
+    this.cleanups.push(() => {
+      this.#packWorker?.terminate();
+      this.#packWorker = null;
+      this.#packEngine = null;
     });
 
     this.renderer.camera.onChange(() => {
@@ -552,6 +577,25 @@ export default class Visualizer extends Component {
       return;
     }
 
+    // Off-thread when there's no contraction: the worker owns the scene
+    // copy and the incidence index, returns a transferable buffer.
+    if (this.#packEngine && this.nodeRemap === null && this.#packSceneGraph === scene.graph) {
+      const seq = ++this.#packEdgeSeq;
+      const hidden = Array.from(this.viewState.hiddenEdgeTypes);
+
+      void this.#packEngine.packEdges(hidden, restrict).then((res) => {
+        if (seq !== this.#packEdgeSeq || !this.renderer) return;
+
+        const f = new Float32Array(res.buffer);
+
+        this.edgeBuf = f;
+        this.renderer.uploadLines(f, res.vertexCount);
+        this.dirty = true;
+      });
+
+      return;
+    }
+
     const { buffer, vertexCount } = packEdges(
       scene.graph.edgesFlat,
       scene.positions,
@@ -581,6 +625,23 @@ export default class Visualizer extends Component {
 
     if (!this.viewState.showEdges && restrict < 0) {
       this.renderer.uploadArrows(new Float32Array(0), 0);
+
+      return;
+    }
+
+    if (this.#packEngine && this.nodeRemap === null && this.#packSceneGraph === scene.graph) {
+      const seq = ++this.#packArrowSeq;
+      const hidden = Array.from(this.viewState.hiddenEdgeTypes);
+
+      void this.#packEngine.packArrows(hidden, restrict).then((res) => {
+        if (seq !== this.#packArrowSeq || !this.renderer) return;
+
+        const f = new Float32Array(res.buffer);
+
+        this.arrowBuf = f;
+        this.renderer.uploadArrows(f, res.count);
+        this.dirty = true;
+      });
 
       return;
     }
@@ -872,6 +933,18 @@ export default class Visualizer extends Component {
       this.lastShowArrows = this.viewState.showArrows;
       this.renderer?.setShowHulls(this.lastShowHulls);
       this.renderer?.setShowArrows(this.lastShowArrows);
+      // Hand the worker its own copy of the scene arrays (structured
+      // clone — the main thread keeps the originals for picking/dimming).
+      // Must run before the repacks below so a same-iteration async pack
+      // sees the scene.
+      this.#packSceneGraph = scene.graph;
+      void this.#packEngine?.setScene(
+        scene.positions,
+        scene.graph.edgesFlat,
+        scene.communities,
+        scene.graph.edgeTypeIds,
+        this.effectiveRadii ?? scene.radii,
+      );
       this.repackCycle(scene);
       this.repackNodes(scene);
       this.repackEdges(scene);
