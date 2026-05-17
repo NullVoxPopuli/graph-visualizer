@@ -20,6 +20,8 @@
 
 use wasm_bindgen::prelude::*;
 
+pub mod graph;
+
 const GOLDEN_ANGLE: f64 = 137.508 * (std::f64::consts::PI / 180.0);
 const MAX_INDEXED_COMM: usize = 200_000;
 const MAX_TICKS: usize = 500;
