@@ -7,6 +7,7 @@ import * as Comlink from "comlink";
 import { modifier } from "ember-modifier";
 import Flatbush from "flatbush";
 
+import { Camera } from "#lib/camera";
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
 import { findBundledCyclesViaRaw } from "#lib/cycle";
@@ -40,6 +41,10 @@ export default class Visualizer extends Component {
   @service declare viewState: ViewStateService;
 
   private renderer: Renderer | null = null;
+  // Camera owns d3-zoom on the DOM canvas (main-thread input). Its
+  // transform is pushed into the renderer via `setCamera` so the
+  // renderer itself stays input-/DOM-free (worker-ready).
+  private camera: Camera | null = null;
 
   private nodeInstanceBuf: Float32Array = new Float32Array(0);
   private edgeBuf: Float32Array = new Float32Array(0);
@@ -190,6 +195,7 @@ export default class Visualizer extends Component {
   // `reactToScene` handle reactive sync against the renderer.
   setupCanvas = modifier((canvas: HTMLCanvasElement) => {
     this.renderer = new Renderer(canvas);
+    this.camera = new Camera(canvas);
     this.handleResize();
     window.addEventListener("resize", this.resizeHandler);
 
@@ -214,7 +220,11 @@ export default class Visualizer extends Component {
       this.#packEngine = null;
     });
 
-    this.renderer.camera.onChange(() => {
+    this.camera.onChange(() => {
+      if (this.camera && this.renderer) {
+        this.renderer.setCamera(this.camera.x, this.camera.y, this.camera.zoom);
+      }
+
       this.dirty = true;
     });
 
@@ -365,9 +375,9 @@ export default class Visualizer extends Component {
 
     const x = scene.positions[2 * idx]!;
     const y = scene.positions[2 * idx + 1]!;
-    const cam = this.renderer.camera;
+    const cam = this.camera;
 
-    if (cam.worldPointInView(x, y)) return;
+    if (!cam || cam.worldPointInView(x, y)) return;
     cam.animateTo(x, y, cam.zoom);
   }
 
@@ -742,8 +752,9 @@ export default class Visualizer extends Component {
       if (y > maxY) maxY = y;
     }
 
-    if (!isFinite(minX)) return;
-    this.renderer.camera.fit(minX, minY, maxX, maxY);
+    if (!isFinite(minX) || !this.camera) return;
+    this.camera.fit(minX, minY, maxX, maxY);
+    this.renderer?.setCamera(this.camera.x, this.camera.y, this.camera.zoom);
   }
 
   private rebuildPicker(scene: ProcessedScene): void {
@@ -775,17 +786,17 @@ export default class Visualizer extends Component {
   private pickAt(sx: number, sy: number): number {
     const scene = this.visualizer.scene;
 
-    if (!this.renderer || !scene) return -1;
+    if (!this.renderer || !scene || !this.camera) return -1;
     if (this.pickerDirty) this.rebuildPicker(scene);
     if (!this.picker) return -1;
 
     const dpr = window.devicePixelRatio || 1;
-    const [wx, wy] = this.renderer.camera.screenToWorld(sx * dpr, sy * dpr);
+    const [wx, wy] = this.camera.screenToWorld(sx * dpr, sy * dpr);
     // Hit radius in world coords corresponds to the rendered screen-px floor
     // (max(4, r*zoom)). At low zoom, the world-space hit area grows so tiny
     // dots stay clickable — so we search a box of that minimum radius around
     // the click, then refine.
-    const zoom = this.renderer.camera.zoom || 1;
+    const zoom = this.camera.zoom || 1;
     const minHitWorld = 4 / zoom;
     const candidates = this.picker.search(
       wx - minHitWorld,
@@ -907,6 +918,14 @@ export default class Visualizer extends Component {
     const dpr = window.devicePixelRatio || 1;
 
     this.renderer.resize(window.innerWidth, window.innerHeight, dpr);
+    // Renderer no longer owns the camera, so resize it here and push the
+    // (possibly clamped) transform back into the renderer.
+    this.camera?.resize(Math.floor(window.innerWidth * dpr), Math.floor(window.innerHeight * dpr));
+
+    if (this.camera) {
+      this.renderer.setCamera(this.camera.x, this.camera.y, this.camera.zoom);
+    }
+
     this.dirty = true;
   }
 
@@ -984,7 +1003,8 @@ export default class Visualizer extends Component {
     for (const fn of this.cleanups) fn();
     this.cleanups = [];
 
-    this.renderer?.camera.destroy();
+    this.camera?.destroy();
+    this.camera = null;
     this.renderer = null;
   }
 

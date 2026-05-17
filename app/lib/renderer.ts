@@ -13,7 +13,9 @@
  * uViewport). No DOM, no per-node objects on the hot path — typed arrays
  * throughout.
  */
-import { Camera } from "./camera.ts";
+// Camera lives on the main thread (d3-zoom binds DOM input); the
+// renderer is fed camera state via `setCamera` so it can run in a worker
+// against an OffscreenCanvas.
 
 // aInstFlags is a packed bitmask so selection / hover / cycle / dim can
 // compose:
@@ -221,7 +223,11 @@ function link(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram 
 
 export class Renderer {
   gl: WebGL2RenderingContext;
-  camera: Camera;
+  // Camera transform, pushed in from the owner (main thread) via
+  // `setCamera`. Defaults render the origin at 1× until the first push.
+  private camX = 0;
+  private camY = 0;
+  private camZoom = 1;
 
   private nodeProg: WebGLProgram;
   private lineProg: WebGLProgram;
@@ -265,7 +271,7 @@ export class Renderer {
   private showHulls = false;
   private showArrows = true;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement | OffscreenCanvas) {
     const gl = canvas.getContext("webgl2", {
       antialias: true,
       alpha: false,
@@ -274,7 +280,6 @@ export class Renderer {
 
     if (!gl) throw new Error("WebGL2 not available in this browser.");
     this.gl = gl;
-    this.camera = new Camera(canvas);
 
     gl.clearColor(0.043, 0.051, 0.063, 1);
     gl.enable(gl.BLEND);
@@ -381,16 +386,31 @@ export class Renderer {
     gl.bindVertexArray(null);
   }
 
+  /**
+   * Size the drawing buffer. CSS sizing of the DOM `<canvas>` is the
+   * owner's job (and impossible on an `OffscreenCanvas`), so only touch
+   * `.style` when it exists — keeps this worker-safe.
+   */
   resize(cssWidth: number, cssHeight: number, dpr: number): void {
     const gl = this.gl;
-    const c = gl.canvas as HTMLCanvasElement;
+    const c = gl.canvas;
 
     c.width = Math.floor(cssWidth * dpr);
     c.height = Math.floor(cssHeight * dpr);
-    c.style.width = `${cssWidth}px`;
-    c.style.height = `${cssHeight}px`;
+
+    if ("style" in c) {
+      c.style.width = `${cssWidth}px`;
+      c.style.height = `${cssHeight}px`;
+    }
+
     gl.viewport(0, 0, c.width, c.height);
-    this.camera.resize(c.width, c.height);
+  }
+
+  /** Camera transform, pushed from the owner each change. */
+  setCamera(x: number, y: number, zoom: number): void {
+    this.camX = x;
+    this.camY = y;
+    this.camZoom = zoom;
   }
 
   setShowHulls(v: boolean): void {
@@ -496,8 +516,8 @@ export class Renderer {
     const gl = this.gl;
 
     gl.useProgram(prog);
-    gl.uniform2f(gl.getUniformLocation(prog, "uCamera"), this.camera.x, this.camera.y);
-    gl.uniform1f(gl.getUniformLocation(prog, "uZoom"), this.camera.zoom);
+    gl.uniform2f(gl.getUniformLocation(prog, "uCamera"), this.camX, this.camY);
+    gl.uniform1f(gl.getUniformLocation(prog, "uZoom"), this.camZoom);
     gl.uniform2f(gl.getUniformLocation(prog, "uViewport"), gl.canvas.width, gl.canvas.height);
   }
 
