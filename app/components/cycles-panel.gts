@@ -267,13 +267,19 @@ export default class CyclesPanel extends Component {
 
     if (!rawCycles) return this.#lastEntries;
 
-    const selectedId = this.viewState.selectedId;
+    // Note: the selection is deliberately NOT part of this key. The list
+    // is the full set of cycles for the current graph/filters; selecting
+    // a node only moves the `is-selected` highlight (driven separately by
+    // the `selectedId` getter). Scoping the list to the selection meant
+    // every click on a cycle node re-filtered and rebuilt the list,
+    // discarding the user's collapse/expand layout and visibly jumping
+    // the panel — clicking a cycle to view it must be non-destructive.
     const hiddenTypesKey = serializeIntSet(this.viewState.hiddenNodeTypes);
     const hiddenEdgeTypesKey = serializeIntSet(this.viewState.hiddenEdgeTypes);
     const collapsedKey = serializeStringSet(this.viewState.collapsedIds);
     const hiddenIdsKey = serializeStringSet(this.viewState.hiddenNodeIds);
     const globKey = `${this.viewState.includeGlobs.join("|")}::${this.viewState.excludeGlobs.join("|")}`;
-    const key = `${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${globKey}|${selectedId ?? ""}`;
+    const key = `${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${globKey}`;
 
     if (g !== this.#lastGraph || key !== this.#lastCycleKey || rawCycles !== this.#lastRaw) {
       const radii = computeRadii(g.inDegree, g.outDegree);
@@ -285,22 +291,6 @@ export default class CyclesPanel extends Component {
         this.viewState.effectiveHiddenNodeIds(g),
       );
       const remap = contraction?.nodeRemap ?? null;
-      // When a node is selected, scope the list to cycles whose bundled
-      // form involves the selection (or its visible owner, when the
-      // selection is a hidden file folded into a package). Without this,
-      // selecting `@acme/billing` would also surface `utils <IconArrowRight /> db` cycles
-      // that have nothing to do with billing — accurate for the whole
-      // graph but noise for someone investigating one node.
-      let scopeIdx = -1;
-
-      if (selectedId !== null) {
-        const idx = g.idToIndex.get(selectedId);
-
-        if (idx !== undefined) {
-          scopeIdx = remap === null ? idx : remap[idx]!;
-        }
-      }
-
       const rawBundled = bundleRawCyclesWithGroups(rawCycles, remap);
       // Dedupe by canonical node sequence — parallel raw edges between two
       // packages (e.g. lots of `file <IconArrowRight /> file` imports) all contract to the
@@ -310,8 +300,6 @@ export default class CyclesPanel extends Component {
       const bundled: { nodes: CycleNode[]; key: string }[] = [];
 
       for (const cycle of rawBundled) {
-        if (scopeIdx >= 0 && !cycle.bundled.includes(scopeIdx)) continue;
-
         const ck = canonicalCycleKey(cycle.bundled);
 
         if (seen.has(ck)) continue;

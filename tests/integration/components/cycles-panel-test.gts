@@ -139,4 +139,50 @@ module("Integration | cycles-panel", function (hooks) {
     assert.dom(".cycles-panel__nodes").exists("body restored on second click");
     assert.dom(".cycles-panel__header").hasAttribute("aria-expanded", "true");
   });
+
+  test("collapsing a cycle, then clicking a cycle node to view it, does not reshuffle the list or reopen others", async function (assert) {
+    // Two independent cycles: a 2-node (a↔b) and a 3-node (c→d→e→c).
+    loadGraph(this.owner, {
+      nodes: [
+        { id: "a", edges: ["b"] },
+        { id: "b", edges: ["a"] },
+        { id: "c", edges: ["d"] },
+        { id: "d", edges: ["e"] },
+        { id: "e", edges: ["c"] },
+      ],
+    });
+    viewState(this.owner).cyclesPanelOpen = true;
+
+    await render(<template><CyclesPanel /></template>);
+    await waitFor(".cycles-panel__entry");
+
+    assert.dom(".cycles-panel__entry").exists({ count: 2 }, "both cycles listed");
+
+    // Entries are shortest-first: [0] = 2-node (a,b), [1] = 3-node.
+    const headerOf = (i: number): Element => {
+      const entry = document.querySelectorAll(".cycles-panel__entry")[i];
+      const header = entry?.querySelector(".cycles-panel__header");
+
+      if (!header) throw new Error(`no header for cycle entry ${i}`);
+
+      return header;
+    };
+
+    // Collapse the first cycle's body. The second stays expanded.
+    await click(headerOf(0));
+    assert.dom(headerOf(0)).hasAttribute("aria-expanded", "false", "cycle 1 collapsed");
+    assert.dom(headerOf(1)).hasAttribute("aria-expanded", "true", "cycle 2 still expanded");
+
+    // Click a node inside the still-open second cycle to view it
+    // (selection → "c").
+    await click('.cycles-panel__entry .cycles-panel__node[title="c"]');
+
+    // Navigating must not reshuffle the panel: both cycles still listed,
+    // cycle 1 still collapsed, cycle 2 still expanded.
+    assert.dom(".cycles-panel__entry").exists({ count: 2 }, "list not re-scoped away by the click");
+    assert
+      .dom(headerOf(0))
+      .hasAttribute("aria-expanded", "false", "collapsed cycle stays collapsed");
+    assert.dom(headerOf(1)).hasAttribute("aria-expanded", "true", "other cycle stays as it was");
+  });
 });
