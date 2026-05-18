@@ -20,7 +20,6 @@ import IconCaretRight from "~icons/ph/caret-right";
 import IconX from "~icons/ph/x";
 
 import type { PanelGeometry } from "#lib/floating-panel";
-import type { LoadedGraph } from "#lib/types";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
@@ -119,31 +118,6 @@ export default class InfoPanel extends Component {
   @service declare visualizer: VisualizerService;
 
   /**
-   * Memoize the fully-built CycleEntry list keyed on every input that
-   * actually affects which cycles appear and how they render. Without
-   * this, `toggleCycleHeader` was triggering a full `findBundledCycles`
-   * re-enumeration: the toggle dirties `collapsedHeaders`, which
-   * invalidates `allCyclesCollapsed`, which reads `this.cycles`, which
-   * (untracked-cached) re-ran the exponential cycle search on every
-   * read. With the cache in place, only the per-cycle `{{#unless}}`
-   * predicates re-evaluate when the user collapses a cycle.
-   */
-  #lastGraph: LoadedGraph | null = null;
-  #lastCycleKey = "";
-  #lastEntries: CycleEntry[] = [];
-
-  /**
-   * Cached top-3 most-referenced cycles, keyed off the `#lastEntries`
-   * reference. Cheap to recompute (O(entries × ref segments)) but
-   * recomputing on every read would still allocate, and the result
-   * never changes unless `entries` does — so memoizing keeps the
-   * "Most referenced" section's render path entirely allocation-free
-   * during collapse/expand toggles.
-   */
-  #lastTopSource: CycleEntry[] | null = null;
-  #lastTop: TopReferencedEntry[] = [];
-
-  /**
    * Cycle keys whose body (node list + occurrences table) the user has
    * collapsed. Cycle bodies render by default; clicking the header
    * adds the cycle here and the row becomes just its `cycle#N` label.
@@ -191,14 +165,13 @@ export default class InfoPanel extends Component {
    * containing cycles* (each container only votes once, even when it
    * happens to mention the same ref id in two non-adjacent segment
    * groups). Sorted descending, capped at 3; returns an empty array
-   * when no cycle is referenced by any other. Cached off the
-   * `this.cycles` reference — toggling collapse/expand state never
-   * recomputes this.
+   * when no cycle is referenced by any other. `@cached`: recomputes
+   * only when `this.cycles` does (which is itself `@cached`), so
+   * collapse/expand toggles never re-run this.
    */
+  @cached
   get topReferencedCycles(): TopReferencedEntry[] {
     const entries = this.cycles;
-
-    if (this.#lastTopSource === entries) return this.#lastTop;
 
     const refCounts = new Map<string, number>();
 
@@ -235,14 +208,7 @@ export default class InfoPanel extends Component {
 
     ranked.sort((a, b) => b.count - a.count);
 
-    const top = ranked.slice(0, 3);
-
-    // eslint-disable-next-line ember/no-side-effects
-    this.#lastTopSource = entries;
-    // eslint-disable-next-line ember/no-side-effects
-    this.#lastTop = top;
-
-    return top;
+    return ranked.slice(0, 3);
   }
 
   /**
@@ -427,29 +393,25 @@ export default class InfoPanel extends Component {
    * raw edges (many `file → file` imports between two packages) don't
    * produce one bundled cycle per edge.
    */
+  /**
+   * `@cached`: recomputes only when a tracked dependency it actually
+   * reads changes — `graph.current`, the selected node, and the
+   * view-state filter slots (`hiddenNodeTypes` / `hiddenEdgeTypes` /
+   * `collapsedIds` / `hiddenNodeIds` / globs, all fine-grained
+   * `trackedObject` slots) plus the resident-session raw-cycles
+   * promise. `collapsedHeaders` / `expandedRefs` are template-level
+   * toggles this body never reads, so collapsing a cycle doesn't
+   * re-run the bundling. (Replaces a hand-built cache key and the
+   * lint-suppressed getter writes it required.)
+   */
+  @cached
   get cycles(): CycleEntry[] {
     const info = this.info;
     const g = this.graph.current;
 
     if (!info || !g) return [];
 
-    // Cache key: every input that actually changes which cycles
-    // appear or how they render. `collapsedHeaders` / `expandedRefs`
-    // are deliberately *not* in the key — those are template-level
-    // toggles and recomputing cycles when the user closes one cycle's
-    // body is exactly what made this getter slow.
     const vs = this.viewState;
-    const hiddenTypesKey = serializeIntSet(vs.hiddenNodeTypes);
-    const hiddenEdgeTypesKey = serializeIntSet(vs.hiddenEdgeTypes);
-    const collapsedKey = serializeStringSet(vs.collapsedIds);
-    const hiddenIdsKey = serializeStringSet(vs.hiddenNodeIds);
-    const globKey = `${vs.includeGlobs.join("|")}::${vs.excludeGlobs.join("|")}`;
-    const cacheKey = `${info.index}|${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${globKey}`;
-
-    if (g === this.#lastGraph && cacheKey === this.#lastCycleKey) {
-      return this.#lastEntries;
-    }
-
     const radii = computeRadii(g.inDegree, g.outDegree);
     const contraction = buildContraction(
       g,
@@ -460,33 +422,21 @@ export default class InfoPanel extends Component {
     );
     const remap = contraction?.nodeRemap ?? null;
 
-    // Selected node is hidden — no bundled cycle goes through *this* node
-    // (its loops are absorbed into the owner). Bail. Still cache the
-    // empty result so subsequent reads with the same inputs skip the
-    // contraction work.
-    if (remap !== null && remap[info.index]! !== info.index) {
-      // eslint-disable-next-line ember/no-side-effects
-      this.#lastGraph = g;
-      // eslint-disable-next-line ember/no-side-effects
-      this.#lastCycleKey = cacheKey;
-      // eslint-disable-next-line ember/no-side-effects
-      this.#lastEntries = [];
-
-      return this.#lastEntries;
-    }
+    // Selected node is hidden — no bundled cycle goes through *this*
+    // node (its loops are absorbed into the owner).
+    if (remap !== null && remap[info.index]! !== info.index) return [];
 
     // The exponential elementary-cycle enumeration runs once in the
     // resident Rust session (service-memoized by graph + edge-type
-    // filter). While a fresh result is in flight, keep the previous
-    // entries so the panel never blocks. The contraction/dedupe below
-    // is the cheap synchronous pass on that fixed raw list.
+    // filter). The contraction/dedupe below is the cheap synchronous
+    // pass on that fixed raw list.
     const rawPromise = this.visualizer.cycleRaw(Int32Array.from(vs.hiddenEdgeTypes), 1000);
 
     if (!rawPromise) return [];
 
     const rawCycles = getPromiseState(rawPromise).resolved;
 
-    if (!rawCycles) return this.#lastEntries;
+    if (!rawCycles) return [];
 
     // Bundled cycles: contracted, deduped by canonical sequence. Same
     // source the renderer uses for red rings, so the info-panel list
@@ -553,13 +503,6 @@ export default class InfoPanel extends Component {
       entry.segments = buildCycleSegments(entry.nodes, entry.id, canonical);
       entry.containedLabel = formatContainedLabel(entry.segments);
     }
-
-    // eslint-disable-next-line ember/no-side-effects
-    this.#lastGraph = g;
-    // eslint-disable-next-line ember/no-side-effects
-    this.#lastCycleKey = cacheKey;
-    // eslint-disable-next-line ember/no-side-effects
-    this.#lastEntries = entries;
 
     return entries;
   }
@@ -1195,16 +1138,4 @@ function buildCycleSegments(
 
 function isExpanded(set: Set<string>, key: string): boolean {
   return set.has(key);
-}
-
-function serializeIntSet(set: Set<number>): string {
-  if (set.size === 0) return "";
-
-  return [...set].sort((a, b) => a - b).join(",");
-}
-
-function serializeStringSet(set: Set<string>): string {
-  if (set.size === 0) return "";
-
-  return [...set].sort().join(",");
 }
