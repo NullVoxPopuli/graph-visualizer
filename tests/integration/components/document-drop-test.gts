@@ -1,4 +1,4 @@
-import { render, settled, waitUntil } from "@ember/test-helpers";
+import { render, settled } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -12,13 +12,23 @@ interface DT {
   files?: File[];
 }
 
-function fireDrag(type: string, dataTransfer: DT): Event {
+/**
+ * Dispatch a drag/drop event on `window` (where `DocumentDrop` listens)
+ * and settle — callers just `await fireDrag(...)`. `prevented` simulates
+ * the inner `/analyze` FileDrop having already claimed the drop.
+ */
+async function fireDrag(
+  type: string,
+  dataTransfer: DT,
+  options: { prevented?: boolean } = {},
+): Promise<void> {
   const ev = new Event(type, { bubbles: true, cancelable: true });
 
   Object.defineProperty(ev, "dataTransfer", { value: dataTransfer });
+  if (options.prevented) ev.preventDefault();
   window.dispatchEvent(ev);
 
-  return ev;
+  await settled();
 }
 
 const GRAPH_JSON = JSON.stringify({
@@ -49,20 +59,17 @@ module("Integration | document-drop", function (hooks) {
 
     assert.dom(".document-drop").doesNotExist("hidden when nothing is being dragged");
 
-    fireDrag("dragenter", { types: ["Files"] });
-    await settled();
+    await fireDrag("dragenter", { types: ["Files"] });
     assert.dom(".document-drop").exists("overlay shows for a file drag");
 
-    fireDrag("dragleave", { types: ["Files"] });
-    await settled();
+    await fireDrag("dragleave", { types: ["Files"] });
     assert.dom(".document-drop").doesNotExist("overlay clears when the drag leaves");
   });
 
   test("ignores drags that aren't files (in-app element drags)", async function (assert) {
     await render(<template><DocumentDrop /></template>);
 
-    fireDrag("dragenter", { types: ["text/plain"] });
-    await settled();
+    await fireDrag("dragenter", { types: ["text/plain"] });
 
     assert.dom(".document-drop").doesNotExist("no overlay for a non-file drag");
   });
@@ -84,9 +91,7 @@ module("Integration | document-drop", function (hooks) {
 
     const file = new File([GRAPH_JSON], "graph.json", { type: "application/json" });
 
-    fireDrag("drop", { types: ["Files"], files: [file] });
-
-    await waitUntil(() => calls.some((c) => c[0] === "view"), { timeout: 2000 });
+    await fireDrag("drop", { types: ["Files"], files: [file] });
 
     assert.strictEqual(graph.current?.ids.length, 2, "the dropped graph was loaded");
     assert.ok(
@@ -101,13 +106,8 @@ module("Integration | document-drop", function (hooks) {
     await render(<template><DocumentDrop /></template>);
 
     const file = new File([GRAPH_JSON], "graph.json", { type: "application/json" });
-    const ev = new Event("drop", { bubbles: true, cancelable: true });
 
-    Object.defineProperty(ev, "dataTransfer", { value: { types: ["Files"], files: [file] } });
-    // Simulate the inner FileDrop having already claimed it.
-    ev.preventDefault();
-    window.dispatchEvent(ev);
-    await settled();
+    await fireDrag("drop", { types: ["Files"], files: [file] }, { prevented: true });
 
     assert.strictEqual(graph.current, null, "window handler bailed on the already-handled drop");
   });
@@ -128,9 +128,7 @@ module("Integration | document-drop", function (hooks) {
 
     const file = new File(["{ not json"], "bad.json", { type: "application/json" });
 
-    fireDrag("drop", { types: ["Files"], files: [file] });
-
-    await waitUntil(() => document.querySelector(".document-drop__error"), { timeout: 2000 });
+    await fireDrag("drop", { types: ["Files"], files: [file] });
 
     assert.dom(".document-drop__error").exists("parse failure is shown");
     assert.notOk(

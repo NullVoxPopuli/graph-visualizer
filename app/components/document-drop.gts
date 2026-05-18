@@ -2,6 +2,7 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
+import { waitForPromise } from "@ember/test-waiters";
 
 import { parseGraphJson } from "#lib/parser";
 import { SchemaError } from "#lib/schema";
@@ -64,7 +65,10 @@ export default class DocumentDrop extends Component {
 
     const file = ev.dataTransfer?.files?.[0];
 
-    if (file) void this.#load(file);
+    // `waitForPromise` is a production no-op; under test it registers a
+    // waiter so `settled()` blocks until the load (or its error) is
+    // done. Tests assert observable behavior, not polled internals.
+    if (file) void waitForPromise(this.#load(file));
   };
 
   #teardown: () => void = (() => {
