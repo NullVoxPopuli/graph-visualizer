@@ -6,7 +6,7 @@
 //! optimizer — communities only need to be *good*, not byte-identical to
 //! graphology.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Parsed graph, the Rust analogue of `LoadedGraph` (minus the graphology
 /// instance — Louvain runs directly on the edge list here).
@@ -411,7 +411,13 @@ pub fn louvain(node_count: usize, edges_flat: &[i32], resolution: f64) -> Vec<i3
             for v in 0..level_n {
                 let cv = comm[v];
                 // Weights from v into each neighbouring community.
-                let mut w_to: HashMap<usize, f64> = HashMap::new();
+                // BTreeMap (not HashMap): the gain loop below iterates
+                // this, and HashMap's per-process-random order would
+                // break near-ties differently every run — making Louvain
+                // non-deterministic on larger graphs (community colours
+                // changing on every reload). Ordered by community id, the
+                // tie-break is stable.
+                let mut w_to: BTreeMap<usize, f64> = BTreeMap::new();
                 for &(u, w) in &cur_adj[v] {
                     if u == v {
                         continue;
@@ -462,7 +468,10 @@ pub fn louvain(node_count: usize, edges_flat: &[i32], resolution: f64) -> Vec<i3
         }
 
         // Aggregate: build the community graph for the next level.
-        let mut agg: Vec<HashMap<usize, f64>> = vec![HashMap::new(); new_n];
+        // BTreeMap so `into_iter()` below yields neighbours in a stable
+        // order — otherwise the next level's (non-associative) float sums
+        // shift run-to-run and reintroduce the non-determinism.
+        let mut agg: Vec<BTreeMap<usize, f64>> = vec![BTreeMap::new(); new_n];
         for vtx in 0..level_n {
             let cv = comm[vtx];
             for &(u, w) in &cur_adj[vtx] {
