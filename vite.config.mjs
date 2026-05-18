@@ -9,7 +9,16 @@ export default defineConfig({
     ember(),
     Icons({ compiler: "ember" }),
     emberSsg({
-      routes: ["index", "docs"],
+      // `index` is intentionally NOT prerendered. Its landing page is
+      // only correct for first-time visitors — a returning visitor with
+      // a cached graph in IndexedDB must go straight to the visualizer.
+      // That check (and redirect) lives in `routes/index.ts#beforeModel`,
+      // but a prerendered `/` would paint the full landing as static HTML
+      // *before* the app boots, so the hook can't stop the flash.
+      // Leaving `/` un-prerendered lets `beforeModel` govern it: the
+      // `index-loading` substate covers the restore, then we either
+      // redirect or fall through to the landing.
+      routes: ["docs"],
       ssrEntry: "app/app-ssr.ts",
     }),
     babel({
