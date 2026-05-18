@@ -1,4 +1,4 @@
-import { render, waitFor, waitUntil } from "@ember/test-helpers";
+import { render, waitFor } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -28,13 +28,13 @@ module("Integration | orphans-panel", function (hooks) {
 
     assert.dom(".orphans-panel").exists();
     assert.dom(".cycles-panel__title").includesText("Orphans");
-    // Orphan analysis now runs in the resident WASM session, so the
-    // list resolves asynchronously — wait for it. Single orphan
-    // (`alone`); the a-b cycle is *not* orphan.
-    await waitUntil(
-      () => document.querySelector(".cycles-panel__count")?.textContent?.trim() === "1",
-      { timeout: 10_000 },
-    );
+    // Orphan analysis runs in the resident WASM session; its test
+    // waiter (see `SessionPipeline`) makes `render()` block until it
+    // resolves, so the count is already settled. Single orphan
+    // (`alone`); the a-b cycle is *not* an orphan.
+    assert.dom(".cycles-panel__count").hasText("1");
+    // `VerticalCollection` still mounts its rows on a later measurement
+    // pass — third-party render deferral, not app async.
     await waitFor(".cycles-panel__node-label");
     assert.dom(".cycles-panel__node-label").hasText("alone");
   });
