@@ -156,6 +156,36 @@ export default class Visualizer extends Component {
   #packEdgeSeq = 0;
   #packArrowSeq = 0;
 
+  /**
+   * Median edge length in world units (sampled, ≤2000 edges, so it's
+   * O(1)-ish per scene). Median — not mean — so a handful of very long
+   * inter-cluster edges don't keep the LOD cull from kicking in when the
+   * vast majority of edges are tiny. 0 when there are no edges.
+   */
+  private medianEdgeLength(scene: ProcessedScene): number {
+    const ef = scene.graph.edgesFlat;
+    const pos = scene.positions;
+    const E = ef.length / 2;
+
+    if (E === 0) return 0;
+
+    const stride = Math.max(1, Math.floor(E / 2000));
+    const lens: number[] = [];
+
+    for (let i = 0; i < E; i += stride) {
+      const a = ef[2 * i]!;
+      const b = ef[2 * i + 1]!;
+      const dx = pos[2 * a]! - pos[2 * b]!;
+      const dy = pos[2 * a + 1]! - pos[2 * b + 1]!;
+
+      lens.push(Math.hypot(dx, dy));
+    }
+
+    lens.sort((p, q) => p - q);
+
+    return lens[lens.length >> 1] ?? 0;
+  }
+
   /** Incident edge-index list for `node`, or null when contraction is
    *  active (the fast path is only valid with `nodeRemap === null`). */
   private incidentEdges(scene: ProcessedScene, node: number): Int32Array | null {
@@ -984,6 +1014,7 @@ export default class Visualizer extends Component {
         scene.graph.edgeTypeIds,
         this.effectiveRadii ?? scene.radii,
       );
+      this.renderer?.setEdgeLod(this.medianEdgeLength(scene));
       this.repackCycle(scene);
       this.repackNodes(scene);
       this.repackEdges(scene);

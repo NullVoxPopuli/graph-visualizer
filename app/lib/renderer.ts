@@ -23,6 +23,11 @@
 //   bit 1 (2) = hovered      — grow body radius
 //   bit 2 (4) = cycle member — red outline
 //   bit 3 (8) = dimmed       — alpha-faded with extra fade at low zoom
+
+// Edge LOD: below this on-screen length (device px) for a representative
+// edge, the edge/arrow layer is dropped (sub-pixel haze, pure fill-rate).
+const EDGE_LOD_MIN_PX = 1.5;
+
 const NODE_VS = /* glsl */ `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aQuad;
@@ -228,6 +233,9 @@ export class Renderer {
   private camX = 0;
   private camY = 0;
   private camZoom = 1;
+  // Representative edge length in world units (median over the scene),
+  // pushed from the owner. 0 = unknown → edge LOD disabled.
+  private edgeLodWorldLen = 0;
 
   private nodeProg: WebGLProgram;
   private lineProg: WebGLProgram;
@@ -413,6 +421,11 @@ export class Renderer {
     this.camZoom = zoom;
   }
 
+  /** Representative edge length (world units) for the zoom LOD cull. */
+  setEdgeLod(worldLen: number): void {
+    this.edgeLodWorldLen = worldLen;
+  }
+
   setShowHulls(v: boolean): void {
     this.showHulls = v;
   }
@@ -532,7 +545,15 @@ export class Renderer {
       gl.drawArrays(gl.TRIANGLES, 0, this.hullVertexCount);
     }
 
-    if (this.lineVertexCount > 0) {
+    // Edge level-of-detail: when a representative edge is shorter than
+    // ~1.5 device-px on screen, the whole edge/arrow layer is a
+    // sub-pixel haze that conveys nothing but is pure fill-rate. Skip
+    // those passes entirely (nodes, hulls, and the selected node's
+    // cycle highlight still draw — those stay meaningful zoomed out).
+    const cullEdges =
+      this.edgeLodWorldLen > 0 && this.edgeLodWorldLen * this.camZoom < EDGE_LOD_MIN_PX;
+
+    if (!cullEdges && this.lineVertexCount > 0) {
       this.setCameraUniforms(this.lineProg);
       gl.bindVertexArray(this.lineVao);
       gl.drawArrays(gl.LINES, 0, this.lineVertexCount);
@@ -544,7 +565,7 @@ export class Renderer {
       gl.drawArrays(gl.LINES, 0, this.cycleVertexCount);
     }
 
-    if (this.showArrows && this.arrowInstCount > 0) {
+    if (!cullEdges && this.showArrows && this.arrowInstCount > 0) {
       this.setCameraUniforms(this.arrowProg);
       gl.bindVertexArray(this.arrowVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, this.arrowInstCount);

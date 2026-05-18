@@ -19,6 +19,7 @@ type InMsg =
   | { t: "init"; canvas: OffscreenCanvas; cssW: number; cssH: number; dpr: number }
   | { t: "resize"; cssW: number; cssH: number; dpr: number }
   | { t: "camera"; x: number; y: number; zoom: number }
+  | { t: "edgeLod"; worldLen: number }
   | { t: "show"; hulls: boolean; arrows: boolean }
   | { t: "selected"; v: boolean }
   | { t: "upload"; kind: UploadKind; buffer: ArrayBuffer; count: number }
@@ -96,6 +97,11 @@ self.onmessage = (e: MessageEvent<InMsg>): void => {
       break;
     case "camera":
       renderer?.setCamera(m.x, m.y, m.zoom);
+      dirty = true;
+
+      break;
+    case "edgeLod":
+      renderer?.setEdgeLod(m.worldLen);
       dirty = true;
 
       break;

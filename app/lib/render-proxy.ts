@@ -67,6 +67,10 @@ export class RenderProxy {
     this.#worker.postMessage({ t: "camera", x, y, zoom });
   }
 
+  setEdgeLod(worldLen: number): void {
+    this.#worker.postMessage({ t: "edgeLod", worldLen });
+  }
+
   resize(cssWidth: number, cssHeight: number, dpr: number): void {
     this.#worker.postMessage({ t: "resize", cssW: cssWidth, cssH: cssHeight, dpr });
   }
