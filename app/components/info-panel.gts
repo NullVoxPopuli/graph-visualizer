@@ -1,5 +1,5 @@
 import Component from "@glimmer/component";
-import { tracked } from "@glimmer/tracking";
+import { cached, tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
@@ -292,6 +292,7 @@ export default class InfoPanel extends Component {
    * or the id isn't in the graph (e.g., stale URL after the user dropped a
    * different file).
    */
+  @cached
   get info(): SelectedInfo | null {
     const id = this.viewState.selectedId;
     const g = this.graph.current;
@@ -316,6 +317,7 @@ export default class InfoPanel extends Component {
    * that depend on / import the selected one. Direct, deduped, sorted by
    * label.
    */
+  @cached
   get inNeighbors(): NeighborEntry[] {
     const info = this.info;
     const g = this.graph.current;
@@ -342,9 +344,35 @@ export default class InfoPanel extends Component {
   }
 
   /**
+   * Just the deduped count of incoming neighbors. A single O(E) scan with
+   * no array materialization or `localeCompare` sort — this is what the
+   * `<summary>` badge, the auto-open threshold, and the `{{#if}}` guard
+   * read, so selecting a 27k-edge hub doesn't pay to build and sort the
+   * full list (the template only materializes `inNeighbors` once the
+   * section is actually expanded).
+   */
+  @cached
+  get inNeighborCount(): number {
+    const info = this.info;
+    const g = this.graph.current;
+
+    if (!info || !g) return 0;
+
+    const edges = g.edgesFlat;
+    const seen = new Set<number>();
+
+    for (let k = 0; k < edges.length; k += 2) {
+      if (edges[k + 1] === info.index) seen.add(edges[k]!);
+    }
+
+    return seen.size;
+  }
+
+  /**
    * Nodes the selected node imports — its own `edges` array, deduped and
    * sorted by label.
    */
+  @cached
   get outNeighbors(): NeighborEntry[] {
     const info = this.info;
     const g = this.graph.current;
@@ -368,6 +396,24 @@ export default class InfoPanel extends Component {
     out.sort((a, b) => a.label.localeCompare(b.label));
 
     return out;
+  }
+
+  /** Deduped outgoing-neighbor count. See `inNeighborCount`. */
+  @cached
+  get outNeighborCount(): number {
+    const info = this.info;
+    const g = this.graph.current;
+
+    if (!info || !g) return 0;
+
+    const edges = g.edgesFlat;
+    const seen = new Set<number>();
+
+    for (let k = 0; k < edges.length; k += 2) {
+      if (edges[k] === info.index) seen.add(edges[k + 1]!);
+    }
+
+    return seen.size;
   }
 
   /**
@@ -553,7 +599,7 @@ export default class InfoPanel extends Component {
 
     if (override !== null) return override;
 
-    return this.inNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+    return this.inNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
   get outOpen(): boolean {
@@ -561,7 +607,7 @@ export default class InfoPanel extends Component {
 
     if (override !== null) return override;
 
-    return this.outNeighbors.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+    return this.outNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD;
   }
 
   get cyclesOpen(): boolean {
@@ -736,25 +782,27 @@ export default class InfoPanel extends Component {
           <details class="panel__section" open={{this.inOpen}}>
             <summary class="panel__subhead" {{on "click" this.toggleIn}}><IconCaretRight
                 class="summary-caret"
-              />in ({{this.inNeighbors.length}})</summary>
-            {{#if this.inNeighbors.length}}
-              <ul class="panel__neighbors">
-                {{#each this.inNeighbors as |entry|}}
-                  <li>
-                    <button
-                      type="button"
-                      class="panel__neighbor"
-                      title={{entry.id}}
-                      {{on "click" (fn this.selectNeighbor entry.id)}}
-                      {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                      {{on "mouseleave" this.unhoverNeighbor}}
-                    >
-                      <span class="panel__neighbor-label">{{entry.label}}</span>
-                      <code class="panel__neighbor-id">{{entry.id}}</code>
-                    </button>
-                  </li>
-                {{/each}}
-              </ul>
+              />in ({{this.inNeighborCount}})</summary>
+            {{#if this.inNeighborCount}}
+              {{#if this.inOpen}}
+                <ul class="panel__neighbors">
+                  {{#each this.inNeighbors as |entry|}}
+                    <li>
+                      <button
+                        type="button"
+                        class="panel__neighbor"
+                        title={{entry.id}}
+                        {{on "click" (fn this.selectNeighbor entry.id)}}
+                        {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                        {{on "mouseleave" this.unhoverNeighbor}}
+                      >
+                        <span class="panel__neighbor-label">{{entry.label}}</span>
+                        <code class="panel__neighbor-id">{{entry.id}}</code>
+                      </button>
+                    </li>
+                  {{/each}}
+                </ul>
+              {{/if}}
             {{else}}
               <p class="panel__empty">No incoming edges.</p>
             {{/if}}
@@ -763,25 +811,27 @@ export default class InfoPanel extends Component {
           <details class="panel__section" open={{this.outOpen}}>
             <summary class="panel__subhead" {{on "click" this.toggleOut}}><IconCaretRight
                 class="summary-caret"
-              />out ({{this.outNeighbors.length}})</summary>
-            {{#if this.outNeighbors.length}}
-              <ul class="panel__neighbors">
-                {{#each this.outNeighbors as |entry|}}
-                  <li>
-                    <button
-                      type="button"
-                      class="panel__neighbor"
-                      title={{entry.id}}
-                      {{on "click" (fn this.selectNeighbor entry.id)}}
-                      {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
-                      {{on "mouseleave" this.unhoverNeighbor}}
-                    >
-                      <span class="panel__neighbor-label">{{entry.label}}</span>
-                      <code class="panel__neighbor-id">{{entry.id}}</code>
-                    </button>
-                  </li>
-                {{/each}}
-              </ul>
+              />out ({{this.outNeighborCount}})</summary>
+            {{#if this.outNeighborCount}}
+              {{#if this.outOpen}}
+                <ul class="panel__neighbors">
+                  {{#each this.outNeighbors as |entry|}}
+                    <li>
+                      <button
+                        type="button"
+                        class="panel__neighbor"
+                        title={{entry.id}}
+                        {{on "click" (fn this.selectNeighbor entry.id)}}
+                        {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
+                        {{on "mouseleave" this.unhoverNeighbor}}
+                      >
+                        <span class="panel__neighbor-label">{{entry.label}}</span>
+                        <code class="panel__neighbor-id">{{entry.id}}</code>
+                      </button>
+                    </li>
+                  {{/each}}
+                </ul>
+              {{/if}}
             {{else}}
               <p class="panel__empty">No outgoing edges.</p>
             {{/if}}
