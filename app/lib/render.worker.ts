@@ -13,21 +13,7 @@
  */
 import { Renderer } from "#lib/renderer";
 
-type UploadKind = "nodes" | "lines" | "arrows" | "hulls" | "cycle";
-
-type InMsg =
-  | { t: "init"; canvas: OffscreenCanvas; cssW: number; cssH: number; dpr: number }
-  | { t: "resize"; cssW: number; cssH: number; dpr: number }
-  | { t: "camera"; x: number; y: number; zoom: number }
-  | { t: "edgeLod"; worldLen: number }
-  | { t: "show"; hulls: boolean; arrows: boolean }
-  | { t: "selected"; v: boolean }
-  | { t: "upload"; kind: UploadKind; buffer: ArrayBuffer; count: number }
-  | { t: "dirty" }
-  // Cadence pulse from the main thread's rAF (vsync-aligned — fires at
-  // the real display refresh, 240Hz on a 240Hz panel). Replaces the old
-  // fixed-60 setTimeout self-loop so frame rate tracks the display.
-  | { t: "tick" };
+import type { RenderInMsg, RenderOutMsg, UploadKind } from "#lib/render-protocol";
 
 let renderer: Renderer | null = null;
 let dirty = true;
@@ -45,7 +31,10 @@ function onTick(): void {
   if (dirty || selected) {
     renderer.draw();
     if (!selected) dirty = false;
-    (self as DedicatedWorkerGlobalScope).postMessage({ t: "frame" });
+
+    const frame: RenderOutMsg = { t: "frame" };
+
+    (self as DedicatedWorkerGlobalScope).postMessage(frame);
   }
 }
 
@@ -80,7 +69,7 @@ function upload(kind: UploadKind, buffer: ArrayBuffer, count: number): void {
   dirty = true;
 }
 
-self.onmessage = (e: MessageEvent<InMsg>): void => {
+self.onmessage = (e: MessageEvent<RenderInMsg>): void => {
   const m = e.data;
 
   switch (m.t) {

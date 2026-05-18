@@ -9,15 +9,9 @@
  * copy) — the slice is a fresh buffer, so the caller's scratch array is
  * never detached.
  */
-const STRIDE = {
-  nodes: 8, // (x,y,r, r,g,b,a, flags) per instance
-  lines: 6, // (x,y, r,g,b,a) per vertex
-  cycle: 6,
-  hulls: 6,
-  arrows: 9, // (sx,sy,tx,ty, r,g,b,a, srcRadius) per instance
-} as const;
+import { STRIDE } from "#lib/render-protocol";
 
-type Kind = keyof typeof STRIDE;
+import type { RenderInMsg, RenderOutMsg, UploadKind } from "#lib/render-protocol";
 
 export class RenderProxy {
   #worker: Worker;
@@ -29,22 +23,36 @@ export class RenderProxy {
 
   constructor(worker: Worker) {
     this.#worker = worker;
-    this.#worker.addEventListener("message", (e: MessageEvent) => {
-      if ((e.data as { t?: string } | null)?.t === "frame") this.framesRendered++;
+    this.#worker.addEventListener("message", (e: MessageEvent<RenderOutMsg>) => {
+      if (e.data?.t === "frame") this.framesRendered++;
     });
+  }
+
+  /** Single typed send point — every message is checked against the
+   *  shared `RenderInMsg` union, so the proxy can't drift from what the
+   *  worker switches on. */
+  #post(msg: RenderInMsg, transfer?: Transferable[]): void {
+    this.#worker.postMessage(msg, transfer ?? []);
+  }
+
+  /** Hand the `OffscreenCanvas` to the worker (which then owns GL + the
+   *  draw loop). Transfers the canvas. Call once, right after
+   *  construction. */
+  init(canvas: OffscreenCanvas, cssWidth: number, cssHeight: number, dpr: number): void {
+    this.#post({ t: "init", canvas, cssW: cssWidth, cssH: cssHeight, dpr }, [canvas]);
   }
 
   /** Cadence pulse — call once per main-thread rAF; the worker draws
    *  this frame iff something changed (or a node is selected). */
   tick(): void {
-    this.#worker.postMessage({ t: "tick" });
+    this.#post({ t: "tick" });
   }
 
-  #upload(kind: Kind, data: Float32Array, count: number): void {
+  #upload(kind: UploadKind, data: Float32Array, count: number): void {
     const used = Math.max(0, count) * STRIDE[kind];
     const slice = data.subarray(0, used).slice(); // fresh, transferable
 
-    this.#worker.postMessage({ t: "upload", kind, buffer: slice.buffer, count }, [slice.buffer]);
+    this.#post({ t: "upload", kind, buffer: slice.buffer, count }, [slice.buffer]);
   }
 
   uploadNodeInstances(data: Float32Array, count: number): void {
@@ -64,33 +72,33 @@ export class RenderProxy {
   }
 
   setCamera(x: number, y: number, zoom: number): void {
-    this.#worker.postMessage({ t: "camera", x, y, zoom });
+    this.#post({ t: "camera", x, y, zoom });
   }
 
   setEdgeLod(worldLen: number): void {
-    this.#worker.postMessage({ t: "edgeLod", worldLen });
+    this.#post({ t: "edgeLod", worldLen });
   }
 
   resize(cssWidth: number, cssHeight: number, dpr: number): void {
-    this.#worker.postMessage({ t: "resize", cssW: cssWidth, cssH: cssHeight, dpr });
+    this.#post({ t: "resize", cssW: cssWidth, cssH: cssHeight, dpr });
   }
 
   setShowHulls(v: boolean): void {
     this.#showHulls = v;
-    this.#worker.postMessage({ t: "show", hulls: this.#showHulls, arrows: this.#showArrows });
+    this.#post({ t: "show", hulls: this.#showHulls, arrows: this.#showArrows });
   }
   setShowArrows(v: boolean): void {
     this.#showArrows = v;
-    this.#worker.postMessage({ t: "show", hulls: this.#showHulls, arrows: this.#showArrows });
+    this.#post({ t: "show", hulls: this.#showHulls, arrows: this.#showArrows });
   }
 
   /** The worker owns the draw loop; nudge it that something changed. */
   markDirty(): void {
-    this.#worker.postMessage({ t: "dirty" });
+    this.#post({ t: "dirty" });
   }
 
   /** Keep the worker animating the selection halo (or not). */
   setSelected(v: boolean): void {
-    this.#worker.postMessage({ t: "selected", v });
+    this.#post({ t: "selected", v });
   }
 }
