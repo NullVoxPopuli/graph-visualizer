@@ -1,15 +1,12 @@
 import { tracked } from "@glimmer/tracking";
 import Service, { service } from "@ember/service";
 
-import * as Comlink from "comlink";
 import { getPromiseState, type State } from "reactiveweb/get-promise-state";
 
-import { computeRadii } from "#lib/pack";
+import { SessionPipeline } from "#lib/session-pipeline";
 
 import type GraphService from "./graph";
 import type ViewStateService from "./view-state";
-import type { AnalyzeEngine, AnalyzeInit } from "#lib/analyze.worker";
-import type { LayoutEngine, LayoutInit } from "#lib/layout-wasm.worker";
 import type { LoadedGraph } from "#lib/types";
 
 interface Analysis {
@@ -51,29 +48,45 @@ export default class VisualizerService extends Service {
   @service declare viewState: ViewStateService;
 
   /**
+   * One resident WASM session per loaded graph. The JSON is parsed into
+   * Rust once; clustering and layout are then cheap in-place queries on
+   * it. Recreated (old session freed) only when a *different* graph is
+   * loaded — not on slider moves.
+   */
+  #pipeline: SessionPipeline | null = null;
+  #pipelineGraph: LoadedGraph | null = null;
+
+  #disposePipeline(): void {
+    this.#pipeline?.dispose();
+    this.#pipeline = null;
+    this.#pipelineGraph = null;
+  }
+
+  /**
    * Community detection + radii. Depends on graph topology and the
-   * Louvain `resolution` slider. Manually memoized by value — `@cached`
-   * here would invalidate on every QP write (the resolution read tracks
-   * `router.currentRoute`), forcing a worker rerun per click.
+   * Louvain `resolution` slider (or the label-prefix grouping toggle).
+   * Manually memoized by value — `@cached` here would invalidate on every
+   * QP write (the resolution read tracks `router.currentRoute`), forcing
+   * a worker rerun per click.
    *
-   * When the inputs change we `terminate()` any still-running analysis
-   * worker (and downstream layout worker) before starting the new run.
-   * The orphaned promises never resolve — Comlink's call hangs once the
-   * worker is gone — but the new promise has replaced them in
-   * `#lastAnalysisPromise` / `#lastProcessing` so nothing observes them.
+   * Cancellation: the session is *resident*, so superseded runs aren't
+   * cancelled by terminating the worker (that would throw away the parsed
+   * graph). A clustering change just issues a new in-place query and
+   * replaces `#lastAnalysisPromise`; any in-flight older promise still
+   * resolves but is no longer referenced, so nothing observes it. The
+   * worker is only torn down when the graph itself changes.
    */
   #lastGraph: LoadedGraph | null = null;
   #lastClustering = Number.NaN;
   #lastClusterByLabel = false;
   #lastAnalysisPromise: Promise<Analysis> | null = null;
-  #analysisWorker: Worker | null = null;
 
   get analysis(): Promise<Analysis> | null {
     const g = this.graph.current;
+    const text = this.graph.currentText;
 
-    if (!g) {
-      this.#cancelAnalysis();
-      this.#cancelLayout();
+    if (!g || !text) {
+      this.#disposePipeline();
       this.#lastGraph = null;
       this.#lastAnalysisPromise = null;
 
@@ -92,32 +105,34 @@ export default class VisualizerService extends Service {
       return this.#lastAnalysisPromise;
     }
 
-    // Inputs changed — cancel both stages. The layout depends on
-    // analysis output, so a new analysis necessarily invalidates the
-    // current layout too.
-    this.#cancelAnalysis();
-    this.#cancelLayout();
+    // A different graph → fresh resident session (frees the old one).
+    if (g !== this.#pipelineGraph) {
+      this.#disposePipeline();
+      this.#pipeline = new SessionPipeline(text);
+      this.#pipelineGraph = g;
+    }
 
     this.#lastGraph = g;
     this.#lastClustering = clustering;
     this.#lastClusterByLabel = clusterByLabel;
 
-    const { worker, result } = startAnalysis(g, clustering, clusterByLabel);
+    const pipeline = this.#pipeline!;
+    // Label-prefix grouping has no Louvain analogue — compute it here
+    // (cheap string ops) and inject it into the resident session.
+    const labelCommunities = clusterByLabel ? clusterByLabelPrefix(g) : null;
 
-    this.#analysisWorker = worker;
-    this.#lastAnalysisPromise = result;
+    this.#lastAnalysisPromise = pipeline
+      .analyze({ clusterByLabel, resolution: clustering, labelCommunities })
+      .then(
+        (info): Analysis => ({
+          graph: g,
+          communities: info.communities,
+          communityCount: info.communityCount,
+          radii: info.radii,
+        }),
+      );
 
     return this.#lastAnalysisPromise;
-  }
-
-  #cancelAnalysis(): void {
-    this.#analysisWorker?.terminate();
-    this.#analysisWorker = null;
-  }
-
-  #cancelLayout(): void {
-    this.#layoutWorker?.terminate();
-    this.#layoutWorker = null;
   }
 
   /**
@@ -131,13 +146,18 @@ export default class VisualizerService extends Service {
    * `@cached` would invalidate on that churn and hand out a fresh promise
    * each click — the new `ProcessedScene` reference would then trip the
    * "re-fit" path in the renderer component.
+   *
+   * `#layoutEpoch` is the cancellation token: only the latest run writes
+   * progress / resolves into the renderer. The `SessionPipeline` itself
+   * collapses superseded layout requests so the worker never runs more
+   * than the newest one.
    */
   #lastAnalysis: Promise<Analysis> | null = null;
   #lastRepulsion = Number.NaN;
   #lastNodeDistance = Number.NaN;
   #lastClusterDistance = Number.NaN;
   #lastProcessing: Promise<ProcessedScene> | null = null;
-  #layoutWorker: Worker | null = null;
+  #layoutEpoch = 0;
 
   get processing(): Promise<ProcessedScene> | null {
     const a = this.analysis;
@@ -163,44 +183,37 @@ export default class VisualizerService extends Service {
       return this.#lastProcessing;
     }
 
-    // A layout slider moved (or analysis just produced a new result) —
-    // kill the previous layout worker before spawning the new one so we
-    // don't end up with two d3-force simulations fighting for CPU.
-    this.#cancelLayout();
-
     this.#lastAnalysis = a;
     this.#lastRepulsion = repulsion;
     this.#lastNodeDistance = nodeDistance;
     this.#lastClusterDistance = clusterDistance;
+
+    const epoch = ++this.#layoutEpoch;
+
     this.layoutProgress = { tick: 0, total: 1 };
     this.#lastProcessing = a.then(async (analysis) => {
-      // Safety: another invalidation may have raced in between the getter
-      // call and the analysis promise resolving (e.g. clustering slider
-      // moved while Louvain was still running). Terminate whatever's left
-      // before spawning so we never have two layout workers alive at once.
-      this.#cancelLayout();
+      const pipeline = this.#pipeline;
 
-      const { worker, result } = startLayout(
-        analysis.graph,
-        analysis.communities,
-        analysis.radii,
+      // Superseded before layout began (clustering moved again, or the
+      // graph was swapped). The cached promise has already been replaced,
+      // so a never-resolving promise here just keeps this stale scene
+      // from ever reaching the renderer — matching the old behavior where
+      // a terminated worker's Comlink call hung forever.
+      if (!pipeline || epoch !== this.#layoutEpoch) {
+        return new Promise<ProcessedScene>(() => {});
+      }
+
+      const positions = await pipeline.layout(
         { repulsion, nodeDistance, clusterDistance },
         (tick, total) => {
-          // Don't smear a dead worker's last tick over the new run's
-          // progress bar — only the currently-tracked worker writes
-          // here.
-          if (this.#layoutWorker === worker) {
+          // Only the latest run owns the progress bar.
+          if (epoch === this.#layoutEpoch) {
             this.layoutProgress = { tick, total };
           }
         },
       );
 
-      this.#layoutWorker = worker;
-
-      const positions = await result;
-
-      if (this.#layoutWorker === worker) {
-        this.#layoutWorker = null;
+      if (epoch === this.#layoutEpoch) {
         this.layoutProgress = null;
       }
 
@@ -276,135 +289,6 @@ export default class VisualizerService extends Service {
   focusOnId(id: string): void {
     this.pendingFocus = { id, ts: Date.now() };
   }
-}
-
-/**
- * Spawn the analyze worker for a single Louvain run. Returns the worker so
- * the caller can `terminate()` it if a newer slider value invalidates the
- * in-flight run; the result promise self-terminates on success so callers
- * who only care about the answer don't have to.
- */
-function startAnalyze(
-  graph: LoadedGraph,
-  resolution: number,
-): { worker: Worker; result: Promise<Int32Array> } {
-  const worker = new Worker(new URL("../lib/analyze.worker.ts", import.meta.url), {
-    type: "module",
-  });
-  const analyze = Comlink.wrap<AnalyzeEngine>(worker);
-  const result = (async () => {
-    try {
-      const init: AnalyzeInit = {
-        nodeCount: graph.ids.length,
-        edges: graph.edgesFlat,
-        resolution,
-      };
-      const { communities } = await analyze.run(init);
-
-      return communities;
-    } finally {
-      // Idempotent — already a no-op if the service terminated us first.
-      worker.terminate();
-    }
-  })();
-
-  return { worker, result };
-}
-
-/**
- * Spawn the Rust/WASM layout worker. Same cancellation contract as
- * `startAnalyze` — the returned worker is the handle the service uses to
- * `terminate()` a still-running layout when a new slider value arrives,
- * so we don't burn CPU on results nobody is going to see.
- */
-function startLayout(
-  graph: LoadedGraph,
-  communities: Int32Array,
-  radii: Float32Array,
-  params: { repulsion: number; nodeDistance: number; clusterDistance: number },
-  onProgress?: (tick: number, total: number) => void,
-): { worker: Worker; result: Promise<Float32Array> } {
-  // Layout runs entirely in the Rust/WASM worker (~3.5× faster than the
-  // old JS d3-force path it replaced). The `new URL(...)` literal is kept
-  // inline (not a computed path) so the bundler can statically discover
-  // and build the worker.
-  const worker = new Worker(new URL("../lib/layout-wasm.worker.ts", import.meta.url), {
-    type: "module",
-  });
-  const layout = Comlink.wrap<LayoutEngine>(worker);
-  const init: LayoutInit = {
-    nodeCount: graph.ids.length,
-    edges: graph.edgesFlat,
-    communities,
-    radii,
-    // The per-batch cluster spread used to amplify positions ~9x, which
-    // dwarfed the spring/charge forces and meant the sliders had no
-    // visible effect after auto-fit normalized the result.
-    spreadFactor: 1,
-    repulsion: params.repulsion,
-    nodeDistance: params.nodeDistance,
-    clusterDistance: params.clusterDistance,
-    cohesion: 0.12,
-  };
-  const result = (async () => {
-    try {
-      // Comlink.proxy gives the worker a callable handle into the main
-      // thread; without the wrap it'd try to clone the function and throw.
-      return await layout.run(init, onProgress ? Comlink.proxy(onProgress) : null);
-    } finally {
-      worker.terminate();
-    }
-  })();
-
-  return { worker, result };
-}
-
-/**
- * Run analysis (label-prefix grouping when `clusterByLabel`, Louvain
- * otherwise) and stamp on the precomputed radii. Returns a `worker`
- * handle (or `null` for the sync path) so the service can terminate the
- * in-flight Louvain run when the clustering slider moves again.
- */
-function startAnalysis(
-  graph: LoadedGraph,
-  resolution: number,
-  clusterByLabel: boolean,
-): { worker: Worker | null; result: Promise<Analysis> } {
-  const radii = computeRadii(graph.inDegree, graph.outDegree);
-
-  if (clusterByLabel) {
-    // Label-based clustering is cheap (pure string ops) and doesn't need
-    // the worker — finalize synchronously and return a resolved promise.
-    const communities = clusterByLabelPrefix(graph);
-
-    return {
-      worker: null,
-      result: Promise.resolve({
-        graph,
-        communities,
-        communityCount: countDistinct(communities),
-        radii,
-      }),
-    };
-  }
-
-  const { worker, result: communitiesP } = startAnalyze(graph, resolution);
-  const result = communitiesP.then((communities) => ({
-    graph,
-    communities,
-    communityCount: countDistinct(communities),
-    radii,
-  }));
-
-  return { worker, result };
-}
-
-function countDistinct(communities: Int32Array): number {
-  const seen = new Set<number>();
-
-  for (let i = 0; i < communities.length; i++) seen.add(communities[i]!);
-
-  return seen.size;
 }
 
 /**

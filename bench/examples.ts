@@ -1,56 +1,67 @@
 /**
  * Load the real example graphs (the ones shipped in `public/examples/`
  * and surfaced on the landing page) into `LayoutInit`s, replicating the
- * exact app pipeline: parse → Louvain community detection → degree-driven
- * radii. This makes the benchmark measure what users actually run,
- * including the 5k-node "large" example, instead of only the synthetic
- * generator.
+ * exact app pipeline: the JSON goes into a resident Rust `GraphSession`
+ * which does parse → Louvain → degree-driven radii, exactly as the app's
+ * session worker does. This makes the benchmark measure what users
+ * actually run, including the 5k-node "large" example, instead of only
+ * the synthetic generator.
  *
- * Louvain is reproduced here (not imported from `#lib/analyze.worker`,
- * which `Comlink.expose`s at module load and references the worker
- * global) — same shape as `analyzeEngine.run`.
+ * The `--target nodejs` WASM build (`crates/layout-wasm/pkg-node`,
+ * produced by `pnpm build:wasm`) initializes synchronously on `require`,
+ * so this stays a synchronous loader and the bench's `buildCases` doesn't
+ * have to become async.
  */
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import Graph from "graphology";
-import louvain from "graphology-communities-louvain";
-
 import { EXAMPLES } from "#lib/examples";
-import { computeRadii } from "#lib/pack";
-import { parseGraphJson } from "#lib/parser";
 
 import { DEFAULT_LAYOUT_PARAMS } from "./graph-gen.ts";
 
 import type { LayoutInit } from "#lib/layout-types";
 
-/** Mirror of `analyze.worker`'s Louvain run (resolution 1 = the default). */
-function detectCommunities(nodeCount: number, edges: Int32Array): Int32Array {
-  const g = new Graph({ type: "directed", multi: false, allowSelfLoops: false });
+interface GraphSessionCtor {
+  load(json: string): {
+    node_count(): number;
+    edges_flat(): Int32Array;
+    communities(): Int32Array;
+    radii(): Float32Array;
+    free(): void;
+  };
+}
 
-  for (let i = 0; i < nodeCount; i++) g.addNode(i);
+const require = createRequire(import.meta.url);
+let sessionCtor: GraphSessionCtor | null = null;
 
-  for (let i = 0; i < edges.length; i += 2) {
-    const a = edges[i]!;
-    const b = edges[i + 1]!;
+/**
+ * Lazily `require` the Node WASM build. Throws a clear message if it
+ * hasn't been built — there is no JS fallback for community detection
+ * anymore (the app runs Louvain in Rust).
+ */
+function graphSession(): GraphSessionCtor {
+  if (sessionCtor) return sessionCtor;
 
-    if (a === b) continue;
-    if (!g.hasEdge(a, b)) g.addEdge(a, b);
+  const spec = fileURLToPath(
+    new URL("../crates/layout-wasm/pkg-node/layout_wasm.js", import.meta.url),
+  );
+
+  let mod: { GraphSession?: GraphSessionCtor; default?: { GraphSession?: GraphSessionCtor } };
+
+  try {
+    mod = require(spec) as typeof mod;
+  } catch {
+    throw new Error("[bench] WASM backend not built. Run `pnpm build:wasm` first.");
   }
 
-  const communities = new Int32Array(nodeCount);
+  const ctor = mod.GraphSession ?? mod.default?.GraphSession;
 
-  if (g.size === 0) {
-    for (let i = 0; i < nodeCount; i++) communities[i] = i;
+  if (!ctor) throw new Error("[bench] pkg-node is missing the GraphSession export.");
 
-    return communities;
-  }
+  sessionCtor = ctor;
 
-  const assignments = louvain(g, { resolution: 1 }) as Record<string, number>;
-
-  for (let i = 0; i < nodeCount; i++) communities[i] = assignments[String(i)] ?? 0;
-
-  return communities;
+  return ctor;
 }
 
 export interface ExampleCase {
@@ -65,21 +76,22 @@ function examplePath(url: string): string {
 
 export function loadExample(label: string, url: string): ExampleCase {
   const text = readFileSync(examplePath(url), "utf8");
-  const graph = parseGraphJson(text);
-  const nodeCount = graph.ids.length;
-  const communities = detectCommunities(nodeCount, graph.edgesFlat);
-  const radii = computeRadii(graph.inDegree, graph.outDegree);
+  const session = graphSession().load(text);
 
-  return {
-    label,
-    init: {
-      nodeCount,
-      edges: graph.edgesFlat,
-      communities,
-      radii,
-      ...DEFAULT_LAYOUT_PARAMS,
-    },
-  };
+  try {
+    return {
+      label,
+      init: {
+        nodeCount: session.node_count(),
+        edges: Int32Array.from(session.edges_flat()),
+        communities: Int32Array.from(session.communities()),
+        radii: Float32Array.from(session.radii()),
+        ...DEFAULT_LAYOUT_PARAMS,
+      },
+    };
+  } finally {
+    session.free();
+  }
 }
 
 /** Every shipped example, smallest-first, as benchmark cases. */

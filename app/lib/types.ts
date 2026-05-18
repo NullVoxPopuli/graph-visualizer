@@ -1,5 +1,3 @@
-import type Graph from "graphology";
-
 /**
  * Parsed, in-memory representation of a graph loaded from the user's JSON.
  *
@@ -19,7 +17,6 @@ export interface LoadedGraph {
   metas: unknown[];
   idToIndex: Map<string, number>;
   edgesFlat: Int32Array;
-  graph: Graph;
   /** count of out-edges per node, for sizing */
   outDegree: Int32Array;
   /** count of in-edges per node, for sizing */

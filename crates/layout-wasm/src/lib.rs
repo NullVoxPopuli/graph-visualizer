@@ -417,6 +417,18 @@ impl GraphSession {
             graph::louvain(self.parsed.ids.len(), &self.parsed.edges_flat, resolution);
     }
 
+    /// Override the community assignment with one computed on the JS side
+    /// (the label-prefix clustering mode, which has no Louvain analogue).
+    /// Indexed 0..node_count-1, same node order as `ids_json`. Extra or
+    /// missing entries are clamped to the resident node count.
+    pub fn set_communities(&mut self, communities: &[i32]) {
+        let n = self.parsed.ids.len();
+        let mut next = vec![0i32; n];
+        let take = communities.len().min(n);
+        next[..take].copy_from_slice(&communities[..take]);
+        self.communities = next;
+    }
+
     pub fn has_any_cycle(&self) -> bool {
         graph::has_any_cycle(
             self.parsed.ids.len(),
