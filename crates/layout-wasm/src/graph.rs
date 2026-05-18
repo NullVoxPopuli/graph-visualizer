@@ -478,3 +478,378 @@ pub fn louvain(node_count: usize, edges_flat: &[i32], resolution: f64) -> Vec<i3
 
     node2comm.iter().map(|&c| c as i32).collect()
 }
+
+// ---------------------------------------------------------------------------
+// Cycle enumeration: faithful port of cycle.ts findAllCycles +
+// bundleRawCycles (Tarjan SCC + iterative Johnson's, contraction, and
+// the visual-key dedup). `node_remap`/`hidden` mirror the JS optionals.
+// ---------------------------------------------------------------------------
+
+/// CSR over visible+remapped edges (port of cycle.ts `buildCsr`).
+fn build_csr_cycles(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    node_remap: Option<&[i32]>,
+    hidden: Option<&[bool]>,
+) -> (Vec<i32>, Vec<i32>) {
+    let e = edges_flat.len() / 2;
+    let mut out_idx = vec![0i32; n + 1];
+    let mut ra = vec![0i32; e];
+    let mut rb = vec![0i32; e];
+    let mut m = 0usize;
+    for i in 0..e {
+        if let Some(h) = hidden {
+            let t = edge_type_ids.get(i).copied().unwrap_or(0) as usize;
+            if h.get(t).copied().unwrap_or(false) {
+                continue;
+            }
+        }
+        let mut a = edges_flat[2 * i];
+        let mut b = edges_flat[2 * i + 1];
+        if let Some(rm) = node_remap {
+            a = rm[a as usize];
+            b = rm[b as usize];
+            if a < 0 || b < 0 || a == b {
+                continue;
+            }
+        }
+        ra[m] = a;
+        rb[m] = b;
+        m += 1;
+        out_idx[a as usize + 1] += 1;
+    }
+    for i in 0..n {
+        out_idx[i + 1] += out_idx[i];
+    }
+    let mut out_adj = vec![0i32; m];
+    let mut filled = vec![0i32; n];
+    for i in 0..m {
+        let a = ra[i] as usize;
+        out_adj[(out_idx[a] + filled[a]) as usize] = rb[i];
+        filled[a] += 1;
+    }
+    (out_idx, out_adj)
+}
+
+/// Iterative Tarjan SCC (port of cycle.ts `tarjanScc`).
+fn tarjan_scc(
+    n: usize,
+    out_idx: &[i32],
+    out_adj: &[i32],
+    exclude_node: i32,
+    node_remap: Option<&[i32]>,
+) -> Vec<Vec<i32>> {
+    let mut index_of = vec![-1i32; n];
+    let mut lowlink = vec![0i32; n];
+    let mut on_stack = vec![false; n];
+    let mut stack: Vec<i32> = Vec::new();
+    let mut call_node = vec![0i32; n];
+    let mut call_cursor = vec![0i32; n];
+    let mut idx_counter = 0i32;
+    let mut sccs: Vec<Vec<i32>> = Vec::new();
+    let remapped_self = |w: i32| node_remap.map(|r| r[w as usize] != w).unwrap_or(false);
+
+    for start in 0..n as i32 {
+        if index_of[start as usize] != -1 || start < exclude_node || remapped_self(start) {
+            continue;
+        }
+        let mut depth = 0usize;
+        call_node[0] = start;
+        call_cursor[0] = out_idx[start as usize];
+        depth = depth + 1;
+        index_of[start as usize] = idx_counter;
+        lowlink[start as usize] = idx_counter;
+        idx_counter += 1;
+        stack.push(start);
+        on_stack[start as usize] = true;
+
+        while depth > 0 {
+            let v = call_node[depth - 1];
+            let end = out_idx[v as usize + 1];
+            let mut recursed = false;
+            while call_cursor[depth - 1] < end {
+                let j = call_cursor[depth - 1];
+                let w = out_adj[j as usize];
+                call_cursor[depth - 1] = j + 1;
+                if w < exclude_node || remapped_self(w) {
+                    continue;
+                }
+                if index_of[w as usize] == -1 {
+                    call_node[depth] = w;
+                    call_cursor[depth] = out_idx[w as usize];
+                    depth += 1;
+                    index_of[w as usize] = idx_counter;
+                    lowlink[w as usize] = idx_counter;
+                    idx_counter += 1;
+                    stack.push(w);
+                    on_stack[w as usize] = true;
+                    recursed = true;
+                    break;
+                } else if on_stack[w as usize] && index_of[w as usize] < lowlink[v as usize] {
+                    lowlink[v as usize] = index_of[w as usize];
+                }
+            }
+            if recursed {
+                continue;
+            }
+            if lowlink[v as usize] == index_of[v as usize] {
+                let mut scc: Vec<i32> = Vec::new();
+                loop {
+                    let popped = stack.pop().unwrap();
+                    on_stack[popped as usize] = false;
+                    scc.push(popped);
+                    if popped == v {
+                        break;
+                    }
+                }
+                if scc.len() > 1 {
+                    sccs.push(scc);
+                }
+            }
+            depth -= 1;
+            if depth > 0 {
+                let parent = call_node[depth - 1];
+                if lowlink[v as usize] < lowlink[parent as usize] {
+                    lowlink[parent as usize] = lowlink[v as usize];
+                }
+            }
+        }
+    }
+    sccs
+}
+
+/// Iterative Johnson's over one SCC (port of
+/// `enumerateElementaryCyclesInScc`), B stored as a linked list.
+#[allow(clippy::too_many_arguments)]
+fn enumerate_cycles_in_scc(
+    scc: &[i32],
+    n: usize,
+    out_idx: &[i32],
+    out_adj: &[i32],
+    in_scc: &[bool],
+    out: &mut Vec<Vec<i32>>,
+    max_cycles: usize,
+) {
+    let mut blocked = vec![false; n];
+    let mut b_head = vec![-1i32; n];
+    let mut b_node: Vec<i32> = Vec::new();
+    let mut b_next: Vec<i32> = Vec::new();
+    let mut path: Vec<i32> = Vec::new();
+    let mut cursor: Vec<i32> = Vec::new();
+    let mut found_at_depth = vec![false; scc.len()];
+    let mut unblock_stack: Vec<i32> = Vec::new();
+
+    for &start in scc {
+        if out.len() >= max_cycles {
+            break;
+        }
+        for &v in scc {
+            blocked[v as usize] = false;
+            b_head[v as usize] = -1;
+        }
+        b_node.clear();
+        b_next.clear();
+        path.clear();
+        cursor.clear();
+        path.push(start);
+        cursor.push(out_idx[start as usize]);
+        found_at_depth[0] = false;
+        blocked[start as usize] = true;
+
+        while !path.is_empty() {
+            if out.len() >= max_cycles {
+                break;
+            }
+            let depth = path.len() - 1;
+            let v = path[depth];
+            let end = out_idx[v as usize + 1];
+            let mut recursed = false;
+
+            while cursor[depth] < end {
+                let j = cursor[depth];
+                let w = out_adj[j as usize];
+                cursor[depth] = j + 1;
+                if !in_scc[w as usize] || w < start {
+                    continue;
+                }
+                if w == start {
+                    out.push(path.clone());
+                    found_at_depth[depth] = true;
+                    if out.len() >= max_cycles {
+                        break;
+                    }
+                    continue;
+                }
+                if !blocked[w as usize] {
+                    path.push(w);
+                    cursor.push(out_idx[w as usize]);
+                    found_at_depth[path.len() - 1] = false;
+                    blocked[w as usize] = true;
+                    recursed = true;
+                    break;
+                }
+            }
+            if recursed {
+                continue;
+            }
+
+            let v_found = found_at_depth[depth];
+            if v_found {
+                // unblock(v), iterative
+                if b_head[v as usize] == -1 {
+                    blocked[v as usize] = false;
+                } else {
+                    unblock_stack.clear();
+                    unblock_stack.push(v);
+                    while let Some(node) = unblock_stack.pop() {
+                        if !blocked[node as usize] {
+                            continue;
+                        }
+                        blocked[node as usize] = false;
+                        let mut entry = b_head[node as usize];
+                        b_head[node as usize] = -1;
+                        while entry != -1 {
+                            let w = b_node[entry as usize];
+                            let next = b_next[entry as usize];
+                            if blocked[w as usize] {
+                                unblock_stack.push(w);
+                            }
+                            entry = next;
+                        }
+                    }
+                }
+            } else {
+                let mut j = out_idx[v as usize];
+                while j < end {
+                    let w = out_adj[j as usize];
+                    j += 1;
+                    if !in_scc[w as usize] || w < start || w == v {
+                        continue;
+                    }
+                    b_node.push(v);
+                    b_next.push(b_head[w as usize]);
+                    b_head[w as usize] = (b_node.len() - 1) as i32;
+                }
+            }
+
+            path.pop();
+            cursor.pop();
+            if v_found && !path.is_empty() {
+                let d = path.len() - 1;
+                found_at_depth[d] = true;
+            }
+        }
+    }
+}
+
+/// Port of cycle.ts `findAllCycles`.
+pub fn find_all_cycles(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    node_remap: Option<&[i32]>,
+    hidden: Option<&[bool]>,
+    max_cycles: usize,
+) -> Vec<Vec<i32>> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let (out_idx, out_adj) = build_csr_cycles(n, edges_flat, edge_type_ids, node_remap, hidden);
+    let sccs = tarjan_scc(n, &out_idx, &out_adj, 0, node_remap);
+    let mut cycles: Vec<Vec<i32>> = Vec::new();
+    for mut scc in sccs {
+        if scc.len() < 2 || cycles.len() >= max_cycles {
+            if cycles.len() >= max_cycles {
+                break;
+            }
+            continue;
+        }
+        scc.sort_unstable();
+        let mut in_scc = vec![false; n];
+        for &v in &scc {
+            in_scc[v as usize] = true;
+        }
+        enumerate_cycles_in_scc(&scc, n, &out_idx, &out_adj, &in_scc, &mut cycles, max_cycles);
+    }
+    cycles.sort_by_key(|c| c.len());
+    cycles
+}
+
+/// Port of cycle.ts `contractCycle`.
+fn contract_cycle(raw: &[i32], node_remap: Option<&[i32]>) -> Option<Vec<i32>> {
+    let Some(rm) = node_remap else {
+        return Some(raw.to_vec());
+    };
+    let mut out: Vec<i32> = Vec::new();
+    for &idx in raw {
+        let r = rm[idx as usize];
+        if r < 0 {
+            return None;
+        }
+        if out.last() == Some(&r) {
+            continue;
+        }
+        out.push(r);
+    }
+    while out.len() > 1 && out[0] == out[out.len() - 1] {
+        out.pop();
+    }
+    if out.len() >= 2 {
+        Some(out)
+    } else {
+        None
+    }
+}
+
+/// Port of cycle.ts `visualCycleKey`.
+fn visual_cycle_key(cycle: &[i32]) -> String {
+    let n = cycle.len();
+    if n == 0 {
+        return String::new();
+    }
+    let mut min_idx = 0;
+    for i in 1..n {
+        if cycle[i] < cycle[min_idx] {
+            min_idx = i;
+        }
+    }
+    if n <= 5 {
+        let mut s = String::new();
+        for i in 0..n {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&cycle[(min_idx + i) % n].to_string());
+        }
+        return s;
+    }
+    let first = cycle[min_idx];
+    let second = cycle[(min_idx + 1) % n];
+    let last = cycle[(min_idx + n - 1) % n];
+    format!("{first}|{second}|{last}|{n}")
+}
+
+/// Port of cycle.ts `findBundledCyclesViaRaw` (find_all + dedup-bundle).
+pub fn find_bundled_cycles_via_raw(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    node_remap: Option<&[i32]>,
+    hidden: Option<&[bool]>,
+    max_cycles: usize,
+) -> Vec<Vec<i32>> {
+    let raw = find_all_cycles(n, edges_flat, edge_type_ids, node_remap, hidden, max_cycles);
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<Vec<i32>> = Vec::new();
+    for r in &raw {
+        if let Some(bundled) = contract_cycle(r, node_remap) {
+            let key = visual_cycle_key(&bundled);
+            if seen.insert(key) {
+                out.push(bundled);
+            }
+        }
+    }
+    out.sort_by_key(|c| c.len());
+    out
+}
