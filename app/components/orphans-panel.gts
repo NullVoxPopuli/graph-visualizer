@@ -4,7 +4,9 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { VerticalCollection } from "@html-next/vertical-collection";
+import { use } from "ember-resources";
 import { getPromiseState } from "reactiveweb/get-promise-state";
+import { keepLatest } from "reactiveweb/keep-latest";
 
 import {
   createApplyGeometryModifier,
@@ -56,13 +58,13 @@ export default class OrphansPanel extends Component {
    * knob.
    */
   @cached
-  get orphans(): OrphanEntry[] {
+  get orphanResult(): { entries: OrphanEntry[]; pending: boolean } {
     // Skip entirely when the panel is closed — nothing reads the result.
-    if (!this.viewState.orphansPanelOpen) return [];
+    if (!this.viewState.orphansPanelOpen) return { entries: [], pending: false };
 
     const g = this.graph.current;
 
-    if (!g) return [];
+    if (!g) return { entries: [], pending: false };
 
     const effectiveHidden = this.viewState.effectiveHiddenNodeIds(g);
     const hiddenIds = Int32Array.from(this.viewState.hiddenEdgeTypes);
@@ -76,11 +78,15 @@ export default class OrphansPanel extends Component {
 
     const promise = this.visualizer.orphanIndices(hiddenIds, Int32Array.from(rootIndices));
 
-    if (!promise) return [];
+    if (!promise) return { entries: [], pending: false };
 
-    const resolved = getPromiseState(promise).resolved;
+    const state = getPromiseState(promise);
+    const resolved = state.resolved;
 
-    if (!resolved) return [];
+    // Declaring a root / toggling an edge-type filter spins up a fresh
+    // Rust query — `resolved` is briefly undefined. Report `pending` so
+    // `keepLatest` holds the last list instead of flashing empty.
+    if (!resolved) return { entries: [], pending: state.isLoading };
 
     const entries: OrphanEntry[] = [];
 
@@ -93,7 +99,23 @@ export default class OrphansPanel extends Component {
 
     entries.sort((a, b) => a.label.localeCompare(b.label));
 
-    return entries;
+    return { entries, pending: false };
+  }
+
+  /**
+   * The displayed orphan list, smoothed across the async re-query that
+   * fires whenever roots/filters change. While the new query is in
+   * flight `keepLatest` keeps the previous non-empty list visible
+   * instead of letting the panel blank and jump; a settled empty result
+   * (genuinely no orphans) still clears it, because `when` is false then.
+   */
+  @use private orphansLatest = keepLatest<OrphanEntry[]>({
+    value: () => this.orphanResult.entries,
+    when: () => this.orphanResult.pending,
+  });
+
+  get orphans(): OrphanEntry[] {
+    return this.orphansLatest ?? [];
   }
 
   get selectedId(): string | null {
