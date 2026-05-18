@@ -1,4 +1,5 @@
 import Component from "@glimmer/component";
+import { cached } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
@@ -39,27 +40,22 @@ export default class OrphansPanel extends Component {
   @service declare visualizer: VisualizerService;
 
   /**
-   * Orphan analysis now lives in the resident Rust session (no JS
-   * duplicate). The service memoizes the query per (graph, edge-type
-   * filter, declared roots) and the worker pass is a cheap O(N + E) on
-   * the already-resident graph, so it runs once per distinct filter
-   * state — not per render. We read the resolved indices via
-   * `getPromiseState` and, while a fresh result is in flight, keep
-   * showing the previous list so the panel never flickers or blocks.
+   * Orphan analysis lives in the resident Rust session (no JS
+   * duplicate). `@cached`: recomputes only when a tracked dependency
+   * this body reads changes — `graph.current`, the edge-type filter,
+   * declared roots, and the effective hide-id post-filter (all
+   * fine-grained `trackedObject` view-state slots) plus the resident-
+   * session orphan promise. Pure computation, no getter side-effects.
    *
-   * The edge-type filter + declared roots are passed into the Rust peel
-   * (they change the analysis). The hidden-node-id / label-glob filter
-   * stays a JS post-pass: orphan status is computed against the full
-   * graph, then any orphan whose id is in the effective hide set is
-   * dropped from the displayed list — matching the renderer (a hidden
-   * node's edges drop off the canvas too) without the peel needing
-   * another knob. Entries are rebuilt only when the resolved index set
-   * or that post-filter actually changes.
+   * The edge-type filter + declared roots feed the Rust peel (they
+   * change the analysis). The hidden-node-id / label-glob filter stays
+   * a JS post-pass: orphan status is computed against the full graph,
+   * then any orphan whose id is in the effective hide set is dropped
+   * from the displayed list — matching the renderer (a hidden node's
+   * edges drop off the canvas too) without the peel needing another
+   * knob.
    */
-  #lastResolved: Int32Array | null = null;
-  #lastHideKey = "";
-  #lastOrphans: OrphanEntry[] = [];
-
+  @cached
   get orphans(): OrphanEntry[] {
     // Skip entirely when the panel is closed — nothing reads the result.
     if (!this.viewState.orphansPanelOpen) return [];
@@ -68,14 +64,11 @@ export default class OrphansPanel extends Component {
 
     if (!g) return [];
 
-    const hiddenEdgeTypes = this.viewState.hiddenEdgeTypes;
     const effectiveHidden = this.viewState.effectiveHiddenNodeIds(g);
-    const rootNodeIds = this.viewState.rootNodeIds;
-
-    const hiddenIds = Int32Array.from(hiddenEdgeTypes);
+    const hiddenIds = Int32Array.from(this.viewState.hiddenEdgeTypes);
     const rootIndices: number[] = [];
 
-    for (const id of rootNodeIds) {
+    for (const id of this.viewState.rootNodeIds) {
       const idx = g.idToIndex.get(id);
 
       if (idx !== undefined) rootIndices.push(idx);
@@ -87,35 +80,20 @@ export default class OrphansPanel extends Component {
 
     const resolved = getPromiseState(promise).resolved;
 
-    // First result for this filter not in yet — keep the previous list
-    // (empty on first ever load; the scene overlay covers that anyway).
-    if (!resolved) return this.#lastOrphans;
+    if (!resolved) return [];
 
-    const hideKey = serializeStringSet(effectiveHidden);
+    const entries: OrphanEntry[] = [];
 
-    if (resolved !== this.#lastResolved || hideKey !== this.#lastHideKey) {
-      const entries: OrphanEntry[] = [];
+    for (const idx of resolved) {
+      const id = g.ids[idx]!;
 
-      for (const idx of resolved) {
-        const id = g.ids[idx]!;
-
-        if (effectiveHidden.has(id)) continue;
-        entries.push({ index: idx, id, label: g.labels[idx]! });
-      }
-
-      entries.sort((a, b) => a.label.localeCompare(b.label));
-
-      // Memoization writes — caching the presented list is the point;
-      // the eslint rule otherwise flags any assignment in a getter.
-      // eslint-disable-next-line ember/no-side-effects
-      this.#lastResolved = resolved;
-      // eslint-disable-next-line ember/no-side-effects
-      this.#lastHideKey = hideKey;
-      // eslint-disable-next-line ember/no-side-effects
-      this.#lastOrphans = entries;
+      if (effectiveHidden.has(id)) continue;
+      entries.push({ index: idx, id, label: g.labels[idx]! });
     }
 
-    return this.#lastOrphans;
+    entries.sort((a, b) => a.label.localeCompare(b.label));
+
+    return entries;
   }
 
   get selectedId(): string | null {
@@ -267,10 +245,4 @@ export default class OrphansPanel extends Component {
       </aside>
     {{/if}}
   </template>
-}
-
-function serializeStringSet(set: Set<string>): string {
-  if (set.size === 0) return "";
-
-  return [...set].sort().join(",");
 }
