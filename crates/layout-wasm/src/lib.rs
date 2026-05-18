@@ -429,13 +429,40 @@ impl GraphSession {
         self.communities = next;
     }
 
-    pub fn has_any_cycle(&self) -> bool {
+    /// `hidden_edge_type_ids`: edge-type ids the user has filtered out
+    /// (empty = none). Same semantics as the JS `hasAnyCycle`.
+    pub fn has_any_cycle(&self, hidden_edge_type_ids: &[i32]) -> bool {
+        let hidden = self.hidden_type_mask(hidden_edge_type_ids);
         graph::has_any_cycle(
             self.parsed.ids.len(),
             &self.parsed.edges_flat,
             &self.parsed.edge_type_ids,
-            None,
+            hidden.as_deref(),
         )
+    }
+
+    /// All elementary directed cycles (Tarjan SCC + Johnson's, the
+    /// exponential-worst-case enumeration), as a flat buffer:
+    /// `[len0, n0_0, n0_1, …, len1, n1_0, …]`. Node indices, no
+    /// contraction — collapsing/bundling is a cheap JS post-pass on this
+    /// fixed list. `hidden_edge_type_ids` restricts to visible edges;
+    /// `max_cycles` caps the (potentially exponential) enumeration.
+    pub fn raw_cycles(&self, hidden_edge_type_ids: &[i32], max_cycles: usize) -> Vec<i32> {
+        let hidden = self.hidden_type_mask(hidden_edge_type_ids);
+        let cycles = graph::find_all_cycles(
+            self.parsed.ids.len(),
+            &self.parsed.edges_flat,
+            &self.parsed.edge_type_ids,
+            None,
+            hidden.as_deref(),
+            max_cycles,
+        );
+        let mut flat = Vec::new();
+        for c in &cycles {
+            flat.push(c.len() as i32);
+            flat.extend_from_slice(c);
+        }
+        flat
     }
 
     /// Boolean mask over edge-type ids: `mask[t] == true` ⇒ edges of

@@ -1,4 +1,4 @@
-import { render } from "@ember/test-helpers";
+import { render, waitUntil } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -68,6 +68,8 @@ module("Integration | info-panel", function (hooks) {
 
     await render(<template><InfoPanel /></template>);
 
+    // Cycle enumeration now resolves from the resident Rust session.
+    await waitUntil(() => document.querySelector(".panel__cycle"));
     assert.dom(".panel__cycle").exists({ count: 1 });
     assert.dom(".panel__cycle-head-text").includesText("3 nodes");
     assert.dom(".cycle-id").exists("cycle entry has its short-id chip");
@@ -92,6 +94,7 @@ module("Integration | info-panel", function (hooks) {
 
     await render(<template><InfoPanel /></template>);
 
+    await waitUntil(() => document.querySelector(".panel__cycle"));
     assert.dom(".panel__cycle").exists({ count: 1 }, "one bundled cycle through pkgA");
     assert.dom(".panel__neighbor-raw").exists("raw-file line surfaces under contracted steps");
   });

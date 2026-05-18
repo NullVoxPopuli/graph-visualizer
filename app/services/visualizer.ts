@@ -315,6 +315,82 @@ export default class VisualizerService extends Service {
   }
 
   /**
+   * Elementary cycles (the exponential enumeration) computed in the
+   * resident Rust session, as `number[][]` node-index lists. Memoized
+   * per (graph, edge-type filter) — collapsed-node bundling is a cheap
+   * synchronous JS pass the panels run on the resolved list, so it
+   * isn't a key here. Same non-blocking promise-state contract as
+   * `orphanIndices`. `null` until a graph + session exist.
+   */
+  #cycleGraph: LoadedGraph | null = null;
+  #cycleCache = new Map<string, Promise<number[][]>>();
+  #hasCycleCache = new Map<string, Promise<boolean>>();
+
+  #resetCycleCachesIfStale(g: LoadedGraph): void {
+    if (g !== this.#cycleGraph) {
+      this.#cycleGraph = g;
+      this.#cycleCache.clear();
+      this.#hasCycleCache.clear();
+    }
+  }
+
+  cycleRaw(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Promise<number[][]> | null {
+    void this.analysis;
+
+    const g = this.graph.current;
+    const pipeline = this.#pipeline;
+
+    if (!g || !pipeline) {
+      this.#cycleGraph = null;
+      this.#cycleCache.clear();
+      this.#hasCycleCache.clear();
+
+      return null;
+    }
+
+    this.#resetCycleCachesIfStale(g);
+
+    const key = `${hiddenEdgeTypeIds.join(",")}|${maxCycles}`;
+    let p = this.#cycleCache.get(key);
+
+    if (!p) {
+      p = pipeline.rawCycles(hiddenEdgeTypeIds, maxCycles);
+      this.#cycleCache.set(key, p);
+    }
+
+    return p;
+  }
+
+  /** Whether any cycle exists under the edge-type filter. Memoized;
+   *  same non-blocking contract as the rest. `null` until ready. */
+  hasAnyCycle(hiddenEdgeTypeIds: Int32Array): Promise<boolean> | null {
+    void this.analysis;
+
+    const g = this.graph.current;
+    const pipeline = this.#pipeline;
+
+    if (!g || !pipeline) {
+      this.#cycleGraph = null;
+      this.#cycleCache.clear();
+      this.#hasCycleCache.clear();
+
+      return null;
+    }
+
+    this.#resetCycleCachesIfStale(g);
+
+    const key = hiddenEdgeTypeIds.join(",");
+    let p = this.#hasCycleCache.get(key);
+
+    if (!p) {
+      p = pipeline.hasAnyCycle(hiddenEdgeTypeIds);
+      this.#hasCycleCache.set(key, p);
+    }
+
+    return p;
+  }
+
+  /**
    * Cross-component pan-to request. Set by the search component (and
    * anything else that wants to bring a node into view); polled and
    * cleared by the Visualizer component's rAF loop. Not tracked — the
