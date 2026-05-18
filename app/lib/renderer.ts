@@ -28,6 +28,24 @@
 // edge, the edge/arrow layer is dropped (sub-pixel haze, pure fill-rate).
 const EDGE_LOD_MIN_PX = 1.5;
 
+// Fullscreen-triangle blit (samples the cached static layer). Uses
+// gl_VertexID so it needs no vertex buffer — just an empty bound VAO.
+const BLIT_VS = /* glsl */ `#version 300 es
+precision highp float;
+out vec2 vUv;
+void main() {
+  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+  vUv = p * 0.5 + 0.5;
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+const BLIT_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+out vec4 fragColor;
+void main() { fragColor = texture(uTex, vUv); }`;
+
 const NODE_VS = /* glsl */ `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aQuad;
@@ -279,6 +297,20 @@ export class Renderer {
   private showHulls = false;
   private showArrows = true;
 
+  // Static-layer cache: hulls + edges + cycle + arrows render into an
+  // offscreen texture, regenerated only when something affecting them
+  // changes (camera / scene buffers / show / edge-LOD / resize). While
+  // just the selection halo animates, we blit this texture and redraw
+  // only the cheap node pass instead of re-rasterizing every edge
+  // 60–240×/s. Nodes are never cached (halo/dim animate per frame).
+  #blitProg: WebGLProgram | null = null;
+  #blitVao: WebGLVertexArrayObject | null = null;
+  #fbo: WebGLFramebuffer | null = null;
+  #fboTex: WebGLTexture | null = null;
+  #fboW = 0;
+  #fboH = 0;
+  #staticDirty = true;
+
   constructor(canvas: HTMLCanvasElement | OffscreenCanvas) {
     const gl = canvas.getContext("webgl2", {
       antialias: true,
@@ -392,6 +424,41 @@ export class Renderer {
     gl.vertexAttribDivisor(4, 1);
 
     gl.bindVertexArray(null);
+
+    this.#blitProg = link(gl, BLIT_VS, BLIT_FS);
+    this.#blitVao = gl.createVertexArray()!;
+  }
+
+  /** (Re)create the static-layer FBO + texture at the current size. */
+  #ensureFbo(): void {
+    const gl = this.gl;
+    const w = gl.canvas.width;
+    const h = gl.canvas.height;
+
+    if (this.#fbo && this.#fboW === w && this.#fboH === h) return;
+    if (this.#fboTex) gl.deleteTexture(this.#fboTex);
+    if (this.#fbo) gl.deleteFramebuffer(this.#fbo);
+
+    const tex = gl.createTexture();
+
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const fbo = gl.createFramebuffer();
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    this.#fbo = fbo;
+    this.#fboTex = tex;
+    this.#fboW = w;
+    this.#fboH = h;
+    this.#staticDirty = true;
   }
 
   /**
@@ -412,6 +479,7 @@ export class Renderer {
     }
 
     gl.viewport(0, 0, c.width, c.height);
+    this.#staticDirty = true;
   }
 
   /** Camera transform, pushed from the owner each change. */
@@ -419,18 +487,22 @@ export class Renderer {
     this.camX = x;
     this.camY = y;
     this.camZoom = zoom;
+    this.#staticDirty = true;
   }
 
   /** Representative edge length (world units) for the zoom LOD cull. */
   setEdgeLod(worldLen: number): void {
     this.edgeLodWorldLen = worldLen;
+    this.#staticDirty = true;
   }
 
   setShowHulls(v: boolean): void {
     this.showHulls = v;
+    this.#staticDirty = true;
   }
   setShowArrows(v: boolean): void {
     this.showArrows = v;
+    this.#staticDirty = true;
   }
 
   /** Upload packed node instances. data length must be >= 8 * count. */
@@ -466,6 +538,7 @@ export class Renderer {
     }
 
     this.lineVertexCount = vertexCount;
+    this.#staticDirty = true;
     gl.bindVertexArray(null);
   }
 
@@ -483,6 +556,7 @@ export class Renderer {
     }
 
     this.hullVertexCount = vertexCount;
+    this.#staticDirty = true;
     gl.bindVertexArray(null);
   }
 
@@ -504,6 +578,7 @@ export class Renderer {
     }
 
     this.arrowInstCount = count;
+    this.#staticDirty = true;
     gl.bindVertexArray(null);
   }
 
@@ -522,6 +597,7 @@ export class Renderer {
     }
 
     this.cycleVertexCount = vertexCount;
+    this.#staticDirty = true;
     gl.bindVertexArray(null);
   }
 
@@ -534,10 +610,9 @@ export class Renderer {
     gl.uniform2f(gl.getUniformLocation(prog, "uViewport"), gl.canvas.width, gl.canvas.height);
   }
 
-  draw(): void {
+  /** Hulls + edges (LOD-culled) + cycle + arrows — cacheable static layer. */
+  #drawStatic(): void {
     const gl = this.gl;
-
-    gl.clear(gl.COLOR_BUFFER_BIT);
 
     if (this.showHulls && this.hullVertexCount > 0) {
       this.setCameraUniforms(this.hullProg);
@@ -548,8 +623,7 @@ export class Renderer {
     // Edge level-of-detail: when a representative edge is shorter than
     // ~1.5 device-px on screen, the whole edge/arrow layer is a
     // sub-pixel haze that conveys nothing but is pure fill-rate. Skip
-    // those passes entirely (nodes, hulls, and the selected node's
-    // cycle highlight still draw — those stay meaningful zoomed out).
+    // those passes (hulls and the cycle highlight still draw).
     const cullEdges =
       this.edgeLodWorldLen > 0 && this.edgeLodWorldLen * this.camZoom < EDGE_LOD_MIN_PX;
 
@@ -570,7 +644,40 @@ export class Renderer {
       gl.bindVertexArray(this.arrowVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, this.arrowInstCount);
     }
+  }
 
+  draw(): void {
+    const gl = this.gl;
+
+    this.#ensureFbo();
+
+    // Regenerate the static layer only when something affecting it
+    // changed. While just the selection halo animates, this is skipped
+    // and only the cheap node pass is redrawn.
+    if (this.#staticDirty) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.#fbo);
+      gl.viewport(0, 0, this.#fboW, this.#fboH);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this.#drawStatic();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.#staticDirty = false;
+    }
+
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Composite the cached static layer (opaque copy — it already holds
+    // the blended edges over the background).
+    gl.disable(gl.BLEND);
+    gl.useProgram(this.#blitProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.#fboTex);
+    gl.uniform1i(gl.getUniformLocation(this.#blitProg!, "uTex"), 0);
+    gl.bindVertexArray(this.#blitVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.enable(gl.BLEND);
+
+    // Nodes (incl. the per-frame animated halo / dim) on top.
     if (this.nodeInstCount > 0) {
       this.setCameraUniforms(this.nodeProg);
       gl.uniform1f(gl.getUniformLocation(this.nodeProg, "uTime"), (performance.now() % 1e6) / 1000);
