@@ -3,8 +3,9 @@ import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import { getPromiseState } from "reactiveweb/get-promise-state";
+
 import { hasAnyCycle } from "#lib/cycle";
-import { hasAnyOrphan } from "#lib/orphans";
 import IconCaretLeft from "~icons/ph/caret-left";
 import IconCaretRight from "~icons/ph/caret-right";
 import IconGear from "~icons/ph/gear";
@@ -14,6 +15,11 @@ import Search from "./search.gts";
 
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
+import type VisualizerService from "#services/visualizer";
+
+/** Stable empty arg so the unfiltered orphan query keeps one cache key
+ *  in the visualizer service (no per-render allocation / key churn). */
+const NO_FILTER = new Int32Array(0);
 
 const REPULSION_MIN = 1;
 const REPULSION_MAX = 30;
@@ -51,6 +57,7 @@ interface Signature {
 export default class Controls extends Component<Signature> {
   @service declare viewState: ViewStateService;
   @service declare graph: GraphService;
+  @service declare visualizer: VisualizerService;
 
   /**
    * Node-type breakdown for the filter section. Returns an empty list when
@@ -280,15 +287,23 @@ export default class Controls extends Component<Signature> {
   }
 
   /**
-   * Cheap `hasAnyOrphan` check for button visibility. Reads only the
-   * graph's `inDegree` view — no traversal, no analysis pass.
+   * Whether the orphans-panel button should show. Backed by the
+   * resident Rust session's *unfiltered* orphan analysis (one stable,
+   * service-memoized query, resolved once after load — no per-render
+   * worker traffic, no flicker as edge-type filters toggle). Returns
+   * `false` until that first result lands; the scene overlay covers
+   * that window. Behavior nuance vs. before: the button now reflects
+   * whether the graph has orphans at all, independent of the edge-type
+   * filter (previously it hid when filtering removed every orphan).
    */
   get hasAnyOrphans(): boolean {
-    const g = this.graph.current;
+    if (!this.graph.current) return false;
 
-    if (!g) return false;
+    const promise = this.visualizer.orphanIndices(NO_FILTER, NO_FILTER);
 
-    return hasAnyOrphan(g, this.viewState.hiddenEdgeTypes);
+    if (!promise) return false;
+
+    return (getPromiseState(promise).resolved?.length ?? 0) > 0;
   }
 
   /**
