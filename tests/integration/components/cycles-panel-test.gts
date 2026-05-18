@@ -1,4 +1,4 @@
-import { click, render, waitFor, waitUntil } from "@ember/test-helpers";
+import { click, render, waitFor } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -38,11 +38,12 @@ module("Integration | cycles-panel", function (hooks) {
 
     assert.dom(".cycles-panel").exists();
     assert.dom(".cycles-panel__title").includesText("Cycles");
-    // Cycle enumeration now resolves from the resident Rust session.
-    await waitUntil(
-      () => document.querySelector(".cycles-panel__count")?.textContent?.trim() === "1",
-    );
+    // Cycle enumeration runs in the resident Rust session; its test
+    // waiter makes `render()` block until it resolves, so the count is
+    // already settled.
     assert.dom(".cycles-panel__count").hasText("1", "one cycle in the graph");
+    // `VerticalCollection` mounts rows on a later measurement pass —
+    // third-party render deferral, not app async.
     await waitFor(".cycle-id");
     assert.dom(".cycle-id").exists({ count: 1 }, "each entry has its short-id chip");
   });

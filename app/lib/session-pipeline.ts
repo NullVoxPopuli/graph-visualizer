@@ -21,7 +21,18 @@
  *    Superseded queued calls' promises are abandoned — the visualizer
  *    service already drops stale pipeline promises by reference, so
  *    nothing ever awaits them.
+ *
+ * Test-waiter integration: `load` + every query (`analyze`,
+ * `findOrphans`, `hasAnyOrphan`, `hasAnyCycle`, `rawCycles`) is wrapped
+ * in `waitForPromise`, so `settled()` / `await render()` block until the
+ * worker result the UI consumes is in — tests assert on semantics, no
+ * `waitUntil` polling. `waitForPromise` compiles to a plain passthrough
+ * in production builds (zero overhead). `layout` is deliberately *not*
+ * wrapped: its superseded coalesced promises are abandoned by design
+ * and never settle, which would leave a test waiter pending forever.
  */
+import { waitForPromise } from "@ember/test-waiters";
+
 import * as Comlink from "comlink";
 
 import type {
@@ -55,7 +66,7 @@ export class SessionPipeline {
       type: "module",
     });
     this.#engine = Comlink.wrap<SessionEngine>(this.#worker);
-    this.#loaded = this.#engine.load(text);
+    this.#loaded = waitForPromise(this.#engine.load(text), "graph-session:load");
   }
 
   /**
@@ -63,22 +74,25 @@ export class SessionPipeline {
    * is the JS label-prefix assignment (only used when `clusterByLabel`);
    * otherwise Rust Louvain runs at `resolution`.
    */
-  async analyze(opts: {
+  analyze(opts: {
     clusterByLabel: boolean;
     resolution: number;
     labelCommunities: Int32Array | null;
   }): Promise<SessionInfo> {
-    await this.#loaded;
+    return waitForPromise(
+      this.#loaded.then(() => {
+        if (opts.clusterByLabel) {
+          if (!opts.labelCommunities) {
+            throw new Error("SessionPipeline.analyze: clusterByLabel needs labelCommunities");
+          }
 
-    if (opts.clusterByLabel) {
-      if (!opts.labelCommunities) {
-        throw new Error("SessionPipeline.analyze: clusterByLabel needs labelCommunities");
-      }
+          return this.#engine.setCommunities(opts.labelCommunities);
+        }
 
-      return this.#engine.setCommunities(opts.labelCommunities);
-    }
-
-    return this.#engine.setResolution(opts.resolution);
+        return this.#engine.setResolution(opts.resolution);
+      }),
+      "graph-session:analyze",
+    );
   }
 
   /**
@@ -133,26 +147,29 @@ export class SessionPipeline {
    * never re-crosses the worker boundary. `hiddenEdgeTypeIds`/
    * `rootIndices` empty ⇒ unfiltered.
    */
-  async findOrphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Promise<Int32Array> {
-    await this.#loaded;
-
-    return this.#engine.findOrphans(hiddenEdgeTypeIds, rootIndices);
+  findOrphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Promise<Int32Array> {
+    return waitForPromise(
+      this.#loaded.then(() => this.#engine.findOrphans(hiddenEdgeTypeIds, rootIndices)),
+      "graph-session:find-orphans",
+    );
   }
 
   /** Does the resident graph have any orphan under this edge-type
    *  filter? (empty ⇒ unfiltered.) */
-  async hasAnyOrphan(hiddenEdgeTypeIds: Int32Array): Promise<boolean> {
-    await this.#loaded;
-
-    return this.#engine.hasAnyOrphan(hiddenEdgeTypeIds);
+  hasAnyOrphan(hiddenEdgeTypeIds: Int32Array): Promise<boolean> {
+    return waitForPromise(
+      this.#loaded.then(() => this.#engine.hasAnyOrphan(hiddenEdgeTypeIds)),
+      "graph-session:has-any-orphan",
+    );
   }
 
   /** Does the resident graph have any cycle under this edge-type
    *  filter? (empty ⇒ unfiltered.) */
-  async hasAnyCycle(hiddenEdgeTypeIds: Int32Array): Promise<boolean> {
-    await this.#loaded;
-
-    return this.#engine.hasAnyCycle(hiddenEdgeTypeIds);
+  hasAnyCycle(hiddenEdgeTypeIds: Int32Array): Promise<boolean> {
+    return waitForPromise(
+      this.#loaded.then(() => this.#engine.hasAnyCycle(hiddenEdgeTypeIds)),
+      "graph-session:has-any-cycle",
+    );
   }
 
   /**
@@ -161,20 +178,24 @@ export class SessionPipeline {
    * collapsed-node bundling is a cheap synchronous JS pass on the
    * returned list (see `bundleRawCyclesWithGroups`).
    */
-  async rawCycles(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Promise<number[][]> {
-    await this.#loaded;
+  rawCycles(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Promise<number[][]> {
+    return waitForPromise(
+      this.#loaded
+        .then(() => this.#engine.rawCycles(hiddenEdgeTypeIds, maxCycles))
+        .then((flat) => {
+          const cycles: number[][] = [];
 
-    const flat = await this.#engine.rawCycles(hiddenEdgeTypeIds, maxCycles);
-    const cycles: number[][] = [];
+          for (let i = 0; i < flat.length; ) {
+            const len = flat[i++]!;
 
-    for (let i = 0; i < flat.length; ) {
-      const len = flat[i++]!;
+            cycles.push(Array.from(flat.subarray(i, i + len)));
+            i += len;
+          }
 
-      cycles.push(Array.from(flat.subarray(i, i + len)));
-      i += len;
-    }
-
-    return cycles;
+          return cycles;
+        }),
+      "graph-session:raw-cycles",
+    );
   }
 
   /** Terminate the worker and free the resident WASM session. */

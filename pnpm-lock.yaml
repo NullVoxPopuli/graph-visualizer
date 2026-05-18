@@ -11,6 +11,9 @@ importers:
 
   .:
     dependencies:
+      '@ember/test-waiters':
+        specifier: 4.1.1
+        version: 4.1.1(@babel/core@7.29.0)(@glint/template@1.7.7)
       '@embroider/macros':
         specifier: 1.20.2
         version: 1.20.2(@babel/core@7.29.0)(@glint/template@1.7.7)
@@ -93,9 +96,6 @@ importers:
       '@ember/test-helpers':
         specifier: 5.4.2
         version: 5.4.2(@babel/core@7.29.0)(@glint/template@1.7.7)
-      '@ember/test-waiters':
-        specifier: 4.1.1
-        version: 4.1.1(@babel/core@7.29.0)(@glint/template@1.7.7)
       '@embroider/core':
         specifier: 4.4.7
         version: 4.4.7(@glint/template@1.7.7)

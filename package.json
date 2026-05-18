@@ -30,7 +30,7 @@
     "lint:fix": "concurrently \"pnpm:lint:*:fix\" --names \"fix:\" --prefixColors auto && pnpm format",
     "format": "prettier --write .",
     "lint:prettier": "prettier --check .",
-    "build:test": "EMBER_ENV=test vite build --mode development",
+    "build:test": "EMBER_ENV=test NODE_ENV=development vite build --mode development",
     "test:ci": "testem ci --port 0",
     "test:parity": "tsx bench/parity.ts",
     "test": "pnpm build:test && pnpm test:ci",
@@ -39,6 +39,7 @@
     "build:wasm": "wasm-pack build crates/layout-wasm --release --target web --out-dir ../../app/lib/wasm --out-name layout_wasm && wasm-pack build crates/layout-wasm --release --target nodejs --out-dir pkg-node --out-name layout_wasm"
   },
   "dependencies": {
+    "@ember/test-waiters": "4.1.1",
     "@embroider/macros": "1.20.2",
     "@embroider/router": "3.0.6",
     "@glimmer/component": "2.1.1",
@@ -68,7 +69,6 @@
     "@babel/runtime": "7.29.2",
     "@ember/app-tsconfig": "2.0.0",
     "@ember/test-helpers": "5.4.2",
-    "@ember/test-waiters": "4.1.1",
     "@embroider/core": "4.4.7",
     "@embroider/vite": "1.7.2",
     "@glint/ember-tsc": "1.7.2",
