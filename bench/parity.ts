@@ -14,19 +14,16 @@
  * Coverage today (everything the WASM surface exposes):
  *   - parse:   node count, ids, flat edge list, degrees   — exact
  *   - radii:   vs `computeRadii`                           — exact (±1e-4)
- *   - cycle existence (no filters) vs `hasAnyCycle`        — exact
  *   - orphans: `find_orphans` / `has_any_orphan` against
  *     concrete fixtures (edge-type filter + declared roots) — the JS
- *     `orphans.ts` was removed when orphans moved into the resident
- *     session, so these are expected-value specs, not a cross-check
+ *     `orphans.ts` was removed when orphans moved into the session
+ *   - cycles: `raw_cycles` / `has_any_cycle` against concrete
+ *     fixtures (incl. an edge-type filter) — `cycle.ts`'s enumeration
+ *     was removed when cycles moved into the session, so these are
+ *     expected-value specs, not a cross-check
  *   - Louvain: determinism (exact, across two loads) + a sane
  *     community count + reported modularity. No JS Louvain left to
  *     cross-check (graphology removed); determinism is the invariant.
- *
- * Not yet covered: bundled-cycle *enumeration* parity — the WASM surface
- * doesn't expose it yet. That case lands together with the cycles → Rust
- * migration (which exposes it on `GraphSession`), added under this same
- * harness.
  *
  * Node runs this `.ts` directly via `tsx` (see package.json). The
  * `--target nodejs` WASM build initializes synchronously on `require`.
@@ -35,7 +32,6 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { hasAnyCycle } from "#lib/cycle";
 import { EXAMPLES } from "#lib/examples";
 import { computeRadii } from "#lib/pack";
 import { parseGraphJson } from "#lib/parser";
@@ -48,7 +44,8 @@ interface RustSession {
   edges_flat(): Int32Array;
   communities(): Int32Array;
   radii(): Float32Array;
-  has_any_cycle(): boolean;
+  has_any_cycle(hiddenEdgeTypeIds: Int32Array): boolean;
+  raw_cycles(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Int32Array;
   has_any_orphan(hiddenEdgeTypeIds: Int32Array): boolean;
   find_orphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Int32Array;
   free(): void;
@@ -244,11 +241,126 @@ function checkOrphanFixtures(GraphSession: RustModule["GraphSession"]): string[]
   return fails;
 }
 
+interface CycleFixture {
+  name: string;
+  json: string;
+  hidden?: number[];
+  /** Each expected cycle as ids; order/rotation-independent. */
+  expectCycles: string[][];
+  expectHasAny: boolean;
+}
+
+/** Rotation-independent canonical form of a cycle given as id labels:
+ *  rotate so the lexicographically-smallest id leads. */
+function canonIds(labels: string[]): string {
+  if (labels.length === 0) return "";
+
+  let min = 0;
+
+  for (let i = 1; i < labels.length; i++) if (labels[i]! < labels[min]!) min = i;
+
+  return labels.map((_, i) => labels[(min + i) % labels.length]!).join(">");
+}
+
+function decodeCycles(flat: Int32Array): number[][] {
+  const out: number[][] = [];
+
+  for (let i = 0; i < flat.length; ) {
+    const len = flat[i++]!;
+
+    out.push(Array.from(flat.subarray(i, i + len)));
+    i += len;
+  }
+
+  return out;
+}
+
+/**
+ * Fixed-fixture specs for cycle enumeration, ported from the deleted
+ * `tests/unit/cycle-test.ts` — they drive the live Rust `GraphSession`
+ * (`cycle.ts`'s enumeration is gone). Exact expected values.
+ */
+function checkCycleFixtures(GraphSession: RustModule["GraphSession"]): string[] {
+  const fails: string[] = [];
+  const fixtures: CycleFixture[] = [
+    {
+      name: "acyclic DAG",
+      json: `{"nodes":[{"id":"a","edges":["b"]},{"id":"b","edges":["c"]},{"id":"c"}]}`,
+      expectCycles: [],
+      expectHasAny: false,
+    },
+    {
+      name: "self-loop is not a cycle",
+      json: `{"nodes":[{"id":"a","edges":["a"]}]}`,
+      expectCycles: [],
+      expectHasAny: false,
+    },
+    {
+      name: "two-node cycle",
+      json: `{"nodes":[{"id":"a","edges":["b"]},{"id":"b","edges":["a"]}]}`,
+      expectCycles: [["a", "b"]],
+      expectHasAny: true,
+    },
+    {
+      name: "triangle",
+      json: `{"nodes":[{"id":"a","edges":["b"]},{"id":"b","edges":["c"]},{"id":"c","edges":["a"]}]}`,
+      expectCycles: [["a", "b", "c"]],
+      expectHasAny: true,
+    },
+    {
+      name: "two disjoint cycles + acyclic bridge",
+      json: `{"nodes":[{"id":"a","edges":["b"]},{"id":"b","edges":["a","c"]},{"id":"c","edges":["d"]},{"id":"d","edges":["c"]}]}`,
+      expectCycles: [
+        ["a", "b"],
+        ["c", "d"],
+      ],
+      expectHasAny: true,
+    },
+    {
+      name: "hiding the closing edge type breaks the cycle",
+      json: `{"nodes":[{"id":"a","edges":[{"nodeId":"b","edgeType":"x"}]},{"id":"b","edges":[{"nodeId":"a","edgeType":"x"}]}]}`,
+      hidden: [1],
+      expectCycles: [],
+      expectHasAny: false,
+    },
+  ];
+
+  for (const fx of fixtures) {
+    const s = GraphSession.load(fx.json);
+
+    try {
+      const ids = JSON.parse(s.ids_json()) as string[];
+      const hidden = Int32Array.from(fx.hidden ?? []);
+      const got = decodeCycles(s.raw_cycles(hidden, 1000))
+        .map((c) => canonIds(c.map((i) => ids[i]!)))
+        .sort();
+      const want = fx.expectCycles.map((c) => canonIds(c)).sort();
+
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        fails.push(
+          `cycle fixture "${fx.name}": got [${got.join(" ; ")}] want [${want.join(" ; ")}]`,
+        );
+      }
+
+      if (s.has_any_cycle(hidden) !== fx.expectHasAny) {
+        fails.push(`cycle fixture "${fx.name}": has_any_cycle ≠ ${fx.expectHasAny}`);
+      }
+    } finally {
+      s.free();
+    }
+  }
+
+  return fails;
+}
+
 function main(): void {
   const { GraphSession } = rustModule();
-  const failures: string[] = checkOrphanFixtures(GraphSession);
+  const failures: string[] = [
+    ...checkOrphanFixtures(GraphSession),
+    ...checkCycleFixtures(GraphSession),
+  ];
 
-  console.info(`  ${failures.length === 0 ? "ok  " : "FAIL"} orphan fixtures\n`);
+  console.info(`  ${failures.length === 0 ? "ok  " : "FAIL"} orphan + cycle fixtures\n`);
 
   for (const ex of EXAMPLES) {
     const text = readFileSync(examplePath(ex.url), "utf8");
@@ -290,8 +402,10 @@ function main(): void {
         fail("find_orphans / has_any_orphan disagree");
       }
 
-      // --- cycle existence (cycle.ts still in JS) ---
-      if (rust.has_any_cycle() !== hasAnyCycle(js)) fail("has_any_cycle differs");
+      // --- cycles (no JS copy; consistency smoke + checkCycleFixtures) ---
+      if (rust.raw_cycles(EMPTY, 1000).length > 0 !== rust.has_any_cycle(EMPTY)) {
+        fail("raw_cycles / has_any_cycle disagree");
+      }
 
       // --- Louvain: determinism + quality ---
       const comm = rust.communities();
@@ -332,8 +446,8 @@ function main(): void {
   }
 
   console.info(
-    `[parity] ${EXAMPLES.length} examples agree (parse/radii/cycle: JS ≡ Rust) ` +
-      `+ orphan fixtures pass.`,
+    `[parity] ${EXAMPLES.length} examples agree (parse/radii: JS ≡ Rust) ` +
+      `+ orphan & cycle fixtures pass.`,
   );
 }
 

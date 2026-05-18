@@ -11,7 +11,7 @@ import Flatbush from "flatbush";
 import { Camera } from "#lib/camera";
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
-import { findBundledCyclesViaRaw } from "#lib/cycle";
+import { bundleRawCyclesWithGroups } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { RenderProxy } from "#lib/render-proxy";
@@ -37,6 +37,11 @@ import type { ProcessedScene } from "#services/visualizer";
  * Hover state is the only thing that lives here — it's transient mouse
  * UI, not URL-worthy.
  */
+/** Stable empty filter — the canvas cycle rings show every cycle
+ *  regardless of edge-type filters, so this keeps one service cache
+ *  key for the unfiltered raw-cycle enumeration. */
+const NO_HIDDEN = new Int32Array(0);
+
 export default class Visualizer extends Component {
   @service declare visualizer: VisualizerService;
   @service declare viewState: ViewStateService;
@@ -124,12 +129,14 @@ export default class Visualizer extends Component {
    */
   private nodeRemap: Int32Array | null = null;
 
-  // Memoized whole-graph bundled cycles. `findBundledCyclesViaRaw` is
-  // graph-wide elementary-cycle enumeration — expensive on big cyclic
-  // graphs — and its result depends only on the graph + contraction
-  // remap, NOT on the selection. Without this it was re-enumerated on
-  // every node click (the reported >10k-node click lag); now a click
-  // only re-filters the cached array by the selected node.
+  // Whole-graph elementary-cycle enumeration runs once in the resident
+  // Rust session (service-memoized by graph). `#rawCycles` holds that
+  // resolved list; `#rawPromise` is the identity we attached to (a new
+  // graph → new promise → re-fetch). The cheap contraction/bundling
+  // through the collapse remap stays here and is memoized by graph +
+  // remap, NOT selection, so a click only re-filters the cached array.
+  #rawPromise: Promise<number[][]> | null = null;
+  #rawCycles: number[][] | null = null;
   #allCycles: number[][] | null = null;
   #allCyclesGraph: ProcessedScene["graph"] | null = null;
   #allCyclesRemap: Int32Array | null = null;
@@ -446,21 +453,49 @@ export default class Visualizer extends Component {
 
     const N = scene.communities.length;
 
-    // Bundled cycles that are *backed by a raw elementary cycle*. Pure
-    // contracted-graph cycles (two unrelated cross-package edges that
-    // happen to close a loop after contraction) used to render as
-    // misleading red rings on packages whose files have no actual
-    // circular dependency. `findBundledCyclesViaRaw` filters those out.
-    // Recompute the graph-wide cycle set only when the graph or the
-    // contraction remap actually changes — not on selection. Both are
-    // replaced by reference when filters/contraction change, so identity
-    // comparison is a correct (and cheap) cache key.
+    // Raw elementary cycles come from the resident Rust session (the
+    // exponential enumeration, run once, service-memoized by graph).
+    // Fetch is async; attach once per graph (new graph → new promise),
+    // store the resolved list, and ask the loop to repack when it
+    // lands. Until then render no rings — they appear a frame later.
+    const rawPromise = this.visualizer.cycleRaw(NO_HIDDEN, 1000);
+
+    if (rawPromise !== this.#rawPromise) {
+      this.#rawPromise = rawPromise;
+      this.#rawCycles = null;
+      this.#allCycles = null;
+
+      rawPromise
+        ?.then((rc) => {
+          if (this.#rawPromise === rawPromise) {
+            this.#rawCycles = rc;
+            this.#allCycles = null;
+            this.dirty = true;
+          }
+        })
+        .catch(() => {});
+    }
+
+    if (this.#rawCycles === null) {
+      this.cycleMask = null;
+      this.dimMask = null;
+      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
+
+      return;
+    }
+
+    // Contract through the collapse remap (cheap, sync). `.bundled` is
+    // the same deduped contracted sequence the old `bundleRawCycles`
+    // produced. Memoized by graph + remap — not selection — so a click
+    // only re-filters the cached array.
     if (
       this.#allCycles === null ||
       this.#allCyclesGraph !== scene.graph ||
       this.#allCyclesRemap !== this.nodeRemap
     ) {
-      this.#allCycles = findBundledCyclesViaRaw(scene.graph, this.nodeRemap);
+      this.#allCycles = bundleRawCyclesWithGroups(this.#rawCycles, this.nodeRemap).map(
+        (b) => b.bundled,
+      );
       this.#allCyclesGraph = scene.graph;
       this.#allCyclesRemap = this.nodeRemap;
     }

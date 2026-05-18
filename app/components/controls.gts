@@ -5,7 +5,6 @@ import { service } from "@ember/service";
 
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
-import { hasAnyCycle } from "#lib/cycle";
 import IconCaretLeft from "~icons/ph/caret-left";
 import IconCaretRight from "~icons/ph/caret-right";
 import IconGear from "~icons/ph/gear";
@@ -336,19 +335,22 @@ export default class Controls extends Component<Signature> {
   }
 
   /**
-   * Whether the currently-loaded graph contains any directed cycle at
-   * all. Uses the fast `hasAnyCycle` back-edge DFS so this footer stays
-   * cheap even when the user is dragging sliders — it returns at the
-   * very first back edge rather than enumerating the whole cycle set.
-   * Returns `false` when no graph is loaded so the footer reads
-   * accurately on the initial empty state too.
+   * Whether the currently-loaded graph contains any directed cycle.
+   * Backed by the resident Rust session's unfiltered cycle check (one
+   * stable, service-memoized query resolved once after load — no
+   * per-render worker traffic, no flicker as edge filters toggle).
+   * `false` until that first result lands / when nothing is loaded.
+   * Reflects whether the graph has cycles at all, independent of the
+   * edge-type filter (same nuance as the orphans button).
    */
   get hasAnyCycles(): boolean {
-    const g = this.graph.current;
+    if (!this.graph.current) return false;
 
-    if (!g) return false;
+    const p = this.visualizer.hasAnyCycle(NO_FILTER);
 
-    return hasAnyCycle(g, this.viewState.hiddenEdgeTypes);
+    if (!p) return false;
+
+    return getPromiseState(p).resolved === true;
   }
 
   /**

@@ -1,4 +1,4 @@
-import { click, fillIn, render, triggerEvent } from "@ember/test-helpers";
+import { click, fillIn, render, triggerEvent, waitUntil } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -41,6 +41,9 @@ module("Integration | controls", function (hooks) {
 
     await render(<template><Controls @onResetView={{NOOP}} /></template>);
 
+    // Cycle detection now resolves from the resident Rust session, so
+    // the button appears a tick after render.
+    await waitUntil(() => document.querySelector('[title="Open the cycle list panel"]'));
     assert.dom('[title="Open the cycle list panel"]').hasText("Show cycles");
   });
 
@@ -131,6 +134,11 @@ module("Integration | controls", function (hooks) {
 
     await render(<template><Controls @onResetView={{NOOP}} /></template>);
 
+    await waitUntil(() =>
+      Array.from(document.querySelectorAll("button")).some((b) =>
+        (b.textContent ?? "").includes("Show cycles"),
+      ),
+    );
     assert.true(
       Array.from(document.querySelectorAll("button")).some((b) =>
         (b.textContent ?? "").includes("Show cycles"),

@@ -4,15 +4,11 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { VerticalCollection } from "@html-next/vertical-collection";
+import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import {
-  canonicalCycleKey,
-  findBundledCyclesWithGroups,
-  hasAnyCycle,
-  shortCycleId,
-} from "#lib/cycle";
+import { bundleRawCyclesWithGroups, canonicalCycleKey, shortCycleId } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -189,6 +185,7 @@ export default class CyclesPanel extends Component {
    */
   #lastGraph: LoadedGraph | null = null;
   #lastCycleKey = "";
+  #lastRaw: number[][] | null = null;
   #lastEntries: CycleEntry[] = [];
 
   /**
@@ -233,7 +230,14 @@ export default class CyclesPanel extends Component {
 
     if (!g) return "graph";
 
-    return hasAnyCycle(g, this.viewState.hiddenEdgeTypes) ? "scoped" : "graph";
+    // Any cycle under the current edge-type filter? If yes but the list
+    // is empty, the selection / hidden-node scope filtered them out
+    // ("scoped"); if no, the (filtered) graph is genuinely acyclic.
+    const p = this.visualizer.hasAnyCycle(Int32Array.from(this.viewState.hiddenEdgeTypes));
+
+    if (!p) return "graph";
+
+    return getPromiseState(p).resolved === true ? "scoped" : "graph";
   }
 
   get cycles(): CycleEntry[] {
@@ -246,6 +250,23 @@ export default class CyclesPanel extends Component {
 
     if (!g) return [];
 
+    // The exponential elementary-cycle enumeration runs once in the
+    // resident Rust session, keyed (in the service) by graph + edge-type
+    // filter. Everything below — contraction through the collapse remap,
+    // dedupe, short ids — is the cheap synchronous post-pass on that
+    // fixed raw list. While a fresh enumeration is in flight we keep the
+    // previous entries so the panel never blanks or blocks.
+    const rawPromise = this.visualizer.cycleRaw(
+      Int32Array.from(this.viewState.hiddenEdgeTypes),
+      1000,
+    );
+
+    if (!rawPromise) return [];
+
+    const rawCycles = getPromiseState(rawPromise).resolved;
+
+    if (!rawCycles) return this.#lastEntries;
+
     const selectedId = this.viewState.selectedId;
     const hiddenTypesKey = serializeIntSet(this.viewState.hiddenNodeTypes);
     const hiddenEdgeTypesKey = serializeIntSet(this.viewState.hiddenEdgeTypes);
@@ -254,7 +275,7 @@ export default class CyclesPanel extends Component {
     const globKey = `${this.viewState.includeGlobs.join("|")}::${this.viewState.excludeGlobs.join("|")}`;
     const key = `${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${globKey}|${selectedId ?? ""}`;
 
-    if (g !== this.#lastGraph || key !== this.#lastCycleKey) {
+    if (g !== this.#lastGraph || key !== this.#lastCycleKey || rawCycles !== this.#lastRaw) {
       const radii = computeRadii(g.inDegree, g.outDegree);
       const contraction = buildContraction(
         g,
@@ -280,12 +301,7 @@ export default class CyclesPanel extends Component {
         }
       }
 
-      const rawBundled = findBundledCyclesWithGroups(
-        g,
-        remap,
-        1000,
-        this.viewState.hiddenEdgeTypes,
-      );
+      const rawBundled = bundleRawCyclesWithGroups(rawCycles, remap);
       // Dedupe by canonical node sequence — parallel raw edges between two
       // packages (e.g. lots of `file <IconArrowRight /> file` imports) all contract to the
       // same bundled cycle, and listing the same `pkgA <IconArrowRight /> pkgB` 13 times is
@@ -353,6 +369,7 @@ export default class CyclesPanel extends Component {
 
       this.#lastGraph = g;
       this.#lastCycleKey = key;
+      this.#lastRaw = rawCycles;
       this.#lastEntries = entries;
     }
 

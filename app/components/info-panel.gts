@@ -3,9 +3,11 @@ import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import { getPromiseState } from "reactiveweb/get-promise-state";
+
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import { canonicalCycleKey, findBundledCyclesWithGroups, shortCycleId } from "#lib/cycle";
+import { bundleRawCyclesWithGroups, canonicalCycleKey, shortCycleId } from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -427,11 +429,24 @@ export default class InfoPanel extends Component {
       return this.#lastEntries;
     }
 
+    // The exponential elementary-cycle enumeration runs once in the
+    // resident Rust session (service-memoized by graph + edge-type
+    // filter). While a fresh result is in flight, keep the previous
+    // entries so the panel never blocks. The contraction/dedupe below
+    // is the cheap synchronous pass on that fixed raw list.
+    const rawPromise = this.visualizer.cycleRaw(Int32Array.from(vs.hiddenEdgeTypes), 1000);
+
+    if (!rawPromise) return [];
+
+    const rawCycles = getPromiseState(rawPromise).resolved;
+
+    if (!rawCycles) return this.#lastEntries;
+
     // Bundled cycles: contracted, deduped by canonical sequence. Same
     // source the renderer uses for red rings, so the info-panel list
     // and the canvas can't disagree.
-    const bundledCycles = findBundledCyclesWithGroups(g, remap, 1000, vs.hiddenEdgeTypes).filter(
-      (c) => c.bundled.includes(info.index),
+    const bundledCycles = bundleRawCyclesWithGroups(rawCycles, remap).filter((c) =>
+      c.bundled.includes(info.index),
     );
 
     const entries: CycleEntry[] = [];

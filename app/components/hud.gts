@@ -1,28 +1,35 @@
 import Component from "@glimmer/component";
 import { service } from "@ember/service";
 
-import { hasAnyCycle } from "#lib/cycle";
+import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import type GraphService from "#services/graph";
-import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
+
+/** Stable empty arg so the unfiltered cycle query keeps one cache key
+ *  in the visualizer service (resolves once, no flicker). */
+const NO_FILTER = new Int32Array(0);
 
 export default class Hud extends Component {
   @service declare visualizer: VisualizerService;
   @service declare graph: GraphService;
-  @service declare viewState: ViewStateService;
 
   /**
-   * Whether the loaded graph has any directed cycle. Same cheap
-   * back-edge DFS the controls panel used before this moved here —
-   * returns at the first back edge rather than enumerating cycles.
+   * Whether the loaded graph has any directed cycle. Backed by the
+   * resident Rust session's unfiltered cycle check (one stable,
+   * service-memoized query resolved once after load — no per-render
+   * worker traffic). `false` until that first result lands; the scene
+   * overlay covers that window. Reflects whether the graph has cycles
+   * at all, independent of the edge-type filter.
    */
   get hasAnyCycles(): boolean {
-    const g = this.graph.current;
+    if (!this.graph.current) return false;
 
-    if (!g) return false;
+    const p = this.visualizer.hasAnyCycle(NO_FILTER);
 
-    return hasAnyCycle(g, this.viewState.hiddenEdgeTypes);
+    if (!p) return false;
+
+    return getPromiseState(p).resolved === true;
   }
 
   <template>

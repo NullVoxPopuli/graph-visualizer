@@ -135,6 +135,23 @@ const sessionEngine = {
     return activeSession().has_any_orphan(hiddenEdgeTypeIds);
   },
 
+  /** Does the resident graph have any cycle under the given edge-type
+   *  filter? (empty ⇒ unfiltered.) */
+  hasAnyCycle(hiddenEdgeTypeIds: Int32Array): boolean {
+    return activeSession().has_any_cycle(hiddenEdgeTypeIds);
+  },
+
+  /**
+   * All elementary cycles (the exponential Tarjan+Johnson's
+   * enumeration) as a flat `[len, …nodes, len, …nodes]` buffer — the
+   * genuinely expensive cycle work, done once on the resident graph.
+   * Bundling/contraction (collapsed nodes) is a cheap JS post-pass on
+   * this fixed list, so it isn't a parameter here.
+   */
+  rawCycles(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Int32Array {
+    return activeSession().raw_cycles(hiddenEdgeTypeIds, maxCycles);
+  },
+
   /** Drop the resident graph and free its WASM memory. */
   dispose(): void {
     session?.free();

@@ -147,6 +147,36 @@ export class SessionPipeline {
     return this.#engine.hasAnyOrphan(hiddenEdgeTypeIds);
   }
 
+  /** Does the resident graph have any cycle under this edge-type
+   *  filter? (empty ⇒ unfiltered.) */
+  async hasAnyCycle(hiddenEdgeTypeIds: Int32Array): Promise<boolean> {
+    await this.#loaded;
+
+    return this.#engine.hasAnyCycle(hiddenEdgeTypeIds);
+  }
+
+  /**
+   * Every elementary cycle as `number[][]` (node indices). The
+   * exponential enumeration runs once in Rust on the resident graph;
+   * collapsed-node bundling is a cheap synchronous JS pass on the
+   * returned list (see `bundleRawCyclesWithGroups`).
+   */
+  async rawCycles(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Promise<number[][]> {
+    await this.#loaded;
+
+    const flat = await this.#engine.rawCycles(hiddenEdgeTypeIds, maxCycles);
+    const cycles: number[][] = [];
+
+    for (let i = 0; i < flat.length; ) {
+      const len = flat[i++]!;
+
+      cycles.push(Array.from(flat.subarray(i, i + len)));
+      i += len;
+    }
+
+    return cycles;
+  }
+
   /** Terminate the worker and free the resident WASM session. */
   dispose(): void {
     // Best-effort WASM free; terminate() is what actually reclaims it if
