@@ -79,9 +79,19 @@ pre code {
 
 .app-header__brand {
   font-weight: 600;
-  text-decoration: none;
   color: var(--fg);
   letter-spacing: 0.01em;
+}
+
+/* Sits on the left, outside `.app-header__nav`, so it needs its own
+   link treatment (matches the nav links on the right). */
+.app-header__analyze {
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+.app-header__analyze:hover {
+  color: var(--fg);
 }
 
 .app-header__nav {
@@ -1623,6 +1633,12 @@ pre code {
 
 @media (max-width: 768px) {
   .hud__cycles {
+    display: none;
+  }
+
+  /* Tight headers drop the wordmark; the "select new analysis" link is
+     the load-bearing control and stays. */
+  .app-header__brand {
     display: none;
   }
 }

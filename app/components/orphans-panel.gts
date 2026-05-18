@@ -4,7 +4,9 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { VerticalCollection } from "@html-next/vertical-collection";
-import { getPromiseState } from "reactiveweb/get-promise-state";
+import { use } from "ember-resources";
+import { getPromiseState, type State } from "reactiveweb/get-promise-state";
+import { keepLatest } from "reactiveweb/keep-latest";
 
 import {
   createApplyGeometryModifier,
@@ -40,31 +42,19 @@ export default class OrphansPanel extends Component {
   @service declare visualizer: VisualizerService;
 
   /**
-   * Orphan analysis lives in the resident Rust session (no JS
-   * duplicate). `@cached`: recomputes only when a tracked dependency
-   * this body reads changes — `graph.current`, the edge-type filter,
-   * declared roots, and the effective hide-id post-filter (all
-   * fine-grained `trackedObject` view-state slots) plus the resident-
-   * session orphan promise. Pure computation, no getter side-effects.
-   *
-   * The edge-type filter + declared roots feed the Rust peel (they
-   * change the analysis). The hidden-node-id / label-glob filter stays
-   * a JS post-pass: orphan status is computed against the full graph,
-   * then any orphan whose id is in the effective hide set is dropped
-   * from the displayed list — matching the renderer (a hidden node's
-   * edges drop off the canvas too) without the peel needing another
-   * knob.
+   * The resident Rust session's orphan query for the current graph +
+   * edge-type filter + declared roots. `null` when the panel is closed
+   * or no graph is loaded (nothing to compute). The edge-type filter and
+   * declared roots feed the Rust peel; the hidden-node-id / label-glob
+   * filter is a JS post-pass applied in `computedOrphans`.
    */
-  @cached
-  get orphans(): OrphanEntry[] {
-    // Skip entirely when the panel is closed — nothing reads the result.
-    if (!this.viewState.orphansPanelOpen) return [];
+  get orphanQuery(): Promise<Int32Array> | null {
+    if (!this.viewState.orphansPanelOpen) return null;
 
     const g = this.graph.current;
 
-    if (!g) return [];
+    if (!g) return null;
 
-    const effectiveHidden = this.viewState.effectiveHiddenNodeIds(g);
     const hiddenIds = Int32Array.from(this.viewState.hiddenEdgeTypes);
     const rootIndices: number[] = [];
 
@@ -74,14 +64,31 @@ export default class OrphansPanel extends Component {
       if (idx !== undefined) rootIndices.push(idx);
     }
 
-    const promise = this.visualizer.orphanIndices(hiddenIds, Int32Array.from(rootIndices));
+    return this.visualizer.orphanIndices(hiddenIds, Int32Array.from(rootIndices));
+  }
 
-    if (!promise) return [];
+  /** Promise state for {@link orphanQuery}; `null` when there's no query. */
+  get orphanState(): State<Int32Array> | null {
+    const promise = this.orphanQuery;
 
-    const resolved = getPromiseState(promise).resolved;
+    return promise === null ? null : getPromiseState(promise);
+  }
 
-    if (!resolved) return [];
+  /**
+   * Orphans for display: the resolved indices minus any whose id is in
+   * the effective hide set (a hidden node's edges drop off the canvas
+   * too, so it shouldn't read as an orphan), sorted by label. `[]` until
+   * the query resolves — `keepLatest` below is what stops that empty
+   * window from flashing on every re-query.
+   */
+  @cached
+  get computedOrphans(): OrphanEntry[] {
+    const g = this.graph.current;
+    const resolved = this.orphanState?.resolved;
 
+    if (!g || !resolved) return [];
+
+    const effectiveHidden = this.viewState.effectiveHiddenNodeIds(g);
     const entries: OrphanEntry[] = [];
 
     for (const idx of resolved) {
@@ -94,6 +101,22 @@ export default class OrphansPanel extends Component {
     entries.sort((a, b) => a.label.localeCompare(b.label));
 
     return entries;
+  }
+
+  /**
+   * The displayed orphan list, smoothed across the async re-query that
+   * fires whenever roots/filters change. While the new query is in
+   * flight `keepLatest` keeps the previous non-empty list visible
+   * instead of letting the panel blank and jump; a settled empty result
+   * (genuinely no orphans) still clears it, because `when` is false then.
+   */
+  @use private orphansLatest = keepLatest<OrphanEntry[]>({
+    value: () => this.computedOrphans,
+    when: () => this.orphanState?.isLoading ?? false,
+  });
+
+  get orphans(): OrphanEntry[] {
+    return this.orphansLatest ?? [];
   }
 
   get selectedId(): string | null {

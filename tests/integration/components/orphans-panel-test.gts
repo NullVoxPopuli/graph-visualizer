@@ -1,9 +1,11 @@
-import { render, waitFor } from "@ember/test-helpers";
+import { render, rerender, settled, waitFor } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
 import OrphansPanel from "#components/orphans-panel";
 import { loadGraph, stubRouterTransitions, viewState } from "#test-helpers/render";
+
+import type VisualizerService from "#services/visualizer";
 
 module("Integration | orphans-panel", function (hooks) {
   setupRenderingTest(hooks);
@@ -52,5 +54,50 @@ module("Integration | orphans-panel", function (hooks) {
 
     assert.dom(".cycles-panel__empty").exists();
     assert.dom(".cycles-panel__empty").includesText("No orphan nodes");
+  });
+
+  test("keeps the previous orphan list visible while a re-query is in flight", async function (assert) {
+    const g = loadGraph(this.owner, {
+      nodes: [{ id: "alone" }, { id: "a", edges: ["b"] }, { id: "b", edges: ["a"] }],
+    });
+    const aloneIdx = g.idToIndex.get("alone");
+
+    if (aloneIdx === undefined) throw new Error("fixture missing 'alone'");
+
+    const vis = this.owner.lookup("service:visualizer") as VisualizerService;
+
+    // Stable promise identities (the real service memoizes by content
+    // key — `getPromiseState` caches off identity). No declared roots →
+    // resolves to the orphan; once a root is declared → a deferred we
+    // hold open, standing in for the in-flight re-query. (`getPromiseState`
+    // wraps promises in a test waiter, so it must eventually resolve or
+    // `settled()` would hang — we release it after asserting.)
+    const resolved = Promise.resolve(Int32Array.from([aloneIdx]));
+    let release!: (v: Int32Array) => void;
+    const deferred = new Promise<Int32Array>((res) => (release = res));
+
+    vis.orphanIndices = (_hidden: Int32Array, roots: Int32Array): Promise<Int32Array> =>
+      roots.length === 0 ? resolved : deferred;
+
+    viewState(this.owner).orphansPanelOpen = true;
+
+    await render(<template><OrphansPanel /></template>);
+    await waitFor(".cycles-panel__node-label");
+    assert.dom(".cycles-panel__node-label").hasText("alone", "orphan listed initially");
+
+    // Declaring a root re-runs the orphan query — now in flight. Flush a
+    // render pass *without* settling (settling would block on the
+    // deferred's test waiter and defeat observing the pending window).
+    viewState(this.owner).toggleRootNodeId("a");
+    await rerender();
+
+    assert
+      .dom(".cycles-panel__node-label")
+      .hasText("alone", "previous list kept while the re-query is in flight");
+    assert.dom(".cycles-panel__empty").doesNotExist("no empty-state flash during the async gap");
+
+    // Let the query finish so the test-waiter clears for teardown.
+    release(Int32Array.from([aloneIdx]));
+    await settled();
   });
 });
