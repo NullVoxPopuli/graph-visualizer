@@ -1,4 +1,4 @@
-import { render, settled, waitUntil } from "@ember/test-helpers";
+import { render, settled } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -85,8 +85,7 @@ module("Integration | document-drop", function (hooks) {
     const file = new File([GRAPH_JSON], "graph.json", { type: "application/json" });
 
     fireDrag("drop", { types: ["Files"], files: [file] });
-
-    await waitUntil(() => calls.some((c) => c[0] === "view"), { timeout: 2000 });
+    await settled();
 
     assert.strictEqual(graph.current?.ids.length, 2, "the dropped graph was loaded");
     assert.ok(
@@ -129,8 +128,7 @@ module("Integration | document-drop", function (hooks) {
     const file = new File(["{ not json"], "bad.json", { type: "application/json" });
 
     fireDrag("drop", { types: ["Files"], files: [file] });
-
-    await waitUntil(() => document.querySelector(".document-drop__error"), { timeout: 2000 });
+    await settled();
 
     assert.dom(".document-drop__error").exists("parse failure is shown");
     assert.notOk(
