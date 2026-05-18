@@ -38,6 +38,14 @@ export default class GraphService extends Service {
    */
   @tracked restoring = true;
 
+  /**
+   * Resolves once the boot-time IDB restore attempt has settled (whether
+   * or not it found anything). The `index` route awaits this in
+   * `beforeModel` so it can redirect a returning visitor straight to the
+   * visualizer instead of flashing the file picker.
+   */
+  readonly restored: Promise<void>;
+
   #db: IDBPDatabase | undefined;
   /**
    * Flips true the moment the user (or some non-restore code path) sets
@@ -49,7 +57,7 @@ export default class GraphService extends Service {
 
   constructor(...args: ConstructorParameters<typeof Service>) {
     super(...args);
-    void this.#tryLoadFromStorage();
+    this.restored = this.#tryLoadFromStorage();
   }
 
   get isLoaded(): boolean {
