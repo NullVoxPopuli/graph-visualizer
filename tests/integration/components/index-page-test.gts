@@ -2,25 +2,35 @@ import { render } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
-import IndexPage from "#app/templates/index";
+import ApplicationTemplate from "#app/templates/application";
 import IndexLoading from "#app/templates/index-loading";
+import AnalyzeScreen from "#components/analyze-screen";
 import { stubRouterTransitions } from "#test-helpers/render";
 
-module("Integration | index-page", function (hooks) {
+module("Integration | app shell + analyze screen", function (hooks) {
   setupRenderingTest(hooks);
 
   hooks.beforeEach(function () {
     stubRouterTransitions(this.owner);
   });
 
-  test("the index template renders the file picker", async function (assert) {
-    // The restore/redirect decision lives in the route now; the template
-    // itself is just the landing page.
-    await render(<template><IndexPage /></template>);
+  test("the header links to the analyze screen", async function (assert) {
+    await render(<template><ApplicationTemplate /></template>);
+
+    assert
+      .dom("a.app-header__analyze")
+      .exists("header has a link to the file/analyze screen")
+      .hasText("Analyze JSON");
+    assert
+      .dom("a.app-header__analyze")
+      .hasAttribute("href", "/analyze", "it points at the dedicated /analyze URL");
+  });
+
+  test("the analyze screen renders the file picker", async function (assert) {
+    await render(<template><AnalyzeScreen /></template>);
 
     assert.dom(".landing").exists();
     assert.dom(".landing__drop").exists("file picker is shown");
-    assert.dom(".empty-state").doesNotExist();
   });
 
   test("the loading substate shows the restoring placeholder", async function (assert) {

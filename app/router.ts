@@ -9,5 +9,6 @@ export default class Router extends EmbroiderRouter {
 
 Router.map(function () {
   this.route("view");
+  this.route("analyze");
   this.route("docs");
 });

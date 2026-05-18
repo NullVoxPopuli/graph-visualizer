@@ -5,12 +5,13 @@ import type RouterService from "@ember/routing/router-service";
 import type GraphService from "#services/graph";
 
 /**
- * The graph service kicks off an IndexedDB restore at boot. A returning
- * visitor landing on `/` should go straight to the visualizer rather
- * than see (or flash) the file picker, so wait for that restore to
- * settle here and redirect when it produced a graph.
+ * `/` is a pure redirector. The graph service kicks off an IndexedDB
+ * restore at boot; once it settles we send the visitor to the
+ * visualizer if a graph was restored, or to the `/analyze` screen if
+ * not. The landing UI lives at its own `/analyze` URL (linked from the
+ * header) so it's reachable on demand, not just on a cold start.
  *
- * Awaiting in `beforeModel` puts the route into its loading substate —
+ * Awaiting here puts the route in its loading substate —
  * `templates/index-loading` renders the "restoring" placeholder until
  * this resolves, so there's no file-picker flash either way.
  */
@@ -21,8 +22,6 @@ export default class IndexRoute extends Route {
   async beforeModel(): Promise<void> {
     await this.graph.restored;
 
-    if (this.graph.current) {
-      this.router.replaceWith("view");
-    }
+    this.router.replaceWith(this.graph.current ? "view" : "analyze");
   }
 }
