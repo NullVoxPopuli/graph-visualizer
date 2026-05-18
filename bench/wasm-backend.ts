@@ -7,7 +7,7 @@
  * isn't built yet it resolves to `null` so the benchmark can still report
  * the JS baseline on its own.
  */
-import type { LayoutInit } from "#lib/layout-core";
+import type { LayoutInit } from "#lib/layout-types";
 
 export interface WasmLayout {
   run(init: LayoutInit): Float32Array;

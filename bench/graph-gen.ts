@@ -10,7 +10,7 @@
  * This is intentionally a separate, dependency-free module: the benchmark
  * harness imports it, but so could a future fuzz/property test.
  */
-import type { LayoutInit } from "#lib/layout-core";
+import type { LayoutInit } from "#lib/layout-types";
 
 /** mulberry32 — tiny, fast, good-enough seeded PRNG. */
 function mulberry32(seed: number): () => number {

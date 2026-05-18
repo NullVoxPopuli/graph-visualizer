@@ -3,11 +3,11 @@ import * as Comlink from "comlink";
 
 import init, { run_layout } from "#lib/wasm/layout_wasm";
 
-import type { LayoutInit, LayoutProgress } from "#lib/layout-core";
+import type { LayoutInit, LayoutProgress } from "#lib/layout-types";
 
-// Same public surface as `layout.worker.ts` so this is a drop-in: the
-// service can swap which worker URL it spawns and nothing else changes.
-export type { LayoutInit, LayoutProgress } from "#lib/layout-core";
+// Re-exported so the visualizer service can import the engine type and
+// its input contract from a single module.
+export type { LayoutInit, LayoutProgress } from "#lib/layout-types";
 
 // Instantiate the module once per worker. `init()` resolves
 // `layout_wasm_bg.wasm` relative to this module — the bundler treats it as
@@ -16,14 +16,13 @@ let wasmReady: Promise<unknown> | null = null;
 
 const layoutEngine = {
   /**
-   * Run the Rust/WASM port of the d3-force pipeline. WASM can't
-   * cooperatively yield mid-run, but it calls `progress` once per batch
-   * so the progress bar still advances during the (multi-second on big
-   * graphs) layout. Uses the `fast` approximation schedule — steeper
-   * alpha decay + single collide pass — for a large speedup at a small,
-   * measured layout difference (`?layout=js` keeps the faithful path).
-   * Cancellation still works: the service `terminate()`s the whole
-   * worker, killing the WASM run outright.
+   * Run the Rust/WASM force-directed layout. WASM can't cooperatively
+   * yield mid-run, but it calls `progress` once per batch so the progress
+   * bar still advances during the (multi-second on big graphs) layout.
+   * Uses the `fast` approximation schedule — steeper alpha decay + single
+   * collide pass — for a large speedup at a small, measured layout
+   * difference. Cancellation still works: the service `terminate()`s the
+   * whole worker, killing the WASM run outright.
    */
   async run(
     layoutInit: LayoutInit,

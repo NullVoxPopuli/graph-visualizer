@@ -6,7 +6,7 @@ import type Graph from "graphology";
  * `ids`, `labels`, and `metas` are indexed by an internal numeric node index
  * (0..N-1). `idToIndex` maps the user's original id string to that index.
  * `edgesFlat` is a flat (from, to, from, to, ...) Int32Array — the form
- * d3-force and the layout worker want.
+ * the WASM layout worker wants.
  *
  * Edge typing: the input schema lets each edge be a bare id or
  * `{ nodeId, edgeType }`. After parsing, every edge has an integer

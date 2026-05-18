@@ -226,8 +226,8 @@ const WITH_NODE_TYPES_HTML = hl(WITH_NODE_TYPES, "json");
         <code>edges</code>
         on node A pointing at node B means "A → B".</li>
       <li>Communities are computed automatically with Louvain modularity clustering.</li>
-      <li>Initial positions are computed with a d3-force simulation. Layout runs in a Web Worker and
-        emits ~12 batches before settling.</li>
+      <li>Initial positions are computed with a force-directed simulation (a Rust/WASM port of the
+        d3-force model). Layout runs in a Web Worker and emits ~12 batches before settling.</li>
       <li>The renderer is WebGL2-instanced; 50k+ nodes are practical on modern hardware.</li>
     </ul>
 
