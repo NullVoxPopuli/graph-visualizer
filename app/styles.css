@@ -118,6 +118,69 @@ pre code {
   display: block;
 }
 
+/* ---------- global document drop zone ---------- */
+
+/* Purely visual — the actual drop is handled on `window`, so this never
+   needs to capture pointer/drag events itself. */
+.document-drop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg, #000) 70%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.document-drop__panel {
+  border: 2px dashed var(--accent, #6ea8fe);
+  border-radius: 12px;
+  padding: 40px 56px;
+  text-align: center;
+  background: var(--panel-soft);
+}
+
+.document-drop__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.document-drop__error {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 90vw;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.document-drop__error button {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.document-drop__error button:hover {
+  color: var(--fg);
+}
+
 .app-main {
   flex: 1;
   position: relative;
