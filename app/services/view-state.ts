@@ -201,6 +201,33 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Read a comma-joined id list QP into a `Set`. Empty/absent returns
+   * the shared `EMPTY_STRING_SET` (stable ref so consumers can identity-
+   * compare). Ids containing a literal `,` cannot round-trip — see the
+   * per-param docs. Shared by `collapsedIds` / `hiddenNodeIds` /
+   * `rootNodeIds`, which differ only by QP key.
+   */
+  #getIdSet(key: string): Set<string> {
+    const raw = this.#qps[key];
+
+    if (!raw) return EMPTY_STRING_SET;
+
+    return new Set(raw.split(",").filter((s) => s.length > 0));
+  }
+
+  /** Toggle `id` in the id-set QP `key`, serializing back (or clearing
+   *  the param when the set empties). Shared toggle for the three id
+   *  lists. */
+  #toggleIdSet(key: string, id: string): void {
+    const next = new Set(this.#getIdSet(key));
+
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+
+    this.#setParam(key, next.size === 0 ? null : [...next].join(","));
+  }
+
+  /**
    * Run any pending rAF-batched QP transition immediately and return its
    * promise. Needed for callers that have to observe the URL/DOM update
    * synchronously with their own work — notably the View Transition
@@ -304,22 +331,11 @@ export default class ViewStateService extends Service {
    * containing a literal `,` cannot round-trip through this URL encoding.
    */
   get collapsedIds(): Set<string> {
-    const raw = this.#qps["collapsed"];
-
-    if (!raw) return EMPTY_STRING_SET;
-
-    return new Set(raw.split(",").filter((s) => s.length > 0));
+    return this.#getIdSet("collapsed");
   }
 
   toggleCollapsed(id: string): void {
-    const next = new Set(this.collapsedIds);
-
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-
-    const serialized = next.size === 0 ? null : [...next].join(",");
-
-    this.#setParam("collapsed", serialized);
+    this.#toggleIdSet("collapsed", id);
   }
 
   clearCollapsed(): void {
@@ -335,22 +351,11 @@ export default class ViewStateService extends Service {
    * `,` cannot round-trip through this URL encoding.
    */
   get hiddenNodeIds(): Set<string> {
-    const raw = this.#qps["hiddenNodes"];
-
-    if (!raw) return EMPTY_STRING_SET;
-
-    return new Set(raw.split(",").filter((s) => s.length > 0));
+    return this.#getIdSet("hiddenNodes");
   }
 
   toggleHiddenNodeId(id: string): void {
-    const next = new Set(this.hiddenNodeIds);
-
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-
-    const serialized = next.size === 0 ? null : [...next].join(",");
-
-    this.#setParam("hiddenNodes", serialized);
+    this.#toggleIdSet("hiddenNodes", id);
   }
 
   clearHiddenNodes(): void {
@@ -367,22 +372,11 @@ export default class ViewStateService extends Service {
    * `,` cannot round-trip through this URL encoding.
    */
   get rootNodeIds(): Set<string> {
-    const raw = this.#qps["rootNodes"];
-
-    if (!raw) return EMPTY_STRING_SET;
-
-    return new Set(raw.split(",").filter((s) => s.length > 0));
+    return this.#getIdSet("rootNodes");
   }
 
   toggleRootNodeId(id: string): void {
-    const next = new Set(this.rootNodeIds);
-
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-
-    const serialized = next.size === 0 ? null : [...next].join(",");
-
-    this.#setParam("rootNodes", serialized);
+    this.#toggleIdSet("rootNodes", id);
   }
 
   clearRootNodes(): void {
