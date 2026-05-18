@@ -7,12 +7,13 @@ import * as Comlink from "comlink";
 import { modifier } from "ember-modifier";
 import Flatbush from "flatbush";
 
+import { Camera } from "#lib/camera";
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
 import { findBundledCyclesViaRaw } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
-import { Renderer } from "#lib/renderer";
+import { RenderProxy } from "#lib/render-proxy";
 
 import Controls from "./controls.gts";
 import CyclesPanel from "./cycles-panel.gts";
@@ -39,7 +40,16 @@ export default class Visualizer extends Component {
   @service declare visualizer: VisualizerService;
   @service declare viewState: ViewStateService;
 
-  private renderer: Renderer | null = null;
+  // `renderer` is a thin proxy that forwards to the render worker (which
+  // owns the OffscreenCanvas, GL, and the draw loop). The method shape
+  // matches the old in-process `Renderer` so `repack*` is unchanged.
+  private renderer: RenderProxy | null = null;
+  #renderWorker: Worker | null = null;
+  #workerSelected = false;
+  // Camera owns d3-zoom on the DOM canvas (main-thread input). Its
+  // transform is pushed into the renderer via `setCamera` so the
+  // renderer itself stays input-/DOM-free (worker-ready).
+  private camera: Camera | null = null;
 
   private nodeInstanceBuf: Float32Array = new Float32Array(0);
   private edgeBuf: Float32Array = new Float32Array(0);
@@ -189,7 +199,22 @@ export default class Visualizer extends Component {
   // Keep this body free of viewState/visualizer reads — the rAF loop and
   // `reactToScene` handle reactive sync against the renderer.
   setupCanvas = modifier((canvas: HTMLCanvasElement) => {
-    this.renderer = new Renderer(canvas);
+    // Hand the canvas to the render worker; GL + the draw loop run there.
+    const worker = new Worker(new URL("../lib/render.worker.ts", import.meta.url), {
+      type: "module",
+    });
+    const off = canvas.transferControlToOffscreen();
+    const dpr = window.devicePixelRatio || 1;
+
+    worker.postMessage(
+      { t: "init", canvas: off, cssW: window.innerWidth, cssH: window.innerHeight, dpr },
+      [off],
+    );
+    this.#renderWorker = worker;
+    this.renderer = new RenderProxy(worker);
+    // Camera stays on the main thread (d3-zoom needs the DOM canvas);
+    // its transform is streamed to the worker via `renderer.setCamera`.
+    this.camera = new Camera(canvas);
     this.handleResize();
     window.addEventListener("resize", this.resizeHandler);
 
@@ -214,7 +239,11 @@ export default class Visualizer extends Component {
       this.#packEngine = null;
     });
 
-    this.renderer.camera.onChange(() => {
+    this.camera.onChange(() => {
+      if (this.camera && this.renderer) {
+        this.renderer.setCamera(this.camera.x, this.camera.y, this.camera.zoom);
+      }
+
       this.dirty = true;
     });
 
@@ -365,9 +394,9 @@ export default class Visualizer extends Component {
 
     const x = scene.positions[2 * idx]!;
     const y = scene.positions[2 * idx + 1]!;
-    const cam = this.renderer.camera;
+    const cam = this.camera;
 
-    if (cam.worldPointInView(x, y)) return;
+    if (!cam || cam.worldPointInView(x, y)) return;
     cam.animateTo(x, y, cam.zoom);
   }
 
@@ -742,8 +771,9 @@ export default class Visualizer extends Component {
       if (y > maxY) maxY = y;
     }
 
-    if (!isFinite(minX)) return;
-    this.renderer.camera.fit(minX, minY, maxX, maxY);
+    if (!isFinite(minX) || !this.camera) return;
+    this.camera.fit(minX, minY, maxX, maxY);
+    this.renderer?.setCamera(this.camera.x, this.camera.y, this.camera.zoom);
   }
 
   private rebuildPicker(scene: ProcessedScene): void {
@@ -775,17 +805,17 @@ export default class Visualizer extends Component {
   private pickAt(sx: number, sy: number): number {
     const scene = this.visualizer.scene;
 
-    if (!this.renderer || !scene) return -1;
+    if (!this.renderer || !scene || !this.camera) return -1;
     if (this.pickerDirty) this.rebuildPicker(scene);
     if (!this.picker) return -1;
 
     const dpr = window.devicePixelRatio || 1;
-    const [wx, wy] = this.renderer.camera.screenToWorld(sx * dpr, sy * dpr);
+    const [wx, wy] = this.camera.screenToWorld(sx * dpr, sy * dpr);
     // Hit radius in world coords corresponds to the rendered screen-px floor
     // (max(4, r*zoom)). At low zoom, the world-space hit area grows so tiny
     // dots stay clickable — so we search a box of that minimum radius around
     // the click, then refine.
-    const zoom = this.renderer.camera.zoom || 1;
+    const zoom = this.camera.zoom || 1;
     const minHitWorld = 4 / zoom;
     const candidates = this.picker.search(
       wx - minHitWorld,
@@ -907,6 +937,14 @@ export default class Visualizer extends Component {
     const dpr = window.devicePixelRatio || 1;
 
     this.renderer.resize(window.innerWidth, window.innerHeight, dpr);
+    // Renderer no longer owns the camera, so resize it here and push the
+    // (possibly clamped) transform back into the renderer.
+    this.camera?.resize(Math.floor(window.innerWidth * dpr), Math.floor(window.innerHeight * dpr));
+
+    if (this.camera) {
+      this.renderer.setCamera(this.camera.x, this.camera.y, this.camera.zoom);
+    }
+
     this.dirty = true;
   }
 
@@ -958,19 +996,25 @@ export default class Visualizer extends Component {
       this.reactToScene(scene);
       this.maybeReactToHover(scene);
       this.maybeHandleFocus(scene);
-      // Keep redrawing while a node is selected — the halo around the
-      // selected node animates and would otherwise freeze the moment the
-      // dirty flag clears.
-      if (this.viewState.selectedId !== null) this.dirty = true;
+
+      // The render worker owns the draw loop and animates the selection
+      // halo itself (off `performance.now()`); just tell it whether a
+      // node is selected so it keeps drawing every frame for the halo.
+      const selNow = this.viewState.selectedId !== null;
+
+      if (selNow !== this.#workerSelected) {
+        this.#workerSelected = selNow;
+        this.renderer?.setSelected(selNow);
+      }
 
       if (this.dirty && this.renderer) {
-        this.renderer.draw();
+        this.renderer.markDirty();
         this.dirty = false;
       }
     } else if (this.dirty && this.renderer) {
       // Clear the canvas while the pipeline is still working so we don't
       // leave a previous scene visible behind the loading overlay.
-      this.renderer.draw();
+      this.renderer.markDirty();
       this.dirty = false;
     }
 
@@ -984,8 +1028,11 @@ export default class Visualizer extends Component {
     for (const fn of this.cleanups) fn();
     this.cleanups = [];
 
-    this.renderer?.camera.destroy();
+    this.camera?.destroy();
+    this.camera = null;
     this.renderer = null;
+    this.#renderWorker?.terminate();
+    this.#renderWorker = null;
   }
 
   <template>
