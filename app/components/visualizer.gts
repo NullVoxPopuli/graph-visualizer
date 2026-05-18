@@ -244,12 +244,9 @@ export default class Visualizer extends Component {
     const off = canvas.transferControlToOffscreen();
     const dpr = window.devicePixelRatio || 1;
 
-    worker.postMessage(
-      { t: "init", canvas: off, cssW: window.innerWidth, cssH: window.innerHeight, dpr },
-      [off],
-    );
     this.#renderWorker = worker;
     this.renderer = new RenderProxy(worker);
+    this.renderer.init(off, window.innerWidth, window.innerHeight, dpr);
     // Camera stays on the main thread (d3-zoom needs the DOM canvas);
     // its transform is streamed to the worker via `renderer.setCamera`.
     this.camera = new Camera(canvas);
