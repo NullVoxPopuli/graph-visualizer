@@ -118,6 +118,23 @@ const sessionEngine = {
     );
   },
 
+  /**
+   * Transitively-orphaned node indices on the resident graph.
+   * `hiddenEdgeTypeIds` restricts to visible edges; `rootIndices` are
+   * never peeled. Both empty ⇒ the unfiltered analysis. The graph is
+   * already resident, so this is a cheap O(N+E) Rust pass — no
+   * re-parse, no graph marshaling.
+   */
+  findOrphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Int32Array {
+    return activeSession().find_orphans(hiddenEdgeTypeIds, rootIndices);
+  },
+
+  /** Does the resident graph have any orphan under the given edge-type
+   *  filter? (empty ⇒ unfiltered.) */
+  hasAnyOrphan(hiddenEdgeTypeIds: Int32Array): boolean {
+    return activeSession().has_any_orphan(hiddenEdgeTypeIds);
+  },
+
   /** Drop the resident graph and free its WASM memory. */
   dispose(): void {
     session?.free();

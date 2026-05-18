@@ -3,17 +3,16 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { VerticalCollection } from "@html-next/vertical-collection";
+import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import {
   createApplyGeometryModifier,
   createDragModifier,
   createResizeModifier,
 } from "#lib/floating-panel";
-import { findOrphans } from "#lib/orphans";
 import IconX from "~icons/ph/x";
 
 import type { PanelGeometry } from "#lib/floating-panel";
-import type { LoadedGraph } from "#lib/types";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
@@ -40,30 +39,29 @@ export default class OrphansPanel extends Component {
   @service declare visualizer: VisualizerService;
 
   /**
-   * Memoize the orphans list by `graph.current` identity, the hidden-
-   * edge-type set, and the effective hide-id set (per-id "Hide" +
-   * label glob filters). Orphan analysis is O(N + E) so re-running on
-   * every render isn't catastrophic, but skipping it when nothing
-   * changed keeps the panel's render path predictable as the user
-   * clicks around.
+   * Orphan analysis now lives in the resident Rust session (no JS
+   * duplicate). The service memoizes the query per (graph, edge-type
+   * filter, declared roots) and the worker pass is a cheap O(N + E) on
+   * the already-resident graph, so it runs once per distinct filter
+   * state — not per render. We read the resolved indices via
+   * `getPromiseState` and, while a fresh result is in flight, keep
+   * showing the previous list so the panel never flickers or blocks.
    *
-   * Note that `findOrphans` itself only takes an edge-type filter —
-   * hidden-node-ids and glob filters are applied as a post-pass:
-   * orphans are computed against the full graph (so a node's "real"
-   * orphan status doesn't depend on what the user's hidden), then any
-   * orphan whose id is in the effective hide set is dropped from the
-   * displayed list. This matches the renderer's behavior — a hidden
-   * node's edges drop out of the canvas too — without forcing
-   * `findOrphans` to grow another knob.
+   * The edge-type filter + declared roots are passed into the Rust peel
+   * (they change the analysis). The hidden-node-id / label-glob filter
+   * stays a JS post-pass: orphan status is computed against the full
+   * graph, then any orphan whose id is in the effective hide set is
+   * dropped from the displayed list — matching the renderer (a hidden
+   * node's edges drop off the canvas too) without the peel needing
+   * another knob. Entries are rebuilt only when the resolved index set
+   * or that post-filter actually changes.
    */
-  #lastGraph: LoadedGraph | null = null;
-  #lastCacheKey = "";
+  #lastResolved: Int32Array | null = null;
+  #lastHideKey = "";
   #lastOrphans: OrphanEntry[] = [];
 
   get orphans(): OrphanEntry[] {
-    // Skip the analysis when the panel is closed — nothing reads the
-    // result, and a no-op getter is cheaper than even an O(N + E)
-    // pass on a 10k-node graph.
+    // Skip entirely when the panel is closed — nothing reads the result.
     if (!this.viewState.orphansPanelOpen) return [];
 
     const g = this.graph.current;
@@ -73,31 +71,32 @@ export default class OrphansPanel extends Component {
     const hiddenEdgeTypes = this.viewState.hiddenEdgeTypes;
     const effectiveHidden = this.viewState.effectiveHiddenNodeIds(g);
     const rootNodeIds = this.viewState.rootNodeIds;
-    const cacheKey = `${serializeIntSet(hiddenEdgeTypes)}|${serializeStringSet(effectiveHidden)}|${serializeStringSet(rootNodeIds)}`;
 
-    if (g !== this.#lastGraph || cacheKey !== this.#lastCacheKey) {
-      // Cache miss: re-run the analysis. Same write-inside-the-branch
-      // shape as the cycles panel's getter so the eslint
-      // `ember/no-side-effects` rule reads this as a memoized
-      // computation rather than an unconditional mutation.
-      // Map the user's declared-root ids to node indices for the peel.
-      // Skipped entirely when nothing's declared.
-      let rootIndices: Set<number> | undefined;
+    const hiddenIds = Int32Array.from(hiddenEdgeTypes);
+    const rootIndices: number[] = [];
 
-      if (rootNodeIds.size > 0) {
-        rootIndices = new Set<number>();
+    for (const id of rootNodeIds) {
+      const idx = g.idToIndex.get(id);
 
-        for (const id of rootNodeIds) {
-          const idx = g.idToIndex.get(id);
+      if (idx !== undefined) rootIndices.push(idx);
+    }
 
-          if (idx !== undefined) rootIndices.add(idx);
-        }
-      }
+    const promise = this.visualizer.orphanIndices(hiddenIds, Int32Array.from(rootIndices));
 
-      const rawOrphans = findOrphans(g, hiddenEdgeTypes, rootIndices);
+    if (!promise) return [];
+
+    const resolved = getPromiseState(promise).resolved;
+
+    // First result for this filter not in yet — keep the previous list
+    // (empty on first ever load; the scene overlay covers that anyway).
+    if (!resolved) return this.#lastOrphans;
+
+    const hideKey = serializeStringSet(effectiveHidden);
+
+    if (resolved !== this.#lastResolved || hideKey !== this.#lastHideKey) {
       const entries: OrphanEntry[] = [];
 
-      for (const idx of rawOrphans) {
+      for (const idx of resolved) {
         const id = g.ids[idx]!;
 
         if (effectiveHidden.has(id)) continue;
@@ -106,13 +105,12 @@ export default class OrphansPanel extends Component {
 
       entries.sort((a, b) => a.label.localeCompare(b.label));
 
-      // Memoization writes — the rule otherwise flags any property
-      // assignment inside a getter, but caching the analysis result
-      // is the whole point.
+      // Memoization writes — caching the presented list is the point;
+      // the eslint rule otherwise flags any assignment in a getter.
       // eslint-disable-next-line ember/no-side-effects
-      this.#lastGraph = g;
+      this.#lastResolved = resolved;
       // eslint-disable-next-line ember/no-side-effects
-      this.#lastCacheKey = cacheKey;
+      this.#lastHideKey = hideKey;
       // eslint-disable-next-line ember/no-side-effects
       this.#lastOrphans = entries;
     }
@@ -269,12 +267,6 @@ export default class OrphansPanel extends Component {
       </aside>
     {{/if}}
   </template>
-}
-
-function serializeIntSet(set: Set<number>): string {
-  if (set.size === 0) return "";
-
-  return [...set].sort((a, b) => a - b).join(",");
 }
 
 function serializeStringSet(set: Set<string>): string {

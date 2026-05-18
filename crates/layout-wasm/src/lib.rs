@@ -438,24 +438,63 @@ impl GraphSession {
         )
     }
 
-    pub fn has_any_orphan(&self) -> bool {
+    /// Boolean mask over edge-type ids: `mask[t] == true` ⇒ edges of
+    /// type `t` are hidden. Empty input ⇒ no filter (`None`).
+    fn hidden_type_mask(&self, hidden_edge_type_ids: &[i32]) -> Option<Vec<bool>> {
+        if hidden_edge_type_ids.is_empty() {
+            return None;
+        }
+        let mut mask = vec![false; self.parsed.edge_type_names.len()];
+        for &t in hidden_edge_type_ids {
+            if let Some(slot) = mask.get_mut(t as usize) {
+                *slot = true;
+            }
+        }
+        Some(mask)
+    }
+
+    /// Boolean mask over node indices for the user's declared roots.
+    /// Empty input ⇒ no roots (`None`).
+    fn root_mask(&self, root_indices: &[i32]) -> Option<Vec<bool>> {
+        if root_indices.is_empty() {
+            return None;
+        }
+        let mut mask = vec![false; self.parsed.ids.len()];
+        for &i in root_indices {
+            if let Some(slot) = mask.get_mut(i as usize) {
+                *slot = true;
+            }
+        }
+        Some(mask)
+    }
+
+    /// `hidden_edge_type_ids`: edge-type ids the user has filtered out
+    /// (empty = none). Same semantics as the JS `hasAnyOrphan`.
+    pub fn has_any_orphan(&self, hidden_edge_type_ids: &[i32]) -> bool {
+        let hidden = self.hidden_type_mask(hidden_edge_type_ids);
         graph::has_any_orphan(
             self.parsed.ids.len(),
             &self.parsed.edges_flat,
             &self.parsed.edge_type_ids,
             &self.parsed.in_degree,
-            None,
+            hidden.as_deref(),
         )
     }
 
-    pub fn find_orphans(&self) -> Vec<i32> {
+    /// Transitively-orphaned node indices. `hidden_edge_type_ids`
+    /// restricts to visible edges; `root_indices` are never peeled.
+    /// Both empty = the unfiltered analysis. Same semantics as the JS
+    /// `findOrphans`.
+    pub fn find_orphans(&self, hidden_edge_type_ids: &[i32], root_indices: &[i32]) -> Vec<i32> {
+        let hidden = self.hidden_type_mask(hidden_edge_type_ids);
+        let roots = self.root_mask(root_indices);
         graph::find_orphans(
             self.parsed.ids.len(),
             &self.parsed.edges_flat,
             &self.parsed.edge_type_ids,
             &self.parsed.in_degree,
-            None,
-            None,
+            hidden.as_deref(),
+            roots.as_deref(),
         )
     }
 

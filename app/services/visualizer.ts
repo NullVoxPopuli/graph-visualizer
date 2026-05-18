@@ -266,6 +266,55 @@ export default class VisualizerService extends Service {
   }
 
   /**
+   * Transitively-orphaned node indices, computed in the resident Rust
+   * session (no JS duplicate). Memoized per (graph, filter content): it
+   * runs once per distinct filter state and is reused across the many
+   * renders that don't change filters — recomputed only when the user
+   * actually toggles an edge-type filter or declares a root. Panels read
+   * the resolved value via `getPromiseState`, so the UI never blocks on
+   * it. `null` until a graph + its session exist.
+   *
+   * The two args are content-keyed; pass stable `Int32Array`s built from
+   * the view-state sets.
+   */
+  #orphanGraph: LoadedGraph | null = null;
+  #orphanCache = new Map<string, Promise<Int32Array>>();
+
+  orphanIndices(
+    hiddenEdgeTypeIds: Int32Array,
+    rootIndices: Int32Array,
+  ): Promise<Int32Array> | null {
+    // Touch `analysis` so the resident pipeline exists for the current
+    // graph (the analysis getter owns the session lifecycle).
+    void this.analysis;
+
+    const g = this.graph.current;
+    const pipeline = this.#pipeline;
+
+    if (!g || !pipeline) {
+      this.#orphanGraph = null;
+      this.#orphanCache.clear();
+
+      return null;
+    }
+
+    if (g !== this.#orphanGraph) {
+      this.#orphanGraph = g;
+      this.#orphanCache.clear();
+    }
+
+    const key = `${hiddenEdgeTypeIds.join(",")}|${rootIndices.join(",")}`;
+    let p = this.#orphanCache.get(key);
+
+    if (!p) {
+      p = pipeline.findOrphans(hiddenEdgeTypeIds, rootIndices);
+      this.#orphanCache.set(key, p);
+    }
+
+    return p;
+  }
+
+  /**
    * Cross-component pan-to request. Set by the search component (and
    * anything else that wants to bring a node into view); polled and
    * cleared by the Visualizer component's rAF loop. Not tracked — the

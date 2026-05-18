@@ -1,24 +1,27 @@
 /**
  * JS ↔ Rust parity harness.
  *
- * The graph algorithms exist twice: the original TypeScript
- * (`#lib/parser`, `#lib/orphans`, `#lib/cycle`, `#lib/pack`) and the
- * Rust/WASM port the app actually runs (`crates/layout-wasm`, surfaced as
- * `GraphSession`). Nothing automated guarded that they stay equivalent —
- * a refactor on either side could silently diverge. This runs both over
- * every shipped example and asserts they agree.
+ * Some graph algorithms still exist in TypeScript (`#lib/parser`,
+ * `#lib/cycle`, `#lib/pack`) alongside the Rust/WASM port the app runs
+ * (`crates/layout-wasm`, surfaced as `GraphSession`). Nothing automated
+ * guarded that they stay equivalent — a refactor on either side could
+ * silently diverge. This runs both over every shipped example and
+ * asserts they agree, plus fixed-fixture specs for the algorithms whose
+ * JS copy has been removed.
  *
  * Run:  pnpm test:parity        (requires `pnpm build:wasm` first)
  *
  * Coverage today (everything the WASM surface exposes):
  *   - parse:   node count, ids, flat edge list, degrees   — exact
  *   - radii:   vs `computeRadii`                           — exact (±1e-4)
- *   - orphans: `find_orphans` (no filters) vs `findOrphans`— exact
- *   - cycle/orphan existence (no filters)                  — exact
+ *   - cycle existence (no filters) vs `hasAnyCycle`        — exact
+ *   - orphans: `find_orphans` / `has_any_orphan` against
+ *     concrete fixtures (edge-type filter + declared roots) — the JS
+ *     `orphans.ts` was removed when orphans moved into the resident
+ *     session, so these are expected-value specs, not a cross-check
  *   - Louvain: determinism (exact, across two loads) + a sane
- *     community count + reported modularity. There's no JS Louvain left
- *     to cross-check against — graphology was removed when the resident
- *     Rust session landed; determinism is the durable invariant.
+ *     community count + reported modularity. No JS Louvain left to
+ *     cross-check (graphology removed); determinism is the invariant.
  *
  * Not yet covered: bundled-cycle *enumeration* parity — the WASM surface
  * doesn't expose it yet. That case lands together with the cycles → Rust
@@ -34,9 +37,10 @@ import { fileURLToPath } from "node:url";
 
 import { hasAnyCycle } from "#lib/cycle";
 import { EXAMPLES } from "#lib/examples";
-import { findOrphans, hasAnyOrphan } from "#lib/orphans";
 import { computeRadii } from "#lib/pack";
 import { parseGraphJson } from "#lib/parser";
+
+const EMPTY = new Int32Array(0);
 
 interface RustSession {
   node_count(): number;
@@ -45,8 +49,8 @@ interface RustSession {
   communities(): Int32Array;
   radii(): Float32Array;
   has_any_cycle(): boolean;
-  has_any_orphan(): boolean;
-  find_orphans(): Int32Array;
+  has_any_orphan(hiddenEdgeTypeIds: Int32Array): boolean;
+  find_orphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Int32Array;
   free(): void;
 }
 interface RustModule {
@@ -144,9 +148,107 @@ function examplePath(url: string): string {
   return fileURLToPath(new URL(`../public${url}`, import.meta.url));
 }
 
+interface OrphanFixture {
+  name: string;
+  json: string;
+  /** edge-type ids to hide. The parser interns types first-seen with
+   *  0 = "" (untyped), so a graph whose only typed edge is "test" has
+   *  "test" === 1; an all-untyped graph hides 0. */
+  hidden?: number[];
+  /** node indices the user declared as roots (never peeled). */
+  roots?: number[];
+  expectOrphans: string[];
+  expectHasAny: boolean;
+}
+
+/**
+ * Fixed-fixture specs for orphan detection, ported from the deleted
+ * `tests/unit/orphans-test.ts` — they now drive the *live* Rust
+ * `GraphSession` (the JS `orphans.ts` they used to test is gone). Exact
+ * expected values, so they guard behavior without a JS cross-check.
+ */
+function checkOrphanFixtures(GraphSession: RustModule["GraphSession"]): string[] {
+  const fails: string[] = [];
+  const fixtures: OrphanFixture[] = [
+    { name: "empty graph", json: `{"nodes":[]}`, expectOrphans: [], expectHasAny: false },
+    {
+      name: "linear DAG peels entirely",
+      json: `{"nodes":[{"id":"src","edges":["mid"]},{"id":"mid","edges":["sink"]},{"id":"sink"}]}`,
+      expectOrphans: ["mid", "sink", "src"],
+      expectHasAny: true,
+    },
+    {
+      name: "pure cycle has no orphans",
+      json: `{"nodes":[{"id":"a","edges":["b"]},{"id":"b","edges":["a"]}]}`,
+      expectOrphans: [],
+      expectHasAny: false,
+    },
+    {
+      name: "node feeding a cycle is an orphan",
+      json: `{"nodes":[{"id":"src","edges":["a"]},{"id":"a","edges":["b"]},{"id":"b","edges":["a"]}]}`,
+      expectOrphans: ["src"],
+      expectHasAny: true,
+    },
+    {
+      name: "hiding the edge type that closes a cycle exposes both nodes",
+      json: `{"nodes":[{"id":"a","edges":[{"nodeId":"b","edgeType":"test"}]},{"id":"b","edges":[{"nodeId":"a","edgeType":"test"}]}]}`,
+      hidden: [1],
+      expectOrphans: ["a", "b"],
+      expectHasAny: true,
+    },
+    {
+      name: "transitive peel (a→b, c→b ⇒ all)",
+      json: `{"nodes":[{"id":"a","edges":["b"]},{"id":"b"},{"id":"c","edges":["b"]}]}`,
+      expectOrphans: ["a", "b", "c"],
+      expectHasAny: true,
+    },
+    {
+      name: "isolated node is an orphan even beside a cycle",
+      json: `{"nodes":[{"id":"alone"},{"id":"a","edges":["b"]},{"id":"b","edges":["a"]}]}`,
+      expectOrphans: ["alone"],
+      expectHasAny: true,
+    },
+    {
+      name: "declared root is never peeled (blocks the whole chain)",
+      json: `{"nodes":[{"id":"src","edges":["mid"]},{"id":"mid","edges":["sink"]},{"id":"sink"}]}`,
+      roots: [0],
+      expectOrphans: [],
+      expectHasAny: true,
+    },
+  ];
+
+  for (const fx of fixtures) {
+    const s = GraphSession.load(fx.json);
+
+    try {
+      const ids = JSON.parse(s.ids_json()) as string[];
+      const hidden = Int32Array.from(fx.hidden ?? []);
+      const roots = Int32Array.from(fx.roots ?? []);
+      const got = Array.from(s.find_orphans(hidden, roots))
+        .map((i) => ids[i]!)
+        .sort();
+      const want = [...fx.expectOrphans].sort();
+
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        fails.push(`orphan fixture "${fx.name}": got [${got.join(",")}] want [${want.join(",")}]`);
+      }
+
+      if (s.has_any_orphan(hidden) !== fx.expectHasAny) {
+        fails.push(`orphan fixture "${fx.name}": has_any_orphan ≠ ${fx.expectHasAny}`);
+      }
+    } finally {
+      s.free();
+    }
+  }
+
+  return fails;
+}
+
 function main(): void {
   const { GraphSession } = rustModule();
-  const failures: string[] = [];
+  const failures: string[] = checkOrphanFixtures(GraphSession);
+
+  console.info(`  ${failures.length === 0 ? "ok  " : "FAIL"} orphan fixtures\n`);
 
   for (const ex of EXAMPLES) {
     const text = readFileSync(examplePath(ex.url), "utf8");
@@ -180,16 +282,15 @@ function main(): void {
 
       if (!radiiOk) fail("radii differ (>1e-4)");
 
-      // --- orphans / existence (no filters) ---
-      const rustOrph = Array.from(rust.find_orphans()).sort((a, b) => a - b);
-      const jsOrph = findOrphans(js).sort((a, b) => a - b);
+      // --- orphans (no JS copy to compare to; consistency smoke +
+      // fixed-fixture specs run separately in checkOrphanFixtures) ---
+      const rustOrph = Array.from(rust.find_orphans(EMPTY, EMPTY));
 
-      if (!intArrayEqual(rustOrph, jsOrph)) {
-        fail(`find_orphans differ (rust ${rustOrph.length}, js ${jsOrph.length})`);
+      if (rustOrph.length > 0 !== rust.has_any_orphan(EMPTY)) {
+        fail("find_orphans / has_any_orphan disagree");
       }
 
-      if (rust.has_any_orphan() !== hasAnyOrphan(js)) fail("has_any_orphan differs");
-
+      // --- cycle existence (cycle.ts still in JS) ---
       if (rust.has_any_cycle() !== hasAnyCycle(js)) fail("has_any_cycle differs");
 
       // --- Louvain: determinism + quality ---
@@ -204,14 +305,14 @@ function main(): void {
       // Modularity is reported (not floor-gated): an absolute threshold
       // measures graph structure, not parity, and is meaningless on
       // tiny/weakly-clustered graphs. Determinism above + the exact
-      // parse/radii/orphan checks are the real nets; there's no JS
-      // Louvain left to cross-check quality against.
+      // parse/radii checks are the real nets; there's no JS Louvain
+      // left to cross-check quality against.
       const qRust = modularity(n, js.edgesFlat, comm);
       const status = failures.some((f) => f.startsWith(`${ex.label}:`)) ? "FAIL" : "ok";
 
       console.info(
         `  ${status.padEnd(4)} ${ex.label.padEnd(14)} n=${String(n).padStart(5)} ` +
-          `comm=${String(k).padStart(4)}  orphans=${String(jsOrph.length).padStart(4)}  ` +
+          `comm=${String(k).padStart(4)}  orphans=${String(rustOrph.length).padStart(4)}  ` +
           `Q=${qRust.toFixed(3)}`,
       );
     } finally {
@@ -230,7 +331,10 @@ function main(): void {
     process.exit(1);
   }
 
-  console.info(`[parity] all ${EXAMPLES.length} examples agree (JS ≡ Rust).`);
+  console.info(
+    `[parity] ${EXAMPLES.length} examples agree (parse/radii/cycle: JS ≡ Rust) ` +
+      `+ orphan fixtures pass.`,
+  );
 }
 
 main();

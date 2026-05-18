@@ -19,6 +19,10 @@ export function loadGraph(owner: Owner, input: InputGraph): LoadedGraph {
   const svc = owner.lookup("service:graph") as GraphService;
 
   svc.current = graph;
+  // The resident WASM session re-parses this; components that read
+  // session-derived analyses (orphans, etc.) need it set, exactly like
+  // a real load. The Rust parser is a faithful port, so indices align.
+  svc.currentText = JSON.stringify(input);
 
   return graph;
 }

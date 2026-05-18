@@ -127,6 +127,26 @@ export class SessionPipeline {
     }
   }
 
+  /**
+   * Transitively-orphaned node indices. Cheap O(N+E) Rust pass on the
+   * resident graph — the analysis isn't duplicated in JS and the graph
+   * never re-crosses the worker boundary. `hiddenEdgeTypeIds`/
+   * `rootIndices` empty ⇒ unfiltered.
+   */
+  async findOrphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Promise<Int32Array> {
+    await this.#loaded;
+
+    return this.#engine.findOrphans(hiddenEdgeTypeIds, rootIndices);
+  }
+
+  /** Does the resident graph have any orphan under this edge-type
+   *  filter? (empty ⇒ unfiltered.) */
+  async hasAnyOrphan(hiddenEdgeTypeIds: Int32Array): Promise<boolean> {
+    await this.#loaded;
+
+    return this.#engine.hasAnyOrphan(hiddenEdgeTypeIds);
+  }
+
   /** Terminate the worker and free the resident WASM session. */
   dispose(): void {
     // Best-effort WASM free; terminate() is what actually reclaims it if
