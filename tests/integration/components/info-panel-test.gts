@@ -1,4 +1,4 @@
-import { render } from "@ember/test-helpers";
+import { click, findAll, render } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -96,5 +96,67 @@ module("Integration | info-panel", function (hooks) {
 
     assert.dom(".panel__cycle").exists({ count: 1 }, "one bundled cycle through pkgA");
     assert.dom(".panel__neighbor-raw").exists("raw-file line surfaces under contracted steps");
+  });
+
+  test("section open/closed state survives navigating between cycle nodes", async function (assert) {
+    // a → b → c → a is the cycle. `a` also gets 21 extra incoming
+    // edges so its `in` section auto-collapses (count 22 > the 20
+    // threshold); `b`'s `in` count is 1, which would auto-open.
+    const fillers = Array.from({ length: 21 }, (_, i) => ({
+      id: `f${i}`,
+      edges: ["a"],
+    }));
+
+    loadGraph(this.owner, {
+      nodes: [
+        { id: "a", edges: ["b"] },
+        { id: "b", edges: ["c"] },
+        { id: "c", edges: ["a"] },
+        ...fillers,
+      ],
+    });
+    viewState(this.owner).selectedId = "a";
+
+    // Cycle enumeration runs in the resident Rust session; its test
+    // waiter makes `render()` block until it resolves.
+    await render(<template><InfoPanel /></template>);
+
+    const section = (label: string): Element => {
+      const el = findAll(".panel__section").find((s) =>
+        s.querySelector(".panel__subhead")?.textContent?.trim().startsWith(label),
+      );
+
+      if (!el) throw new Error(`no "${label}" section`);
+
+      return el;
+    };
+
+    const isOpen = (label: string): boolean => section(label).hasAttribute("open");
+    const summary = (label: string): Element => {
+      const el = section(label).querySelector(".panel__subhead");
+
+      if (!el) throw new Error(`no "${label}" summary`);
+
+      return el;
+    };
+
+    // Preconditions: `a` has 22 incoming → `in` auto-collapsed; the
+    // single cycle is short → `cycles` auto-open.
+    assert.false(isOpen("in"), "in section auto-collapses for the 22-in-edge node");
+    assert.true(isOpen("cycles"), "cycles section auto-opens");
+
+    // User explicitly collapses the cycles section.
+    await click(summary("cycles"));
+    assert.false(isOpen("cycles"), "cycles section now closed");
+
+    // Click a node inside the cycle to view it (selection → "b").
+    await click('.panel__cycle .panel__neighbor[title="b"]');
+    assert.dom(".panel__title").hasText("b", "navigated to the clicked cycle node");
+
+    // The regression: re-deriving open state from b's counts flipped
+    // the untouched `in` section open and sprang the explicitly-closed
+    // `cycles` section back open — the panel jumped. Both must hold.
+    assert.false(isOpen("in"), "in section stays collapsed after navigating");
+    assert.false(isOpen("cycles"), "explicitly-closed cycles section stays closed");
   });
 });
