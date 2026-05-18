@@ -594,28 +594,58 @@ export default class InfoPanel extends Component {
    */
   static readonly AUTO_OPEN_THRESHOLD = 20;
 
-  get inOpen(): boolean {
-    const override = this.viewState.infoInOpenOverride;
+  /**
+   * The auto-open heuristic is per-node (short lists open, long ones
+   * collapse). Recomputing it on every selection made *untouched*
+   * sections flip as the user clicked from node to node — collapse the
+   * cycles section, click a cycle member to view it, and `in`/`out`
+   * would spring open/closed under a different node's counts, so the
+   * panel visibly jumped. Latch the first resolved default per section
+   * for the panel's lifetime: navigation no longer reshuffles the
+   * layout, while an explicit user toggle still persists through
+   * `viewState` and always wins over the latch.
+   */
+  #autoOpenLatch: { in?: boolean; out?: boolean; cycles?: boolean } = {};
 
+  private latchedOpen(
+    key: "in" | "out" | "cycles",
+    override: boolean | null,
+    auto: () => boolean,
+  ): boolean {
     if (override !== null) return override;
 
-    return this.inNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD;
+    let latched = this.#autoOpenLatch[key];
+
+    if (latched === undefined) {
+      latched = auto();
+      this.#autoOpenLatch[key] = latched;
+    }
+
+    return latched;
+  }
+
+  get inOpen(): boolean {
+    return this.latchedOpen(
+      "in",
+      this.viewState.infoInOpenOverride,
+      () => this.inNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD,
+    );
   }
 
   get outOpen(): boolean {
-    const override = this.viewState.infoOutOpenOverride;
-
-    if (override !== null) return override;
-
-    return this.outNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD;
+    return this.latchedOpen(
+      "out",
+      this.viewState.infoOutOpenOverride,
+      () => this.outNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD,
+    );
   }
 
   get cyclesOpen(): boolean {
-    const override = this.viewState.infoCyclesOpenOverride;
-
-    if (override !== null) return override;
-
-    return this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD;
+    return this.latchedOpen(
+      "cycles",
+      this.viewState.infoCyclesOpenOverride,
+      () => this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD,
+    );
   }
 
   /**
