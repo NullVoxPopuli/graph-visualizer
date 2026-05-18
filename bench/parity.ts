@@ -1,0 +1,236 @@
+/**
+ * JS ↔ Rust parity harness.
+ *
+ * The graph algorithms exist twice: the original TypeScript
+ * (`#lib/parser`, `#lib/orphans`, `#lib/cycle`, `#lib/pack`) and the
+ * Rust/WASM port the app actually runs (`crates/layout-wasm`, surfaced as
+ * `GraphSession`). Nothing automated guarded that they stay equivalent —
+ * a refactor on either side could silently diverge. This runs both over
+ * every shipped example and asserts they agree.
+ *
+ * Run:  pnpm test:parity        (requires `pnpm build:wasm` first)
+ *
+ * Coverage today (everything the WASM surface exposes):
+ *   - parse:   node count, ids, flat edge list, degrees   — exact
+ *   - radii:   vs `computeRadii`                           — exact (±1e-4)
+ *   - orphans: `find_orphans` (no filters) vs `findOrphans`— exact
+ *   - cycle/orphan existence (no filters)                  — exact
+ *   - Louvain: determinism (exact, across two loads) + a sane
+ *     community count + reported modularity. There's no JS Louvain left
+ *     to cross-check against — graphology was removed when the resident
+ *     Rust session landed; determinism is the durable invariant.
+ *
+ * Not yet covered: bundled-cycle *enumeration* parity — the WASM surface
+ * doesn't expose it yet. That case lands together with the cycles → Rust
+ * migration (which exposes it on `GraphSession`), added under this same
+ * harness.
+ *
+ * Node runs this `.ts` directly via `tsx` (see package.json). The
+ * `--target nodejs` WASM build initializes synchronously on `require`.
+ */
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+
+import { hasAnyCycle } from "#lib/cycle";
+import { EXAMPLES } from "#lib/examples";
+import { findOrphans, hasAnyOrphan } from "#lib/orphans";
+import { computeRadii } from "#lib/pack";
+import { parseGraphJson } from "#lib/parser";
+
+interface RustSession {
+  node_count(): number;
+  ids_json(): string;
+  edges_flat(): Int32Array;
+  communities(): Int32Array;
+  radii(): Float32Array;
+  has_any_cycle(): boolean;
+  has_any_orphan(): boolean;
+  find_orphans(): Int32Array;
+  free(): void;
+}
+interface RustModule {
+  GraphSession: { load(json: string): RustSession };
+}
+
+const require = createRequire(import.meta.url);
+
+function rustModule(): RustModule {
+  const spec = fileURLToPath(
+    new URL("../crates/layout-wasm/pkg-node/layout_wasm.js", import.meta.url),
+  );
+
+  let mod: RustModule & { default?: RustModule };
+
+  try {
+    mod = require(spec) as typeof mod;
+  } catch {
+    throw new Error("[parity] WASM backend not built. Run `pnpm build:wasm` first.");
+  }
+
+  const m = typeof mod.GraphSession === "function" ? mod : (mod.default as RustModule);
+
+  if (!m?.GraphSession) throw new Error("[parity] pkg-node missing the GraphSession export.");
+
+  return m;
+}
+
+/**
+ * Undirected modularity of a partition. Standard fast form:
+ * Q = Σ_c [ L_c/m − (D_c/2m)² ], where L_c = intra-community edges and
+ * D_c = total degree in community c. Direction and duplicate (a,b)/(b,a)
+ * pairs are collapsed and self-loops dropped, matching how Louvain treats
+ * the graph here.
+ */
+function modularity(n: number, edgesFlat: Int32Array, comm: Int32Array): number {
+  const undirected = new Set<number>();
+
+  for (let i = 0; i < edgesFlat.length; i += 2) {
+    let a = edgesFlat[i]!;
+    let b = edgesFlat[i + 1]!;
+
+    if (a === b) continue;
+    if (a > b) [a, b] = [b, a];
+
+    undirected.add(a * n + b);
+  }
+
+  const m = undirected.size;
+
+  if (m === 0) return 0;
+
+  const deg = new Float64Array(n);
+  const intra = new Map<number, number>();
+  const dsum = new Map<number, number>();
+
+  for (const key of undirected) {
+    const a = Math.floor(key / n);
+    const b = key % n;
+
+    deg[a]! += 1;
+    deg[b]! += 1;
+
+    if (comm[a] === comm[b]) {
+      intra.set(comm[a]!, (intra.get(comm[a]!) ?? 0) + 1);
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
+    dsum.set(comm[i]!, (dsum.get(comm[i]!) ?? 0) + deg[i]!);
+  }
+
+  let q = 0;
+
+  for (const [c, dc] of dsum) {
+    q += (intra.get(c) ?? 0) / m - (dc / (2 * m)) ** 2;
+  }
+
+  return q;
+}
+
+function intArrayEqual(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+
+  return true;
+}
+
+function distinctCount(a: Int32Array): number {
+  return new Set(Array.from(a)).size;
+}
+
+function examplePath(url: string): string {
+  return fileURLToPath(new URL(`../public${url}`, import.meta.url));
+}
+
+function main(): void {
+  const { GraphSession } = rustModule();
+  const failures: string[] = [];
+
+  for (const ex of EXAMPLES) {
+    const text = readFileSync(examplePath(ex.url), "utf8");
+    const js = parseGraphJson(text);
+    const rust = GraphSession.load(text);
+    const rust2 = GraphSession.load(text);
+
+    try {
+      const n = js.ids.length;
+      const fail = (msg: string): void => {
+        failures.push(`${ex.label}: ${msg}`);
+      };
+
+      // --- parse ---
+      if (rust.node_count() !== n) fail(`node_count ${rust.node_count()} ≠ ${n}`);
+
+      if (JSON.stringify(JSON.parse(rust.ids_json())) !== JSON.stringify(js.ids)) {
+        fail("ids differ");
+      }
+
+      if (!intArrayEqual(rust.edges_flat(), js.edgesFlat)) fail("edges_flat differ");
+
+      // --- radii ---
+      const jsRadii = computeRadii(js.inDegree, js.outDegree);
+      const rustRadii = rust.radii();
+      let radiiOk = rustRadii.length === jsRadii.length;
+
+      for (let i = 0; radiiOk && i < jsRadii.length; i++) {
+        if (Math.abs(rustRadii[i]! - jsRadii[i]!) > 1e-4) radiiOk = false;
+      }
+
+      if (!radiiOk) fail("radii differ (>1e-4)");
+
+      // --- orphans / existence (no filters) ---
+      const rustOrph = Array.from(rust.find_orphans()).sort((a, b) => a - b);
+      const jsOrph = findOrphans(js).sort((a, b) => a - b);
+
+      if (!intArrayEqual(rustOrph, jsOrph)) {
+        fail(`find_orphans differ (rust ${rustOrph.length}, js ${jsOrph.length})`);
+      }
+
+      if (rust.has_any_orphan() !== hasAnyOrphan(js)) fail("has_any_orphan differs");
+
+      if (rust.has_any_cycle() !== hasAnyCycle(js)) fail("has_any_cycle differs");
+
+      // --- Louvain: determinism + quality ---
+      const comm = rust.communities();
+
+      if (!intArrayEqual(comm, rust2.communities())) fail("Louvain not deterministic");
+
+      const k = distinctCount(comm);
+
+      if (k < 1 || k > n) fail(`community count ${k} out of range`);
+
+      // Modularity is reported (not floor-gated): an absolute threshold
+      // measures graph structure, not parity, and is meaningless on
+      // tiny/weakly-clustered graphs. Determinism above + the exact
+      // parse/radii/orphan checks are the real nets; there's no JS
+      // Louvain left to cross-check quality against.
+      const qRust = modularity(n, js.edgesFlat, comm);
+      const status = failures.some((f) => f.startsWith(`${ex.label}:`)) ? "FAIL" : "ok";
+
+      console.info(
+        `  ${status.padEnd(4)} ${ex.label.padEnd(14)} n=${String(n).padStart(5)} ` +
+          `comm=${String(k).padStart(4)}  orphans=${String(jsOrph.length).padStart(4)}  ` +
+          `Q=${qRust.toFixed(3)}`,
+      );
+    } finally {
+      rust.free();
+      rust2.free();
+    }
+  }
+
+  console.info();
+
+  if (failures.length > 0) {
+    console.error(`[parity] ${failures.length} mismatch(es):`);
+
+    for (const f of failures) console.error(`  - ${f}`);
+
+    process.exit(1);
+  }
+
+  console.info(`[parity] all ${EXAMPLES.length} examples agree (JS ≡ Rust).`);
+}
+
+main();

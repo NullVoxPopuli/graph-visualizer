@@ -32,6 +32,7 @@
     "lint:prettier": "prettier --check .",
     "build:test": "EMBER_ENV=test vite build --mode development",
     "test:ci": "testem ci --port 0",
+    "test:parity": "tsx bench/parity.ts",
     "test": "pnpm build:test && pnpm test:ci",
     "lint:types": "ember-tsc --noEmit",
     "bench:layout": "tsx bench/layout.bench.ts",
