@@ -1,24 +1,25 @@
 /**
  * Layout simulation benchmark.
  *
- * Times `runLayoutCore` (the production d3-force pipeline, extracted from
- * the worker) across a range of graph sizes, and — once the Rust/WASM
- * backend is built — the WASM port head-to-head on the *same* generated
- * graphs.
+ * Times the Rust/WASM force-directed layout (the exact pipeline the app
+ * ships) across the real example graphs, or a synthetic size sweep.
  *
- * Run:  pnpm bench:layout            (mitata, all sizes)
- *       pnpm bench:layout 200,2000   (mitata, custom sizes)
+ * Run:  pnpm bench:layout            (mitata, real examples)
+ *       pnpm bench:layout 200,2000   (mitata, synthetic sizes)
  *       pnpm bench:layout smoke      (one run/size, prints ms + sanity)
  *
  * Node 24 runs this `.ts` directly via `tsx` (see package.json).
+ *
+ * Requires the WASM backend to be built first (`pnpm build:wasm`); there
+ * is no JS fallback — the simulation lives only in Rust.
  */
 import { bench, group, run, summary } from "mitata";
-
-import { type LayoutInit, runLayoutCore } from "#lib/layout-core";
 
 import { loadAllExamples } from "./examples.ts";
 import { describeGraph, generateLayoutInit } from "./graph-gen.ts";
 import { loadWasmLayout, type WasmLayout } from "./wasm-backend.ts";
+
+import type { LayoutInit } from "#lib/layout-types";
 
 const DEFAULT_SIZES = [200, 1_000, 3_000, 6_000];
 
@@ -32,7 +33,7 @@ function parseSizes(arg: string | undefined): number[] {
 }
 
 /**
- * Cheap sanity gate so a "fast" backend that produces garbage can't look
+ * Cheap sanity gate so a "fast" change that produces garbage can't look
  * like a win: every coordinate must be finite and the cloud must have
  * actually spread out (not collapsed to a point).
  */
@@ -63,10 +64,6 @@ function assertSanePositions(positions: Float32Array, nodeCount: number, label: 
   const spread = Math.max(maxX - minX, maxY - minY);
 
   if (spread < 1) throw new Error(`${label}: positions collapsed (spread ${spread.toFixed(3)})`);
-}
-
-async function runJs(init: LayoutInit): Promise<Float32Array> {
-  return runLayoutCore(init, { yieldBetweenBatches: false });
 }
 
 /**
@@ -160,56 +157,37 @@ function buildCases(arg: string | undefined): Case[] {
   }));
 }
 
-async function smoke(cases: Case[], wasm: WasmLayout | null): Promise<void> {
-  // `BENCH_WASM_ONLY=1` skips the (slow) JS baseline — for quick WASM-only
-  // probing (per-phase profiling, approximation sweeps).
-  const wasmOnly = process.env["BENCH_WASM_ONLY"] === "1";
-
+function smoke(cases: Case[], wasm: WasmLayout): void {
   for (const { label, init } of cases) {
     const n = init.nodeCount;
 
     console.info(`\n${label}`);
 
-    let jsMs = NaN;
+    const t1 = performance.now();
+    const wasmPos = wasm.run(init);
+    const wasmMs = performance.now() - t1;
 
-    if (!wasmOnly) {
-      const t0 = performance.now();
-      const jsPos = await runJs(init);
+    assertSanePositions(wasmPos, n, `WASM@${label}`);
 
-      jsMs = performance.now() - t0;
-      assertSanePositions(jsPos, n, `JS@${label}`);
-      console.info(`  JS    ${jsMs.toFixed(1).padStart(9)} ms`);
-    }
+    const sep = clusterSeparation(wasmPos, init.communities);
 
-    if (wasm) {
-      const t1 = performance.now();
-      const wasmPos = wasm.run(init);
-      const wasmMs = performance.now() - t1;
-
-      assertSanePositions(wasmPos, n, `WASM@${label}`);
-
-      const sep = clusterSeparation(wasmPos, init.communities);
-      const vs = Number.isFinite(jsMs) ? `   (${(jsMs / wasmMs).toFixed(2)}× vs JS)` : "";
-
-      console.info(
-        `  WASM  ${wasmMs.toFixed(1).padStart(9)} ms${vs}   cluster-sep ${sep.toFixed(2)}`,
-      );
-    }
+    console.info(`  WASM  ${wasmMs.toFixed(1).padStart(9)} ms   cluster-sep ${sep.toFixed(2)}`);
   }
 }
 
 async function main(): Promise<void> {
   const arg = process.argv[2];
-  // The WASM backend is optional: until `pnpm build:wasm` has produced the
-  // pkg, this resolves to null and the bench just reports the JS baseline.
   const wasm = await loadWasmLayout();
 
   if (!wasm) {
-    console.info("[bench] WASM backend not built — JS baseline only. Run `pnpm build:wasm`.\n");
+    console.error("[bench] WASM backend not built. Run `pnpm build:wasm` first.");
+    process.exitCode = 1;
+
+    return;
   }
 
   if (arg === "smoke") {
-    await smoke(buildCases(process.argv[3]), wasm);
+    smoke(buildCases(process.argv[3]), wasm);
 
     return;
   }
@@ -217,15 +195,9 @@ async function main(): Promise<void> {
   for (const { label, init } of buildCases(arg)) {
     group(label, () => {
       summary(() => {
-        bench("JS  ", async () => {
-          await runJs(init);
+        bench("WASM", () => {
+          wasm.run(init);
         });
-
-        if (wasm) {
-          bench("WASM", () => {
-            wasm.run(init);
-          });
-        }
       });
     });
   }

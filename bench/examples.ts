@@ -22,7 +22,7 @@ import { parseGraphJson } from "#lib/parser";
 
 import { DEFAULT_LAYOUT_PARAMS } from "./graph-gen.ts";
 
-import type { LayoutInit } from "#lib/layout-core";
+import type { LayoutInit } from "#lib/layout-types";
 
 /** Mirror of `analyze.worker`'s Louvain run (resolution 1 = the default). */
 function detectCommunities(nodeCount: number, edges: Int32Array): Int32Array {
