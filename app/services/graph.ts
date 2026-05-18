@@ -22,6 +22,14 @@ const DB_VERSION = 1;
  */
 export default class GraphService extends Service {
   @tracked current: LoadedGraph | null = null;
+  /**
+   * The raw JSON text the current graph was parsed from. Retained (not
+   * just persisted to IDB) because the resident WASM session re-parses it
+   * once in Rust — the Rust parser is a faithful port of the JS one, so
+   * both produce identically-ordered node indices and the session's
+   * communities/positions line up 1:1 with `current.ids`.
+   */
+  @tracked currentText: string | null = null;
   @tracked fileName: string | null = null;
   /**
    * True while we're attempting to read a previously-stored graph from
@@ -64,6 +72,7 @@ export default class GraphService extends Service {
   async load(g: LoadedGraph, source?: { text: string; name: string }): Promise<void> {
     this.#userLoadSeen = true;
     this.current = g;
+    this.currentText = source?.text ?? null;
     this.fileName = source?.name ?? null;
 
     if (!source) return;
@@ -84,6 +93,7 @@ export default class GraphService extends Service {
   async clear(): Promise<void> {
     this.#userLoadSeen = true;
     this.current = null;
+    this.currentText = null;
     this.fileName = null;
 
     try {
@@ -125,6 +135,7 @@ export default class GraphService extends Service {
 
         if (!this.#userLoadSeen) {
           this.current = parsed;
+          this.currentText = text;
           this.fileName = name ?? null;
         }
       }

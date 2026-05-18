@@ -1,5 +1,3 @@
-import Graph from "graphology";
-
 import { type InputGraph, SchemaError, validate } from "./schema.ts";
 
 import type { LoadedGraph } from "./types.ts";
@@ -8,8 +6,7 @@ import type { LoadedGraph } from "./types.ts";
  * Parse the user's JSON text into the internal LoadedGraph form. Throws
  * SchemaError on malformed input. Edges referencing unknown ids are dropped
  * with a console warning; duplicate (from, to) pairs are collapsed (first
- * one wins for edgeType assignment, since the underlying graphology is
- * non-multi).
+ * one wins for edgeType assignment).
  */
 export function parseGraphJson(text: string): LoadedGraph {
   let parsed: unknown;
@@ -139,18 +136,6 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
   const edgesFlat = Int32Array.from(flat);
   const edgeTypeIds = Int32Array.from(edgeTypeIdList);
 
-  // Build graphology instance (used by Louvain in the analyze worker).
-  const graph = new Graph({ type: "directed", multi: false, allowSelfLoops: false });
-
-  for (let i = 0; i < N; i++) graph.addNode(i);
-
-  for (let i = 0; i < edgesFlat.length; i += 2) {
-    const a = edgesFlat[i]!;
-    const b = edgesFlat[i + 1]!;
-
-    graph.addEdge(a, b);
-  }
-
   // Per-node degrees for sizing.
   const outDegree = new Int32Array(N);
   const inDegree = new Int32Array(N);
@@ -166,7 +151,6 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
     metas,
     idToIndex,
     edgesFlat,
-    graph,
     outDegree,
     inDegree,
     edgeTypeNames,
