@@ -20,10 +20,14 @@ module("Integration | app shell + analyze screen", function (hooks) {
     assert
       .dom("a.app-header__analyze")
       .exists("header has a link to the file/analyze screen")
-      .hasText("Analyze JSON");
+      .hasText("select new analysis");
     assert
       .dom("a.app-header__analyze")
       .hasAttribute("href", "/analyze", "it points at the dedicated /analyze URL");
+
+    // The wordmark is no longer a link.
+    assert.dom(".app-header__brand").exists().hasText("Graph Visualizer");
+    assert.dom("a.app-header__brand").doesNotExist("brand is not a link anymore");
   });
 
   test("the analyze screen renders the file picker", async function (assert) {

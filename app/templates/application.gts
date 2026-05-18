@@ -6,9 +6,9 @@ import { cleanupSSRContent } from "vite-ember-ssr/client";
   {{cleanupSSRContent}}
   <div class="app-shell">
     <header class="app-header">
-      <LinkTo @route="index" class="app-header__brand">Graph Visualizer</LinkTo>
+      <LinkTo @route="analyze" class="app-header__analyze">select new analysis</LinkTo>
+      <span class="app-header__brand">Graph Visualizer</span>
       <nav class="app-header__nav">
-        <LinkTo @route="analyze" class="app-header__analyze">Analyze JSON</LinkTo>
         <a
           href="https://github.com/NullVoxPopuli/graph-visualizer"
           target="_blank"
