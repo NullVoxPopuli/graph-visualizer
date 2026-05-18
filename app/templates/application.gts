@@ -2,8 +2,11 @@ import { LinkTo } from "@ember/routing";
 
 import { cleanupSSRContent } from "vite-ember-ssr/client";
 
+import DocumentDrop from "#components/document-drop";
+
 <template>
   {{cleanupSSRContent}}
+  <DocumentDrop />
   <div class="app-shell">
     <header class="app-header">
       <LinkTo @route="analyze" class="app-header__analyze">select new analysis</LinkTo>
