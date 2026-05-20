@@ -154,11 +154,7 @@ const sessionEngine = {
    * regression where the contracted graph has a 92-package SCC but
    * Johnson's only saw 30 intra-package raw cycles.
    */
-  rawCycles(
-    hiddenEdgeTypeIds: Int32Array,
-    nodeRemap: Int32Array,
-    maxCycles: number,
-  ): Int32Array {
+  rawCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array, maxCycles: number): Int32Array {
     return activeSession().raw_cycles(hiddenEdgeTypeIds, nodeRemap, maxCycles);
   },
 

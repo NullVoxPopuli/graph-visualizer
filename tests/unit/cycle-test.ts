@@ -49,7 +49,11 @@ module("Unit | lib/cycle | bundling through a hidden node type", () => {
     const cycle = bundled[0]!;
     const ids = cycle.bundled.toSorted((x, y) => x - y);
 
-    assert.deepEqual(ids, [a, d].toSorted((x, y) => x - y), "cycle bridges packages a and d");
+    assert.deepEqual(
+      ids,
+      [a, d].toSorted((x, y) => x - y),
+      "cycle bridges packages a and d",
+    );
   });
 });
 

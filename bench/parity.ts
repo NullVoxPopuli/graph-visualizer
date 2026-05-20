@@ -45,11 +45,7 @@ interface RustSession {
   communities(): Int32Array;
   radii(): Float32Array;
   has_any_cycle(hiddenEdgeTypeIds: Int32Array): boolean;
-  raw_cycles(
-    hiddenEdgeTypeIds: Int32Array,
-    nodeRemap: Int32Array,
-    maxCycles: number,
-  ): Int32Array;
+  raw_cycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array, maxCycles: number): Int32Array;
   has_any_orphan(hiddenEdgeTypeIds: Int32Array): boolean;
   find_orphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Int32Array;
   free(): void;

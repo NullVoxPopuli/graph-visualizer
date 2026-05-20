@@ -294,6 +294,20 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * When on, hide every visible node that doesn't sit on at least one
+   * cycle (computed against the current contraction). Lets the user
+   * zoom in on the cyclic structure of a graph without manually
+   * grooming the hidden-id list. Off by default; only the on state is
+   * encoded in the URL.
+   */
+  get cyclesOnly(): boolean {
+    return this.#qps["cyclesOnly"] === "1";
+  }
+  set cyclesOnly(v: boolean) {
+    this.#setParam("cyclesOnly", v ? "1" : null);
+  }
+
+  /**
    * Whether to draw the directional arrowhead at the source end of each
    * edge (the node that listed the edge in its outgoing list). On by
    * default — the URL only encodes the off state.

@@ -11,11 +11,7 @@ import Flatbush from "flatbush";
 import { Camera } from "#lib/camera";
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
-import {
-  bundleAlreadyContractedCycles,
-  bundleRawCyclesWithGroups,
-  MAX_CYCLES,
-} from "#lib/cycle";
+import { bundleAlreadyContractedCycles, bundleRawCyclesWithGroups, MAX_CYCLES } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { RenderProxy } from "#lib/render-proxy";
@@ -102,6 +98,16 @@ export default class Visualizer extends Component {
   private lastShowEdges = true;
   private lastShowHulls = false;
   private lastShowArrows = true;
+  private lastCyclesOnly = false;
+  /** Identity of the raw-cycle promise's resolved value the last time
+   *  the cyclesOnly watcher ran. We track `#rawCycles` (not
+   *  `#allCycles`) because that's the field the rawPromise callback
+   *  actually writes — `#allCycles` only gets filled later, inside
+   *  `repackCycle`, which is what the watcher is supposed to
+   *  *trigger*. Watching `#rawCycles` lets us notice "the Rust
+   *  enumeration just resolved" without depending on the very pass
+   *  that consumes the result. */
+  private lastRawCyclesForFilter: number[][] | null = null;
   private lastHiddenKey = "";
   private lastHiddenNodeKey = "";
   private lastHiddenNodeIdsKey = "";
@@ -130,8 +136,23 @@ export default class Visualizer extends Component {
    * nodes map to themselves; hidden nodes map to their nearest visible
    * predecessor (propagated through chains of hidden nodes), or `-1` if
    * unreachable from any visible node. `null` when nothing is hidden.
+   *
+   * This is the *base* remap — it reflects the user's hidden-type /
+   * collapsed / glob filters but never the `cyclesOnly` filter, so the
+   * cycle enumeration (which keys its cache on this remap) doesn't
+   * chase its own tail when `cyclesOnly` is on.
    */
   private nodeRemap: Int32Array | null = null;
+
+  /**
+   * Per-node "is this node in at least one cycle?" mask. Built from the
+   * bundled cycle list in `repackCycle` (so it reflects whatever
+   * contraction is currently active). `null` when `cyclesOnly` is off
+   * OR the cycle list hasn't resolved yet — both packing helpers treat
+   * `null` as "no cycle filter, draw everything". Once the list lands,
+   * the next frame rebuilds it and the off-cycle nodes vanish.
+   */
+  private cycleMembersMask: Uint8Array | null = null;
 
   // Whole-graph elementary-cycle enumeration runs once in the resident
   // Rust session (service-memoized by graph). `#rawCycles` holds that
@@ -367,6 +388,27 @@ export default class Visualizer extends Component {
       this.dirty = true;
     }
 
+    // The `cyclesOnly` toggle plus the raw-cycle promise's resolved
+    // value together drive a synthetic "needs repack" signal — the
+    // toggle flipping flushes everything, and the cycle promise
+    // resolving (which is async) flushes again so non-cycle nodes
+    // vanish the frame after the enumeration lands. `repackCycle`
+    // rebuilds the membership mask in-place, so we just need to
+    // re-run the dependent packs.
+    const cyclesOnly = vs.cyclesOnly;
+    const rawForFilter = cyclesOnly ? this.#rawCycles : null;
+
+    if (cyclesOnly !== this.lastCyclesOnly || rawForFilter !== this.lastRawCyclesForFilter) {
+      this.lastCyclesOnly = cyclesOnly;
+      this.lastRawCyclesForFilter = rawForFilter;
+      this.repackCycle(scene);
+      this.repackNodes(scene);
+      this.repackEdges(scene);
+      this.repackArrows(scene);
+      this.pickerDirty = true;
+      this.dirty = true;
+    }
+
     if (hiddenKey !== this.lastHiddenKey) {
       this.lastHiddenKey = hiddenKey;
       this.repackEdges(scene);
@@ -443,15 +485,7 @@ export default class Visualizer extends Component {
     if (!this.renderer) return;
 
     const selected = this.selectedIdx;
-
-    if (selected < 0) {
-      this.cycleMask = null;
-      this.dimMask = null;
-      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
-
-      return;
-    }
-
+    const cyclesOnly = this.viewState.cyclesOnly;
     const N = scene.communities.length;
 
     // Elementary cycles come from the resident Rust session (the
@@ -465,6 +499,11 @@ export default class Visualizer extends Component {
     // real package-level cycles through the selected node. Fetch is
     // async; attach once per (graph, remap), store the resolved list,
     // and ask the loop to repack when it lands.
+    //
+    // Run the fetch even when nothing is selected so the
+    // cycle-membership mask used by the `cyclesOnly` filter is
+    // available — the user can flip "cycles only" with no selection
+    // and we still need to know which nodes are in cycles.
     const rawPromise = this.visualizer.cycleRaw(NO_HIDDEN, this.nodeRemap, MAX_CYCLES);
 
     if (rawPromise !== this.#rawPromise) {
@@ -485,7 +524,12 @@ export default class Visualizer extends Component {
 
     if (this.#rawCycles === null) {
       this.cycleMask = null;
-      this.dimMask = null;
+      this.cycleMembersMask = null;
+
+      if (selected < 0) {
+        this.dimMask = null;
+      }
+
       this.renderer.uploadCycleEdges(new Float32Array(0), 0);
 
       return;
@@ -509,6 +553,37 @@ export default class Visualizer extends Component {
       ).map((b) => b.bundled);
       this.#allCyclesGraph = scene.graph;
       this.#allCyclesRemap = this.nodeRemap;
+      // The "is this node in any cycle" mask is derived from the same
+      // bundled list, so invalidate it whenever the list changes. The
+      // packing helpers read it via `effectiveHideMask` /
+      // `effectiveNodeRemap`, so they'll pick the new mask up the next
+      // time they're called this frame.
+      this.cycleMembersMask = null;
+    }
+
+    // Build the membership mask lazily — we only need it when the
+    // `cyclesOnly` toggle is on AND the bundled cycle list is ready.
+    if (cyclesOnly && this.cycleMembersMask === null) {
+      const mask = new Uint8Array(N);
+
+      for (const cycle of this.#allCycles) {
+        for (const idx of cycle) mask[idx] = 1;
+      }
+
+      this.cycleMembersMask = mask;
+    } else if (!cyclesOnly) {
+      this.cycleMembersMask = null;
+    }
+
+    // The selection-driven red rings and red edges only apply when a
+    // node is actually selected. The membership mask above is set
+    // regardless of selection because `cyclesOnly` needs it.
+    if (selected < 0) {
+      this.cycleMask = null;
+      this.dimMask = null;
+      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
+
+      return;
     }
 
     const cycles = this.#allCycles.filter((c) => c.includes(selected));
@@ -655,11 +730,58 @@ export default class Visualizer extends Component {
       this.selectedIdx,
       this.hoveredIdx,
       this.dimMask,
-      this.hideNodeMask,
+      this.effectiveHideMask(scene.communities.length),
       this.cycleMask,
       this.nodeInstanceBuf,
     );
     this.renderer.uploadNodeInstances(this.nodeInstanceBuf, scene.communities.length);
+  }
+
+  /**
+   * The hide mask the packing/picking pass should actually use. Folds
+   * the user's hidden-type/glob/etc. mask together with the
+   * `cyclesOnly` filter so a non-cycle node disappears with the same
+   * alpha-zero treatment as a type-hidden one. Returns the base mask
+   * (or `null`) untouched when `cyclesOnly` is off or its membership
+   * mask isn't built yet.
+   */
+  private effectiveHideMask(N: number): Uint8Array | null {
+    const cyc = this.cycleMembersMask;
+    const base = this.hideNodeMask;
+
+    if (cyc === null) return base;
+
+    const out = new Uint8Array(N);
+
+    for (let i = 0; i < N; i++) {
+      out[i] = base !== null && base[i] === 1 ? 1 : cyc[i] === 1 ? 0 : 1;
+    }
+
+    return out;
+  }
+
+  /**
+   * The remap edges/arrows should follow. Same as `nodeRemap` until
+   * `cyclesOnly` kicks in, at which point every remap target whose
+   * cycle-membership flag is 0 collapses to `-1`. Edges to/from
+   * non-cycle representatives then drop out of `packEdges` via the
+   * existing `-1` handling.
+   */
+  private effectiveNodeRemap(N: number): Int32Array | null {
+    const cyc = this.cycleMembersMask;
+
+    if (cyc === null) return this.nodeRemap;
+
+    const base = this.nodeRemap;
+    const out = new Int32Array(N);
+
+    for (let i = 0; i < N; i++) {
+      const r = base !== null ? base[i]! : i;
+
+      out[i] = r >= 0 && cyc[r] === 1 ? r : -1;
+    }
+
+    return out;
   }
 
   /**
@@ -683,9 +805,12 @@ export default class Visualizer extends Component {
       return;
     }
 
-    // Off-thread when there's no contraction: the worker owns the scene
-    // copy and the incidence index, returns a transferable buffer.
-    if (this.#packEngine && this.nodeRemap === null && this.#packSceneGraph === scene.graph) {
+    const effRemap = this.effectiveNodeRemap(scene.communities.length);
+
+    // Off-thread when there's no contraction (incl. no cycles-only
+    // filter): the worker owns the scene copy and the incidence index,
+    // returns a transferable buffer.
+    if (this.#packEngine && effRemap === null && this.#packSceneGraph === scene.graph) {
       const seq = ++this.#packEdgeSeq;
       const hidden = Array.from(this.viewState.hiddenEdgeTypes);
 
@@ -709,9 +834,9 @@ export default class Visualizer extends Component {
       this.edgeBuf,
       scene.graph.edgeTypeIds,
       this.viewState.hiddenEdgeTypes,
-      this.nodeRemap,
+      effRemap,
       restrict,
-      restrict >= 0 ? this.incidentEdges(scene, restrict) : null,
+      restrict >= 0 && effRemap === null ? this.incidentEdges(scene, restrict) : null,
     );
 
     this.edgeBuf = buffer;
@@ -735,7 +860,9 @@ export default class Visualizer extends Component {
       return;
     }
 
-    if (this.#packEngine && this.nodeRemap === null && this.#packSceneGraph === scene.graph) {
+    const effRemap = this.effectiveNodeRemap(scene.communities.length);
+
+    if (this.#packEngine && effRemap === null && this.#packSceneGraph === scene.graph) {
       const seq = ++this.#packArrowSeq;
       const hidden = Array.from(this.viewState.hiddenEdgeTypes);
 
@@ -760,9 +887,9 @@ export default class Visualizer extends Component {
       this.arrowBuf,
       scene.graph.edgeTypeIds,
       this.viewState.hiddenEdgeTypes,
-      this.nodeRemap,
+      effRemap,
       restrict,
-      restrict >= 0 ? this.incidentEdges(scene, restrict) : null,
+      restrict >= 0 && effRemap === null ? this.incidentEdges(scene, restrict) : null,
     );
 
     this.arrowBuf = buffer;
@@ -904,9 +1031,12 @@ export default class Visualizer extends Component {
     let bestDist = Infinity;
 
     const radii = this.effectiveRadii ?? scene.radii;
+    // Use the effective mask so picks ignore nodes that the `cyclesOnly`
+    // filter hid even though `hideNodeMask` itself doesn't include them.
+    const hide = this.effectiveHideMask(scene.communities.length);
 
     for (const c of candidates) {
-      if (this.hideNodeMask !== null && this.hideNodeMask[c] === 1) continue;
+      if (hide !== null && hide[c] === 1) continue;
 
       const x = scene.positions[2 * c]!;
       const y = scene.positions[2 * c + 1]!;

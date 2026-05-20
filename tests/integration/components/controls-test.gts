@@ -108,6 +108,46 @@ module("Integration | controls", function (hooks) {
     assert.dom(".controls__glob").doesNotExist();
   });
 
+  test("`cycles only` checkbox round-trips through viewState.cyclesOnly", async function (assert) {
+    loadGraph(this.owner, {
+      nodes: [
+        { id: "a", edges: ["b"] },
+        { id: "b", edges: ["a"] },
+      ],
+    });
+
+    await render(<template><Controls @onResetView={{NOOP}} /></template>);
+
+    const findCheckbox = (label: string): HTMLInputElement => {
+      const lbl = Array.from(document.querySelectorAll("label")).find((el) =>
+        (el.textContent ?? "").trim().startsWith(label),
+      );
+
+      if (!lbl) throw new Error(`no "${label}" checkbox label`);
+
+      const input = lbl.querySelector('input[type="checkbox"]');
+
+      if (!input) throw new Error(`"${label}" label has no checkbox`);
+
+      return input as HTMLInputElement;
+    };
+
+    const cb = findCheckbox("cycles only");
+
+    assert.false(cb.checked, "off by default");
+    assert.false(viewState(this.owner).cyclesOnly, "view-state agrees");
+
+    await click(cb);
+
+    assert.true(cb.checked, "click flips checkbox");
+    assert.true(viewState(this.owner).cyclesOnly, "click writes through to view-state");
+
+    await click(cb);
+
+    assert.false(cb.checked, "second click flips back");
+    assert.false(viewState(this.owner).cyclesOnly, "view-state matches");
+  });
+
   test("the 'Show cycles' button appears only when the graph has cycles", async function (assert) {
     loadGraph(this.owner, {
       nodes: [{ id: "a", edges: ["b"] }, { id: "b" }],

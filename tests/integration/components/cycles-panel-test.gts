@@ -107,7 +107,9 @@ module("Integration | cycles-panel", function (hooks) {
     await render(<template><CyclesPanel /></template>);
     await waitFor(".cycles-panel__entry");
 
-    assert.dom(".cycles-panel__count").hasText("1", "the file cycle contracts to one package cycle");
+    assert
+      .dom(".cycles-panel__count")
+      .hasText("1", "the file cycle contracts to one package cycle");
 
     const labels = Array.from(document.querySelectorAll(".cycles-panel__node-label"))
       .map((el) => el.textContent?.trim() ?? "")

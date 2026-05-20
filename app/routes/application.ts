@@ -14,6 +14,7 @@ export default class ApplicationRoute extends Route {
     edges: { refreshModel: false },
     arrows: { refreshModel: false },
     hulls: { refreshModel: false },
+    cyclesOnly: { refreshModel: false },
     hiddenEdgeTypes: { refreshModel: false },
     hiddenNodeTypes: { refreshModel: false },
     hiddenNodes: { refreshModel: false },

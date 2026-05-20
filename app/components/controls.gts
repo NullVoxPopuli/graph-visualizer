@@ -149,6 +149,11 @@ export default class Controls extends Component<Signature> {
   }
 
   @action
+  toggleCyclesOnly(): void {
+    this.viewState.cyclesOnly = !this.viewState.cyclesOnly;
+  }
+
+  @action
   toggleEdgeType(id: number): void {
     this.viewState.toggleHiddenEdgeType(id);
   }
@@ -563,6 +568,16 @@ export default class Controls extends Component<Signature> {
               {{on "change" this.toggleClusterByLabel}}
             />
             cluster by label
+          </label>
+          <label
+            title="Hide every visible node that doesn't sit on at least one cycle. Lets you focus on the cyclic backbone of the graph without manually grooming filters."
+          >
+            <input
+              type="checkbox"
+              checked={{this.viewState.cyclesOnly}}
+              {{on "change" this.toggleCyclesOnly}}
+            />
+            cycles only
           </label>
         </div>
         {{#if this.nodeTypes.length}}
