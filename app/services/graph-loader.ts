@@ -1,5 +1,7 @@
 import Service, { service } from "@ember/service";
 
+import { viewQueryParamDefaults } from "#lib/view-defaults";
+
 import type RouterService from "@ember/routing/router-service";
 import type { ParsedInput } from "#components/file-drop";
 import type GraphService from "#services/graph";
@@ -24,6 +26,6 @@ export default class GraphLoaderService extends Service {
     // "didn't update".
     this.viewState.resetGraphSpecific();
     await this.graph.load(input.parsed, { text: input.text, name: input.name });
-    this.router.transitionTo("view");
+    this.router.transitionTo("view", { queryParams: viewQueryParamDefaults(input.parsed) });
   }
 }

@@ -3,6 +3,7 @@ dist/
 dist-*/
 .eslintcache
 .ssg-tmp/
+do-not-commit.json
 
 # Rust / wasm-pack build artifacts — regenerate with `pnpm build:wasm`
 crates/layout-wasm/target/

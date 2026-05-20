@@ -39,7 +39,31 @@ module("Integration | route:index", function (hooks) {
 
     await route.beforeModel();
 
-    assert.deepEqual(calls, [["view"]], "returning visitor goes straight to the visualizer");
+    assert.deepEqual(
+      calls,
+      [["view", { queryParams: {} }]],
+      "returning visitor goes straight to the visualizer; small graph keeps default QPs",
+    );
+  });
+
+  test("disables edges by default when the restored graph is large", async function (assert) {
+    const route = this.owner.lookup("route:index") as IndexRoute;
+    const graph = this.owner.lookup("service:graph") as GraphService;
+    const calls = stubReplaceWith(this.owner);
+
+    await graph.restored;
+    // 1001 nodes — one past the threshold — to drive the off-by-default branch.
+    const nodes = Array.from({ length: 1001 }, (_, i) => ({ id: `n${i}` }));
+
+    loadGraph(this.owner, { nodes });
+
+    await route.beforeModel();
+
+    assert.deepEqual(
+      calls,
+      [["view", { queryParams: { edges: "0" } }]],
+      "above the threshold the visualizer loads with edges turned off",
+    );
   });
 
   test("redirects to the analyze screen when nothing was restored", async function (assert) {

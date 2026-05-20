@@ -1,6 +1,8 @@
 import Route from "@ember/routing/route";
 import { service } from "@ember/service";
 
+import { viewQueryParamDefaults } from "#lib/view-defaults";
+
 import type RouterService from "@ember/routing/router-service";
 import type GraphService from "#services/graph";
 
@@ -22,6 +24,14 @@ export default class IndexRoute extends Route {
   async beforeModel(): Promise<void> {
     await this.graph.restored;
 
-    this.router.replaceWith(this.graph.current ? "view" : "analyze");
+    const restored = this.graph.current;
+
+    if (!restored) {
+      this.router.replaceWith("analyze");
+
+      return;
+    }
+
+    this.router.replaceWith("view", { queryParams: viewQueryParamDefaults(restored) });
   }
 }
