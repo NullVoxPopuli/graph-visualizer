@@ -133,15 +133,59 @@ module("Unit | lib/parser | parseGraphJson", () => {
     assert.strictEqual(g.edgesFlat[1], 1, "to = b");
   });
 
-  test("edges referencing unknown ids are dropped", (assert) => {
+  test('edges referencing unknown ids spawn synthetic "missing"-typed nodes', (assert) => {
     const g = parseSilently(
       JSON.stringify({
         nodes: [{ id: "a", edges: ["b", "ghost"] }, { id: "b" }],
       }),
     );
 
-    // Only a → b kept; a → ghost dropped.
-    assert.strictEqual(g.edgesFlat.length / 2, 1);
+    // Both edges survive — `ghost` got a placeholder node appended after
+    // the declared `a` and `b` (in input order).
+    assert.strictEqual(g.edgesFlat.length / 2, 2, "a→b and a→ghost both kept");
+    assert.strictEqual(g.ids.length, 3, "ghost added as a third node");
+
+    const ghostIdx = g.idToIndex.get("ghost");
+
+    assert.strictEqual(typeof ghostIdx, "number", "ghost is reachable via idToIndex");
+    assert.strictEqual(
+      g.labels[ghostIdx!],
+      "ghost",
+      "label defaults to the id when none was provided",
+    );
+
+    const missingTypeId = g.nodeTypeNames.indexOf("missing");
+
+    assert.ok(missingTypeId > 0, "the missing type was interned");
+    assert.strictEqual(
+      g.nodeTypeIds[ghostIdx!],
+      missingTypeId,
+      "the synthetic node's type is 'missing'",
+    );
+
+    // Real declared nodes keep their original (untyped) typing.
+    assert.strictEqual(g.nodeTypeIds[g.idToIndex.get("a")!], 0, "a stays untyped");
+    assert.strictEqual(g.nodeTypeIds[g.idToIndex.get("b")!], 0, "b stays untyped");
+  });
+
+  test("multiple edges pointing at the same unknown id share one placeholder node", (assert) => {
+    const g = parseSilently(
+      JSON.stringify({
+        nodes: [
+          { id: "a", edges: ["ghost"] },
+          { id: "b", edges: ["ghost"] },
+        ],
+      }),
+    );
+
+    // Both edges land on the same synthetic `ghost` node.
+    assert.strictEqual(g.ids.length, 3, "exactly one placeholder for the shared unknown id");
+    assert.strictEqual(g.edgesFlat.length / 2, 2, "both edges retained");
+
+    const ghostIdx = g.idToIndex.get("ghost")!;
+    const targets = [g.edgesFlat[1], g.edgesFlat[3]];
+
+    assert.deepEqual(targets, [ghostIdx, ghostIdx], "both edges target the shared placeholder");
   });
 
   test("duplicate (from, to) edge pairs are deduped (first edge-type wins)", (assert) => {
@@ -210,7 +254,10 @@ module("Unit | lib/parser | parseGraphJson", () => {
       }),
     );
 
-    assert.deepEqual(g.nodeTypeNames, ["", "file", "package"]);
+    // `missing` is pre-interned unconditionally — even when the graph
+    // never references an unknown id — so the type filter chip has a
+    // stable slot across loads.
+    assert.deepEqual(g.nodeTypeNames, ["", "file", "package", "missing"]);
     assert.strictEqual(g.nodeTypeIds[0], 1, "file");
     assert.strictEqual(g.nodeTypeIds[1], 2, "package");
     assert.strictEqual(g.nodeTypeIds[2], 1, "file again — same intern");

@@ -43,8 +43,11 @@ fn coerce_id(v: &serde_json::Value) -> Option<String> {
 }
 
 /// Port of `parseGraphJson` + `buildLoadedGraph` (schema validation is
-/// folded in as `Err` returns). Drops edges to unknown ids and
-/// self-loops; collapses duplicate (from,to) pairs (first edgeType wins).
+/// folded in as `Err` returns). Edges that target an id missing from
+/// the `nodes` list spawn a synthetic placeholder node with
+/// `type == "missing"` and `label == id`; the JS parser does the same.
+/// Self-loops are still dropped, and duplicate `(from, to)` pairs
+/// collapse (first edgeType wins).
 pub fn parse(json: &str) -> Result<ParsedGraph, String> {
     let root: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {e}"))?;
@@ -53,14 +56,14 @@ pub fn parse(json: &str) -> Result<ParsedGraph, String> {
         .and_then(|v| v.as_array())
         .ok_or_else(|| "Top-level `nodes` must be an array.".to_string())?;
 
-    let n = nodes.len();
-    let mut ids: Vec<String> = Vec::with_capacity(n);
-    let mut labels: Vec<String> = Vec::with_capacity(n);
-    let mut id_to_index: HashMap<String, i32> = HashMap::with_capacity(n);
+    let initial_n = nodes.len();
+    let mut ids: Vec<String> = Vec::with_capacity(initial_n);
+    let mut labels: Vec<String> = Vec::with_capacity(initial_n);
+    let mut id_to_index: HashMap<String, i32> = HashMap::with_capacity(initial_n);
 
     let mut node_type_names: Vec<String> = vec![String::new()];
     let mut node_type_index: HashMap<String, i32> = HashMap::from([(String::new(), 0)]);
-    let mut node_type_ids: Vec<i32> = Vec::with_capacity(n);
+    let mut node_type_ids: Vec<i32> = Vec::with_capacity(initial_n);
 
     for (i, node) in nodes.iter().enumerate() {
         let obj = node
@@ -90,9 +93,21 @@ pub fn parse(json: &str) -> Result<ParsedGraph, String> {
         node_type_ids.push(tid);
     }
 
+    // Pre-intern the synthetic `missing` type so it lands in
+    // `node_type_names` consistently even when the graph happens to
+    // declare zero of them — matches the JS parser's behavior.
+    let missing_type_id = *node_type_index
+        .entry("missing".to_string())
+        .or_insert_with(|| {
+            node_type_names.push("missing".to_string());
+            (node_type_names.len() - 1) as i32
+        });
+
     let mut edge_type_names: Vec<String> = vec![String::new()];
     let mut edge_type_index: HashMap<String, i32> = HashMap::from([(String::new(), 0)]);
 
+    // (from, to) dedupe — encode as `(i64 << 32) | j` so it stays
+    // unique regardless of how many synthetic nodes we end up appending.
     let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut flat: Vec<i32> = Vec::new();
     let mut edge_type_ids: Vec<i32> = Vec::new();
@@ -118,13 +133,23 @@ pub fn parse(json: &str) -> Result<ParsedGraph, String> {
                 }
                 _ => return Err(format!("nodes[{i}].edges[] has an invalid entry.")),
             };
-            let Some(&j) = id_to_index.get(&tid_str) else {
-                continue; // unknown id — dropped (JS warns)
+            // Unknown ids spawn a placeholder node on first sight; later
+            // edges to the same id reuse the same index. The synthetic
+            // node carries `type = "missing"` and `label = id`.
+            let j = if let Some(&existing) = id_to_index.get(&tid_str) {
+                existing
+            } else {
+                let idx = ids.len() as i32;
+                id_to_index.insert(tid_str.clone(), idx);
+                labels.push(tid_str.clone());
+                ids.push(tid_str.clone());
+                node_type_ids.push(missing_type_id);
+                idx
             };
             if j == i as i32 {
                 continue; // self-loop — dropped
             }
-            let key = i as i64 * n as i64 + j as i64;
+            let key = ((i as i64) << 32) | (j as i64);
             if !seen.insert(key) {
                 continue; // duplicate (from,to)
             }
@@ -140,8 +165,9 @@ pub fn parse(json: &str) -> Result<ParsedGraph, String> {
         }
     }
 
-    let mut in_degree = vec![0i32; n];
-    let mut out_degree = vec![0i32; n];
+    let final_n = ids.len();
+    let mut in_degree = vec![0i32; final_n];
+    let mut out_degree = vec![0i32; final_n];
     let mut k = 0;
     while k < flat.len() {
         out_degree[flat[k] as usize] += 1;

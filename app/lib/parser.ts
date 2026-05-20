@@ -4,9 +4,12 @@ import type { LoadedGraph } from "./types.ts";
 
 /**
  * Parse the user's JSON text into the internal LoadedGraph form. Throws
- * SchemaError on malformed input. Edges referencing unknown ids are dropped
- * with a console warning; duplicate (from, to) pairs are collapsed (first
- * one wins for edgeType assignment).
+ * SchemaError on malformed input. Edges that target an id missing from
+ * the `nodes` list don't get dropped — instead a synthetic node is
+ * created for each such id with `type === "missing"` and `label === id`,
+ * and the edge wires up to it. Self-loops are dropped (force layouts
+ * handle them poorly and they aren't visually useful), and duplicate
+ * `(from, to)` pairs collapse (first one wins for edgeType assignment).
  */
 export function parseGraphJson(text: string): LoadedGraph {
   let parsed: unknown;
@@ -20,11 +23,19 @@ export function parseGraphJson(text: string): LoadedGraph {
   return buildLoadedGraph(validate(parsed));
 }
 
+/** The node type assigned to auto-created placeholder nodes. Exposed as
+ *  a constant so consumers (style, type-filter chips, tests) can refer
+ *  to the same string without a magic literal. */
+export const MISSING_NODE_TYPE = "missing";
+
 function buildLoadedGraph(input: InputGraph): LoadedGraph {
-  const N = input.nodes.length;
-  const ids: string[] = new Array<string>(N);
-  const labels: string[] = new Array<string>(N);
-  const metas: unknown[] = new Array<unknown>(N);
+  // Real-node count is the initial high-water mark; synthetic "missing"
+  // nodes append after these. Using `let N` (not `const`) so the final
+  // size lands in one place — the per-node arrays push as we go.
+  const initialN = input.nodes.length;
+  const ids: string[] = [];
+  const labels: string[] = [];
+  const metas: unknown[] = [];
   const idToIndex = new Map<string, number>();
 
   // Node-type interning mirrors edge-type interning. Index 0 is the empty
@@ -43,9 +54,9 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
 
     return idx;
   };
-  const nodeTypeIdList: number[] = new Array<number>(N);
+  const nodeTypeIdList: number[] = [];
 
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < initialN; i++) {
     const n = input.nodes[i]!;
     const id = String(n.id);
 
@@ -54,11 +65,36 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
     }
 
     idToIndex.set(id, i);
-    ids[i] = id;
-    labels[i] = n.label ?? id;
-    metas[i] = n.meta;
-    nodeTypeIdList[i] = internNodeType(n.type ?? "");
+    ids.push(id);
+    labels.push(n.label ?? id);
+    metas.push(n.meta);
+    nodeTypeIdList.push(internNodeType(n.type ?? ""));
   }
+
+  // Pre-intern the `missing` type even if we don't end up using it — it
+  // makes the type-filter UI render the chip consistently across loads
+  // and keeps `nodeTypeNames`'s ordering predictable.
+  const missingTypeId = internNodeType(MISSING_NODE_TYPE);
+
+  // Synthesize a placeholder node for `id`. Same `idToIndex` slot every
+  // call, so re-using a missing id across many edges doesn't duplicate
+  // the synthetic node. The label intentionally equals the id — we have
+  // no better display string for a node we never saw declared.
+  const ensureNodeForMissingId = (id: string): number => {
+    const existing = idToIndex.get(id);
+
+    if (existing !== undefined) return existing;
+
+    const idx = ids.length;
+
+    idToIndex.set(id, idx);
+    ids.push(id);
+    labels.push(id);
+    metas.push(undefined);
+    nodeTypeIdList.push(missingTypeId);
+
+    return idx;
+  };
 
   // Edge-type interning. Index 0 is reserved for the empty (untyped) name —
   // bare-id edges hash there so the parallel `edgeTypeIds` array has the same
@@ -78,16 +114,20 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
     return idx;
   };
 
-  // Build flat edges with dedup. Use a Set keyed by (from * N + to) to drop
-  // duplicate pairs. Self-loops are dropped (force layouts handle them
-  // poorly and they aren't visually useful).
-  const seen = new Set<number>();
+  // Build flat edges with dedup. Self-loops still drop (force layouts
+  // handle them poorly), but unknown ids now spawn synthetic
+  // `missing`-typed nodes and the edge wires up to them. Dedupe key uses
+  // a string instead of a number because the final node count is no
+  // longer known up-front; encoding `(from, to)` as `${from}|${to}`
+  // costs a hair more per edge but stays correct for any size.
+  const seen = new Set<string>();
   const flat: number[] = [];
   const edgeTypeIdList: number[] = [];
-  let droppedUnknown = 0;
   let droppedSelf = 0;
+  let createdMissing = 0;
+  let edgesToMissing = 0;
 
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < initialN; i++) {
     const n = input.nodes[i]!;
 
     if (!n.edges) continue;
@@ -104,19 +144,18 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
         typeName = target.edgeType;
       }
 
-      const j = idToIndex.get(tid);
+      const before = ids.length;
+      const j = ensureNodeForMissingId(tid);
 
-      if (j === undefined) {
-        droppedUnknown++;
-        continue;
-      }
+      if (ids.length > before) createdMissing++;
+      if (j >= initialN) edgesToMissing++;
 
       if (j === i) {
         droppedSelf++;
         continue;
       }
 
-      const key = i * N + j;
+      const key = `${i}|${j}`;
 
       if (seen.has(key)) continue;
       seen.add(key);
@@ -125,14 +164,17 @@ function buildLoadedGraph(input: InputGraph): LoadedGraph {
     }
   }
 
-  if (droppedUnknown > 0) {
-    console.warn(`Dropped ${droppedUnknown} edge(s) referencing unknown node ids.`);
+  if (createdMissing > 0) {
+    console.warn(
+      `Created ${createdMissing} placeholder node(s) of type "${MISSING_NODE_TYPE}" for ${edgesToMissing} edge(s) referencing ids not in the input.`,
+    );
   }
 
   if (droppedSelf > 0) {
     console.warn(`Dropped ${droppedSelf} self-loop edge(s).`);
   }
 
+  const N = ids.length;
   const edgesFlat = Int32Array.from(flat);
   const edgeTypeIds = Int32Array.from(edgeTypeIdList);
 
