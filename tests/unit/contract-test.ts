@@ -114,6 +114,46 @@ module("Unit | lib/contract | buildContraction", () => {
     assert.strictEqual(c.hideMask[indexOf(g, "file1")], 0, "inverted-baseline file is now visible");
   });
 
+  test('hiding the "missing" type drops those nodes instead of folding them onto an owner', (assert) => {
+    // Two packages each reference the same unknown id `ghost`. The
+    // parser synthesizes one shared `ghost` node with type=missing.
+    // When `missing` is hidden by type, contracting `ghost` onto an
+    // arbitrary first-reaching owner would synthesize a cross-package
+    // edge pkgB → pkgA (or vice versa) that doesn't reflect any real
+    // coupling — so the contraction must drop the placeholder entirely
+    // (`remap === -1`), the same way explicit `hiddenNodeIds` work.
+    const g = makeGraph({
+      nodes: [
+        { id: "pkgA", type: "package", edges: ["ghost"] },
+        { id: "pkgB", type: "package", edges: ["ghost"] },
+      ],
+    });
+    const missingType = g.nodeTypeNames.indexOf("missing");
+
+    assert.ok(missingType > 0, "parser interned the missing type");
+
+    const c = expectContraction(
+      buildContraction(g, unitRadii(g), new Set([missingType]), new Set()),
+      assert,
+    );
+    const ghost = indexOf(g, "ghost");
+
+    assert.strictEqual(c.hideMask[ghost], 1, "ghost is hidden");
+    assert.strictEqual(c.nodeRemap[ghost], -1, "ghost drops — does not fold onto pkgA or pkgB");
+
+    // Both packages stay visible and remap to themselves.
+    const pkgA = indexOf(g, "pkgA");
+    const pkgB = indexOf(g, "pkgB");
+
+    assert.strictEqual(c.nodeRemap[pkgA], pkgA);
+    assert.strictEqual(c.nodeRemap[pkgB], pkgB);
+
+    // And — most importantly — the visible packages don't grow from
+    // absorbing the placeholder's area.
+    assert.strictEqual(c.effectiveRadii[pkgA], 1, "pkgA radius unchanged (no absorption)");
+    assert.strictEqual(c.effectiveRadii[pkgB], 1, "pkgB radius unchanged (no absorption)");
+  });
+
   test("absorbed radii grow the owner: total area is preserved", (assert) => {
     const g = makeGraph({
       nodes: [

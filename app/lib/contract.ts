@@ -1,3 +1,5 @@
+import { MISSING_NODE_TYPE } from "./parser.ts";
+
 import type { LoadedGraph } from "./types.ts";
 
 /**
@@ -58,6 +60,25 @@ export function buildContraction(
     const idx = idToIndex.get(id);
 
     if (idx !== undefined) idHidden[idx] = 1;
+  }
+
+  // Synthetic "missing" placeholder nodes — created by the parser to
+  // stand in for edge targets that aren't declared in `nodes` — also
+  // drop instead of fold when their type is hidden. Folding them would
+  // pick an arbitrary "first reaching" package as their owner and
+  // redirect every other incoming edge through that one node, which
+  // synthesizes cross-package edges (and therefore cycles) that don't
+  // reflect any real coupling — the placeholder doesn't belong to any
+  // package structurally, so attributing its inbound edges to one is
+  // misleading. Promoting them into `idHidden` here means edges
+  // touching them get dropped, matching how the user's explicit
+  // per-id hides behave.
+  const missingTypeId = graph.nodeTypeNames.indexOf(MISSING_NODE_TYPE);
+
+  if (missingTypeId >= 0 && hiddenTypes.has(missingTypeId)) {
+    for (let i = 0; i < N; i++) {
+      if (nodeTypeIds[i] === missingTypeId) idHidden[i] = 1;
+    }
   }
 
   // Direct outgoing targets of any node listed in `col` get their

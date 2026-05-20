@@ -524,7 +524,18 @@ export default class Visualizer extends Component {
 
     if (this.#rawCycles === null) {
       this.cycleMask = null;
-      this.cycleMembersMask = null;
+
+      // While the new cycle promise is in flight we *keep* the stale
+      // `cycleMembersMask` if cyclesOnly is on, so toggling a node
+      // type doesn't briefly reveal the whole graph before the new
+      // mask lands. The pack helpers read the mask via
+      // `effectiveHideMask` / `effectiveNodeRemap`; a one-frame stale
+      // membership shows mostly the right nodes (the indices haven't
+      // changed; what shifts is which packages are in the new bundled
+      // cycle list), and the next frame replaces it with the fresh
+      // mask. Clearing it here instead caused the cycles-only filter
+      // to switch off mid-toggle and flash everything visible.
+      if (!cyclesOnly) this.cycleMembersMask = null;
 
       if (selected < 0) {
         this.dimMask = null;
@@ -797,6 +808,13 @@ export default class Visualizer extends Component {
   private repackEdges(scene: ProcessedScene): void {
     if (!this.renderer) return;
 
+    // Bump the seq up-front, before picking inline vs off-thread, so any
+    // off-thread response from the *previous* repack — possibly still in
+    // flight on the worker — fails its seq check and never lands. Without
+    // this, toggling between contracted and uncontracted state can cause
+    // a one-frame flash of the old buffer: the inline path uploads fresh
+    // data, then the late off-thread response overwrites it with stale.
+    const seq = ++this.#packEdgeSeq;
     const restrict = this.edgeRestriction();
 
     if (!this.viewState.showEdges && restrict < 0) {
@@ -811,7 +829,6 @@ export default class Visualizer extends Component {
     // filter): the worker owns the scene copy and the incidence index,
     // returns a transferable buffer.
     if (this.#packEngine && effRemap === null && this.#packSceneGraph === scene.graph) {
-      const seq = ++this.#packEdgeSeq;
       const hidden = Array.from(this.viewState.hiddenEdgeTypes);
 
       void this.#packEngine.packEdges(hidden, restrict).then((res) => {
@@ -846,6 +863,12 @@ export default class Visualizer extends Component {
   private repackArrows(scene: ProcessedScene): void {
     if (!this.renderer) return;
 
+    // See `repackEdges` for why we bump the seq up-front: a previous
+    // off-thread response that lands after we switch paths would
+    // otherwise clobber the fresh inline upload and flash the old
+    // arrows for a frame.
+    const seq = ++this.#packArrowSeq;
+
     if (!this.viewState.showArrows) {
       this.renderer.uploadArrows(new Float32Array(0), 0);
 
@@ -863,7 +886,6 @@ export default class Visualizer extends Component {
     const effRemap = this.effectiveNodeRemap(scene.communities.length);
 
     if (this.#packEngine && effRemap === null && this.#packSceneGraph === scene.graph) {
-      const seq = ++this.#packArrowSeq;
       const hidden = Array.from(this.viewState.hiddenEdgeTypes);
 
       void this.#packEngine.packArrows(hidden, restrict).then((res) => {
