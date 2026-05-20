@@ -81,6 +81,41 @@ module("Integration | cycles-panel", function (hooks) {
       .exists("raw-file line renders under bundled steps when files fold into packages");
   });
 
+  test("file-only cycle that bridges two packages surfaces as a package cycle when files are hidden", async function (assert) {
+    // Packages do not appear in any raw cycle directly — the only
+    // elementary cycle is b → c → e → b among files. The expected
+    // behavior is: hiding the file type folds b/c onto package a and
+    // e onto package d, and the cycle still surfaces as a package-level
+    // pair {a, d}. This has regressed before; keep the assertion at
+    // the integration layer so the whole Rust + JS pipeline is on the
+    // hook for it.
+    const g = loadGraph(this.owner, {
+      nodes: [
+        { id: "a", type: "package", edges: ["b", "c"] },
+        { id: "d", type: "package", edges: ["e", "f"] },
+        { id: "b", type: "file", edges: ["c"] },
+        { id: "c", type: "file", edges: ["e"] },
+        { id: "e", type: "file", edges: ["b"] },
+        { id: "f", type: "file" },
+      ],
+    });
+    const fileType = g.nodeTypeNames.indexOf("file");
+
+    viewState(this.owner).toggleHiddenNodeType(fileType);
+    viewState(this.owner).cyclesPanelOpen = true;
+
+    await render(<template><CyclesPanel /></template>);
+    await waitFor(".cycles-panel__entry");
+
+    assert.dom(".cycles-panel__count").hasText("1", "the file cycle contracts to one package cycle");
+
+    const labels = Array.from(document.querySelectorAll(".cycles-panel__node-label"))
+      .map((el) => el.textContent?.trim() ?? "")
+      .toSorted();
+
+    assert.deepEqual(labels, ["a", "d"], "bundled cycle's nodes are exactly the two packages");
+  });
+
   test("glob exclude filter hides nodes from the cycles list", async function (assert) {
     loadGraph(this.owner, {
       // Two independent 2-cycles. Excluding `b/*` drops `b/1` so only

@@ -52,6 +52,7 @@ module("Integration | route:index", function (hooks) {
     const calls = stubReplaceWith(this.owner);
 
     await graph.restored;
+
     // 1001 nodes — one past the threshold — to drive the off-by-default branch.
     const nodes = Array.from({ length: 1001 }, (_, i) => ({ id: `n${i}` }));
 

@@ -11,7 +11,11 @@ import Flatbush from "flatbush";
 import { Camera } from "#lib/camera";
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
-import { bundleRawCyclesWithGroups } from "#lib/cycle";
+import {
+  bundleAlreadyContractedCycles,
+  bundleRawCyclesWithGroups,
+  MAX_CYCLES,
+} from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { RenderProxy } from "#lib/render-proxy";
@@ -450,12 +454,18 @@ export default class Visualizer extends Component {
 
     const N = scene.communities.length;
 
-    // Raw elementary cycles come from the resident Rust session (the
-    // exponential enumeration, run once, service-memoized by graph).
-    // Fetch is async; attach once per graph (new graph → new promise),
-    // store the resolved list, and ask the loop to repack when it
-    // lands. Until then render no rings — they appear a frame later.
-    const rawPromise = this.visualizer.cycleRaw(NO_HIDDEN, 1000);
+    // Elementary cycles come from the resident Rust session (the
+    // exponential enumeration, run once, service-memoized per remap +
+    // edge-type filter). Pass the current node remap so the renderer's
+    // bundled-cycle list matches what the cycles panel and info panel
+    // see — without that, the canvas runs on the raw (file-level) CSR,
+    // and on graphs whose raw cycles all live inside one package every
+    // cycle bundles to a self-loop and disappears: the red rings + red
+    // edges silently stop being drawn even though there are dozens of
+    // real package-level cycles through the selected node. Fetch is
+    // async; attach once per (graph, remap), store the resolved list,
+    // and ask the loop to repack when it lands.
+    const rawPromise = this.visualizer.cycleRaw(NO_HIDDEN, this.nodeRemap, MAX_CYCLES);
 
     if (rawPromise !== this.#rawPromise) {
       this.#rawPromise = rawPromise;
@@ -481,18 +491,22 @@ export default class Visualizer extends Component {
       return;
     }
 
-    // Contract through the collapse remap (cheap, sync). `.bundled` is
-    // the same deduped contracted sequence the old `bundleRawCycles`
-    // produced. Memoized by graph + remap — not selection — so a click
-    // only re-filters the cached array.
+    // When Rust enumerated on the contracted CSR (`nodeRemap` non-null)
+    // the returned cycles are already bundled — `bundleAlreadyContracted-
+    // Cycles` just dedupes by visual key. When there's no contraction
+    // the legacy bundle pass (raw → bundled with groups) handles it.
+    // Memoized by graph + remap — not selection — so a click only
+    // re-filters the cached array.
     if (
       this.#allCycles === null ||
       this.#allCyclesGraph !== scene.graph ||
       this.#allCyclesRemap !== this.nodeRemap
     ) {
-      this.#allCycles = bundleRawCyclesWithGroups(this.#rawCycles, this.nodeRemap).map(
-        (b) => b.bundled,
-      );
+      this.#allCycles = (
+        this.nodeRemap
+          ? bundleAlreadyContractedCycles(scene.graph, this.nodeRemap, this.#rawCycles)
+          : bundleRawCyclesWithGroups(this.#rawCycles, null)
+      ).map((b) => b.bundled);
       this.#allCyclesGraph = scene.graph;
       this.#allCyclesRemap = this.nodeRemap;
     }

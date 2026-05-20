@@ -1,3 +1,17 @@
+import type { LoadedGraph } from "./types.ts";
+
+/**
+ * Cap on raw cycles Rust returns per enumeration. Johnson's elementary
+ * cycle enumeration is exponential worst-case, and on dense contracted
+ * SCCs the count explodes (do-not-commit.json's 92-package SCC has
+ * thousands of visually-distinct elementary cycles). The cap lives in
+ * one place so the cycles-panel and info-panel ask for the same budget
+ * and so it's easy to tune: bumped from 1000 to 5000 once parallel-edge
+ * dedupe and JS visual-key dedupe made each emitted cycle pull its
+ * weight instead of being a near-duplicate.
+ */
+export const MAX_CYCLES = 5000;
+
 /**
  * Cheap cycle *presentation* helpers.
  *
@@ -102,7 +116,7 @@ export function canonicalCycleKey(cycle: number[]): string {
  * because everything between them is hidden behind the
  * "N hidden — click to expand" marker anyway.
  */
-function visualCycleKey(cycle: number[]): string {
+export function visualCycleKey(cycle: number[]): string {
   const n = cycle.length;
 
   if (n === 0) return "";
@@ -199,4 +213,160 @@ function fnv1aHex(input: string): string {
   }
 
   return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * When Rust enumerates cycles on the *contracted* CSR (i.e., a non-null
+ * `nodeRemap` was passed to `raw_cycles`), each returned cycle is
+ * already a sequence of visible reps — none of the hidden files that
+ * actually formed the underlying graph cycle survive. The cycles-panel
+ * still wants to show those files under each bundled step (so the user
+ * can see *which* files in package A reach into package B), so we
+ * reconstruct one representative file chain per step here.
+ *
+ * For each consecutive pair `(a, b)` we BFS from `a` through nodes
+ * still in `a`'s territory (`nodeRemap[u] === a`), stopping as soon as
+ * we reach a node `v` mapped to `b` (`nodeRemap[v] === b`). The
+ * intermediate hidden nodes are the chain; we prepend `a` itself so
+ * the output matches the shape `bundleRawCyclesWithGroups` produced
+ * before — `groups[i] = [visibleRep, ...hiddenFilesInItsTerritory]`,
+ * and the panel filters the visible rep out at render time. Steps
+ * where the contracted edge came from a direct `a -> b` graph edge
+ * yield `groups[i] = [a]`, which the panel already handles as
+ * "no file chips for this step".
+ *
+ * Returns `null` when any step has no chain at all (e.g., the
+ * contracted edge `(a, b)` has no underlying graph path that stays
+ * inside `a`'s package — possible if the remap pulled in an exotic
+ * collapse/expand combination). The caller then falls back to bare
+ * visible reps with no file chips, instead of dropping the whole
+ * cycle.
+ */
+/**
+ * Pair counterpart to `bundleRawCyclesWithGroups` for the path where
+ * Rust enumerated on the *contracted* CSR — i.e. each input cycle is
+ * already a sequence of visible reps. Dedupe by the same visual key
+ * the legacy path used (so a fan-out of head/tail-identical cycles in
+ * the contracted graph collapses to one row instead of swamping the
+ * panel), sort shortest-first, then reconstruct the file chain under
+ * each step via BFS so the per-step file chips can still render.
+ *
+ * Falls back to single-element groups when the BFS can't find a
+ * connected chain — the row still surfaces, just without raw-file
+ * chips for that step, which beats silently dropping a real cycle.
+ */
+export function bundleAlreadyContractedCycles(
+  graph: LoadedGraph,
+  nodeRemap: Int32Array,
+  contractedCycles: number[][],
+): BundledWithGroups[] {
+  const seen = new Set<string>();
+  const out: BundledWithGroups[] = [];
+
+  for (const c of contractedCycles) {
+    const key = visualCycleKey(c);
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const groups = reconstructGroupsForBundledCycle(graph, nodeRemap, c);
+
+    out.push({ bundled: c, groups: groups ?? c.map((idx) => [idx]) });
+  }
+
+  out.sort((a, b) => a.bundled.length - b.bundled.length);
+
+  return out;
+}
+
+export function reconstructGroupsForBundledCycle(
+  graph: LoadedGraph,
+  nodeRemap: Int32Array,
+  bundled: number[],
+): number[][] | null {
+  const { edgesFlat } = graph;
+  const N = nodeRemap.length;
+  const E = edgesFlat.length / 2;
+  // Rebuild outgoing CSR per call; it's O(E) once, then every BFS is
+  // O(packageSize) which dominates the unique work. The graph's other
+  // consumers don't need a CSR, so we don't cache it on the graph.
+  const outIdx = new Int32Array(N + 1);
+
+  for (let i = 0; i < E; i++) outIdx[edgesFlat[2 * i]! + 1]!++;
+  for (let i = 0; i < N; i++) outIdx[i + 1]! += outIdx[i]!;
+
+  const outAdj = new Int32Array(E);
+  const cursor = new Int32Array(N);
+
+  for (let i = 0; i < E; i++) {
+    const a = edgesFlat[2 * i]!;
+    const b = edgesFlat[2 * i + 1]!;
+
+    outAdj[outIdx[a]! + cursor[a]!] = b;
+    cursor[a]!++;
+  }
+
+  const groups: number[][] = [];
+
+  // Scratch arrays reused across steps — every BFS only touches at most
+  // the source package's territory, so a per-step reset of `visited`
+  // and `parent` along the queue is cheaper than re-allocating.
+  const visited = new Uint8Array(N);
+  const parent = new Int32Array(N);
+
+  for (let i = 0; i < bundled.length; i++) {
+    const startRep = bundled[i]!;
+    const endRep = bundled[(i + 1) % bundled.length]!;
+
+    visited.fill(0);
+    parent.fill(-1);
+    visited[startRep] = 1;
+
+    const queue: number[] = [startRep];
+    let found = -1;
+
+    bfs: while (queue.length > 0) {
+      const u = queue.shift()!;
+      const from = outIdx[u]!;
+      const to = outIdx[u + 1]!;
+
+      for (let j = from; j < to; j++) {
+        const v = outAdj[j]!;
+
+        if (visited[v]) continue;
+
+        if (nodeRemap[v] === endRep) {
+          parent[v] = u;
+          found = v;
+
+          break bfs;
+        }
+
+        if (nodeRemap[v] === startRep) {
+          visited[v] = 1;
+          parent[v] = u;
+          queue.push(v);
+        }
+      }
+    }
+
+    if (found === -1) return null;
+
+    // Walk parents from the node just *before* `found` (which sits in
+    // `endRep`'s territory and will be the head of the next step's
+    // group anyway) back to `startRep`. That gives the hidden chain in
+    // `startRep`'s territory between the two visible reps.
+    const chain: number[] = [];
+    let cur = parent[found]!;
+
+    while (cur !== -1 && cur !== startRep) {
+      chain.push(cur);
+      cur = parent[cur]!;
+    }
+
+    chain.reverse();
+    groups.push([startRep, ...chain]);
+  }
+
+  return groups;
 }

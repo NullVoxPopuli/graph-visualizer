@@ -142,14 +142,24 @@ const sessionEngine = {
   },
 
   /**
-   * All elementary cycles (the exponential Tarjan+Johnson's
-   * enumeration) as a flat `[len, …nodes, len, …nodes]` buffer — the
-   * genuinely expensive cycle work, done once on the resident graph.
-   * Bundling/contraction (collapsed nodes) is a cheap JS post-pass on
-   * this fixed list, so it isn't a parameter here.
+   * Elementary cycles (Tarjan+Johnson's, exponential-worst-case) as a
+   * flat `[len, …nodes, len, …nodes]` buffer.
+   *
+   * `nodeRemap` is the contraction map (visible→self, hidden→owner,
+   * unmappable→-1). Empty means "no contraction — return raw cycles".
+   * Non-empty means "enumerate on the contracted CSR" so `maxCycles`
+   * bounds *bundled* cycles, not raw ones. Without this, a graph
+   * whose raw cycles all sit inside one package collapses to zero
+   * bundled cycles after JS contraction; see the do-not-commit.json
+   * regression where the contracted graph has a 92-package SCC but
+   * Johnson's only saw 30 intra-package raw cycles.
    */
-  rawCycles(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Int32Array {
-    return activeSession().raw_cycles(hiddenEdgeTypeIds, maxCycles);
+  rawCycles(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array,
+    maxCycles: number,
+  ): Int32Array {
+    return activeSession().raw_cycles(hiddenEdgeTypeIds, nodeRemap, maxCycles);
   },
 
   /** Drop the resident graph and free its WASM memory. */

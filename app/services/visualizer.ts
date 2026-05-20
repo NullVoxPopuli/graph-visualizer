@@ -315,12 +315,13 @@ export default class VisualizerService extends Service {
   }
 
   /**
-   * Elementary cycles (the exponential enumeration) computed in the
-   * resident Rust session, as `number[][]` node-index lists. Memoized
-   * per (graph, edge-type filter) — collapsed-node bundling is a cheap
-   * synchronous JS pass the panels run on the resolved list, so it
-   * isn't a key here. Same non-blocking promise-state contract as
-   * `orphanIndices`. `null` until a graph + session exist.
+   * Elementary cycles computed in the resident Rust session as
+   * `number[][]` node-index lists. Memoized per (graph, edge-type
+   * filter, node-contraction map): the remap key matters because Rust
+   * enumerates on the *contracted* CSR when a remap is passed — so the
+   * `maxCycles` cap bounds bundled cycles instead of raw ones. Same
+   * non-blocking promise-state contract as `orphanIndices`. `null`
+   * until a graph + session exist.
    */
   #cycleGraph: LoadedGraph | null = null;
   #cycleCache = new Map<string, Promise<number[][]>>();
@@ -334,7 +335,18 @@ export default class VisualizerService extends Service {
     }
   }
 
-  cycleRaw(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Promise<number[][]> | null {
+  /**
+   * `nodeRemap` lets the caller hand the resident Rust session a JS-built
+   * contraction map (see `buildContraction`). Pass `null` when no
+   * contraction is active. The remap is fingerprinted into the cache key
+   * — two callers that build the same remap reuse one enumeration, but
+   * toggling a node-type filter forces a fresh Rust run.
+   */
+  cycleRaw(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array | null,
+    maxCycles: number,
+  ): Promise<number[][]> | null {
     void this.analysis;
 
     const g = this.graph.current;
@@ -350,11 +362,16 @@ export default class VisualizerService extends Service {
 
     this.#resetCycleCachesIfStale(g);
 
-    const key = `${hiddenEdgeTypeIds.join(",")}|${maxCycles}`;
+    // Empty remap == "no contraction" on the Rust side. Hashing it into
+    // the key keeps every distinct visibility filter as its own cached
+    // entry; without that, toggling a type would silently reuse stale
+    // cycles enumerated on a different remap.
+    const remapKey = nodeRemap ? fingerprintRemap(nodeRemap) : "";
+    const key = `${hiddenEdgeTypeIds.join(",")}|${remapKey}|${maxCycles}`;
     let p = this.#cycleCache.get(key);
 
     if (!p) {
-      p = pipeline.rawCycles(hiddenEdgeTypeIds, maxCycles);
+      p = pipeline.rawCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP, maxCycles);
       this.#cycleCache.set(key, p);
     }
 
@@ -414,6 +431,32 @@ export default class VisualizerService extends Service {
   focusOnId(id: string): void {
     this.pendingFocus = { id, ts: Date.now() };
   }
+}
+
+/** Shared sentinel for "no contraction" — passing the same instance to the
+ *  worker means Comlink doesn't allocate a fresh transferable on each call. */
+const EMPTY_REMAP = new Int32Array(0);
+
+/**
+ * Stable string fingerprint of a `nodeRemap` slice for cycle-cache keying.
+ * The full `nodeRemap.join(",")` would be O(N) per cycle-panel render and
+ * grow with the graph; this 64-bit FNV-1a digest is O(N) but constant-size,
+ * and identical remaps always hash to the same string.
+ */
+function fingerprintRemap(remap: Int32Array): string {
+  let h1 = 0x811c9dc5 >>> 0;
+  let h2 = 0xcbf29ce4 >>> 0;
+
+  for (let i = 0; i < remap.length; i++) {
+    const v = remap[i]! | 0;
+
+    h1 ^= v;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= v ^ (i & 0xff);
+    h2 = Math.imul(h2, 0x01000193);
+  }
+
+  return `${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}:${remap.length}`;
 }
 
 /**

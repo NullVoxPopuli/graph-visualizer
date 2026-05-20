@@ -8,7 +8,13 @@ import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import { bundleRawCyclesWithGroups, canonicalCycleKey, shortCycleId } from "#lib/cycle";
+import {
+  bundleAlreadyContractedCycles,
+  bundleRawCyclesWithGroups,
+  canonicalCycleKey,
+  MAX_CYCLES,
+  shortCycleId,
+} from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -250,15 +256,28 @@ export default class CyclesPanel extends Component {
 
     if (!g) return [];
 
-    // The exponential elementary-cycle enumeration runs once in the
-    // resident Rust session, keyed (in the service) by graph + edge-type
-    // filter. Everything below — contraction through the collapse remap,
-    // dedupe, short ids — is the cheap synchronous post-pass on that
-    // fixed raw list. While a fresh enumeration is in flight we keep the
-    // previous entries so the panel never blanks or blocks.
+    // Build the contraction up-front so we can hand the resident Rust
+    // session a node-remap. With a remap supplied, Rust's Johnson's runs
+    // on the *contracted* CSR — the 1000-cycle cap then bounds bundled
+    // cycles instead of raw ones. Without that change a graph like
+    // do-not-commit.json (11k files, mostly intra-package cycles) would
+    // fill the cap with file cycles that all collapse to a single
+    // package, leaving zero entries visible after files are hidden even
+    // though the contracted graph has plenty of real package cycles.
+    const radii = computeRadii(g.inDegree, g.outDegree);
+    const contraction = buildContraction(
+      g,
+      radii,
+      this.viewState.hiddenNodeTypes,
+      this.viewState.collapsedIds,
+      this.viewState.effectiveHiddenNodeIds(g),
+    );
+    const remap = contraction?.nodeRemap ?? null;
+
     const rawPromise = this.visualizer.cycleRaw(
       Int32Array.from(this.viewState.hiddenEdgeTypes),
-      1000,
+      remap,
+      MAX_CYCLES,
     );
 
     if (!rawPromise) return [];
@@ -282,16 +301,16 @@ export default class CyclesPanel extends Component {
     const key = `${hiddenTypesKey}|${hiddenEdgeTypesKey}|${collapsedKey}|${hiddenIdsKey}|${globKey}`;
 
     if (g !== this.#lastGraph || key !== this.#lastCycleKey || rawCycles !== this.#lastRaw) {
-      const radii = computeRadii(g.inDegree, g.outDegree);
-      const contraction = buildContraction(
-        g,
-        radii,
-        this.viewState.hiddenNodeTypes,
-        this.viewState.collapsedIds,
-        this.viewState.effectiveHiddenNodeIds(g),
-      );
-      const remap = contraction?.nodeRemap ?? null;
-      const rawBundled = bundleRawCyclesWithGroups(rawCycles, remap);
+      // When Rust enumerated on the contracted CSR (`remap` non-null) the
+      // returned cycles are already bundled — every node is a visible
+      // rep. `bundleAlreadyContractedCycles` dedupes by visual key
+      // (matching the legacy bundle pass's noise reduction so a fan-out
+      // of head/tail-identical contracted cycles doesn't blow the panel
+      // up to thousands of rows) and reconstructs per-step file chains.
+      // When no contraction is active we keep the legacy path.
+      const rawBundled = remap
+        ? bundleAlreadyContractedCycles(g, remap, rawCycles)
+        : bundleRawCyclesWithGroups(rawCycles, null);
       // Dedupe by canonical node sequence — parallel raw edges between two
       // packages (e.g. lots of `file <IconArrowRight /> file` imports) all contract to the
       // same bundled cycle, and listing the same `pkgA <IconArrowRight /> pkgB` 13 times is

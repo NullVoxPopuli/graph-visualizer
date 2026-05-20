@@ -173,15 +173,25 @@ export class SessionPipeline {
   }
 
   /**
-   * Every elementary cycle as `number[][]` (node indices). The
-   * exponential enumeration runs once in Rust on the resident graph;
-   * collapsed-node bundling is a cheap synchronous JS pass on the
-   * returned list (see `bundleRawCyclesWithGroups`).
+   * Elementary cycles as `number[][]` (node indices). Runs once in Rust
+   * on the resident graph.
+   *
+   * `nodeRemap` is the JS contraction map (visible→self, hidden→owner,
+   * unmappable→-1). When non-empty Rust enumerates on the *contracted*
+   * CSR — the returned cycles are already in bundled form, and
+   * `maxCycles` bounds bundled cycles. When empty Rust returns raw
+   * cycles and the JS pass (`bundleRawCyclesWithGroups`) does the
+   * contraction. The non-empty path is what saves do-not-commit-shaped
+   * graphs where intra-package file cycles otherwise fill the cap.
    */
-  rawCycles(hiddenEdgeTypeIds: Int32Array, maxCycles: number): Promise<number[][]> {
+  rawCycles(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array,
+    maxCycles: number,
+  ): Promise<number[][]> {
     return waitForPromise(
       this.#loaded
-        .then(() => this.#engine.rawCycles(hiddenEdgeTypeIds, maxCycles))
+        .then(() => this.#engine.rawCycles(hiddenEdgeTypeIds, nodeRemap, maxCycles))
         .then((flat) => {
           const cycles: number[][] = [];
 

@@ -7,7 +7,14 @@ import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import { toggleInSet } from "#lib/collapse-list";
 import { buildContraction } from "#lib/contract";
-import { bundleRawCyclesWithGroups, canonicalCycleKey, shortCycleId } from "#lib/cycle";
+import {
+  bundleAlreadyContractedCycles,
+  type BundledWithGroups,
+  bundleRawCyclesWithGroups,
+  canonicalCycleKey,
+  MAX_CYCLES,
+  shortCycleId,
+} from "#lib/cycle";
 import {
   createApplyGeometryModifier,
   createDragModifier,
@@ -20,6 +27,7 @@ import IconCaretRight from "~icons/ph/caret-right";
 import IconX from "~icons/ph/x";
 
 import type { PanelGeometry } from "#lib/floating-panel";
+import type { LoadedGraph } from "#lib/types";
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
 import type VisualizerService from "#services/visualizer";
@@ -383,6 +391,34 @@ export default class InfoPanel extends Component {
   }
 
   /**
+   * Whether the cycles section is rendering *internal* (within-package,
+   * file-level) cycles instead of the default cross-package list. The
+   * default cross-package mode answers "what loops does this package
+   * sit on?"; flipping the toggle drills into "what loops are happening
+   * inside this package's files" — those file cycles are normally
+   * absorbed by the file-type contraction and never surface, even
+   * though they're often the most actionable coupling issues to fix.
+   */
+  @tracked private showingInternalCycles = false;
+
+  @action
+  toggleInternalCyclesMode(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.showingInternalCycles = !this.showingInternalCycles;
+  }
+
+  /**
+   * The cycle list rendered in the panel. Switches between cross-
+   * package (the default — bundled loops this node sits on) and
+   * internal (raw file-level loops entirely inside the selected
+   * package's territory) based on the toggle in the section header.
+   */
+  get cycles(): CycleEntry[] {
+    return this.showingInternalCycles ? this.internalCycles : this.crossPackageCycles;
+  }
+
+  /**
    * Cycles the selected node sits on. The top-level entries are the
    * bundled cycles (the same loops the renderer red-rings). Each one
    * also carries the underlying raw cycles that contract to it — handy
@@ -392,8 +428,7 @@ export default class InfoPanel extends Component {
    * Bundled cycles are deduped by canonical node sequence so parallel
    * raw edges (many `file → file` imports between two packages) don't
    * produce one bundled cycle per edge.
-   */
-  /**
+   *
    * `@cached`: recomputes only when a tracked dependency it actually
    * reads changes — `graph.current`, the selected node, and the
    * view-state filter slots (`hiddenNodeTypes` / `hiddenEdgeTypes` /
@@ -401,11 +436,10 @@ export default class InfoPanel extends Component {
    * `trackedObject` slots) plus the resident-session raw-cycles
    * promise. `collapsedHeaders` / `expandedRefs` are template-level
    * toggles this body never reads, so collapsing a cycle doesn't
-   * re-run the bundling. (Replaces a hand-built cache key and the
-   * lint-suppressed getter writes it required.)
+   * re-run the bundling.
    */
   @cached
-  get cycles(): CycleEntry[] {
+  get crossPackageCycles(): CycleEntry[] {
     const info = this.info;
     const g = this.graph.current;
 
@@ -426,11 +460,11 @@ export default class InfoPanel extends Component {
     // node (its loops are absorbed into the owner).
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    // The exponential elementary-cycle enumeration runs once in the
-    // resident Rust session (service-memoized by graph + edge-type
-    // filter). The contraction/dedupe below is the cheap synchronous
-    // pass on that fixed raw list.
-    const rawPromise = this.visualizer.cycleRaw(Int32Array.from(vs.hiddenEdgeTypes), 1000);
+    const rawPromise = this.visualizer.cycleRaw(
+      Int32Array.from(vs.hiddenEdgeTypes),
+      remap,
+      MAX_CYCLES,
+    );
 
     if (!rawPromise) return [];
 
@@ -438,23 +472,100 @@ export default class InfoPanel extends Component {
 
     if (!rawCycles) return [];
 
-    // Bundled cycles: contracted, deduped by canonical sequence. Same
-    // source the renderer uses for red rings, so the info-panel list
-    // and the canvas can't disagree.
-    const bundledCycles = bundleRawCyclesWithGroups(rawCycles, remap).filter((c) =>
-      c.bundled.includes(info.index),
+    // `bundleAlreadyContractedCycles` handles dedup + per-step file
+    // chain reconstruction for the contracted-CSR path; the legacy
+    // path keeps its own bundle+dedup pass. Both arrive sorted shortest
+    // first, so the info-panel ordering matches the cycles panel.
+    const bundledCycles = (
+      remap
+        ? bundleAlreadyContractedCycles(g, remap, rawCycles)
+        : bundleRawCyclesWithGroups(rawCycles, null)
+    ).filter((c) => c.bundled.includes(info.index));
+
+    return this.#assembleCycleEntries(g, bundledCycles);
+  }
+
+  /**
+   * File-level cycles whose nodes are entirely within the selected
+   * node's territory (i.e., every node maps to the selected one
+   * through the active contraction). Only populated when contraction
+   * is active AND the selected node is itself visible — in any other
+   * configuration the notion of "internal" doesn't apply and the
+   * getter short-circuits to `[]`.
+   *
+   * These cycles never appear in the default list because the file-
+   * type contraction collapses each one to a single-package row that
+   * gets dropped as a degenerate self-loop. Surfacing them via the
+   * toggle gives the user a way to look at intra-package coupling
+   * without having to re-enable the whole file type globally.
+   */
+  @cached
+  get internalCycles(): CycleEntry[] {
+    const info = this.info;
+    const g = this.graph.current;
+
+    if (!info || !g) return [];
+
+    const vs = this.viewState;
+    const radii = computeRadii(g.inDegree, g.outDegree);
+    const contraction = buildContraction(
+      g,
+      radii,
+      vs.hiddenNodeTypes,
+      vs.collapsedIds,
+      vs.effectiveHiddenNodeIds(g),
+    );
+    const remap = contraction?.nodeRemap ?? null;
+
+    // No contraction → no "internal vs external" distinction; the
+    // normal list already covers every cycle through this node.
+    if (!remap) return [];
+    // Selected node is hidden — its territory belongs to its owner,
+    // so the "internal cycles for this node" question doesn't make
+    // sense. The user should select the owner instead.
+    if (remap[info.index]! !== info.index) return [];
+
+    // Ask Rust for the *raw* (un-contracted) enumeration so we can see
+    // file-level cycles. Cached separately from the contracted path —
+    // the visualizer's cycle cache keys on the remap, so the two
+    // promises coexist without invalidating each other.
+    const rawPromise = this.visualizer.cycleRaw(
+      Int32Array.from(vs.hiddenEdgeTypes),
+      null,
+      MAX_CYCLES,
     );
 
+    if (!rawPromise) return [];
+
+    const rawCycles = getPromiseState(rawPromise).resolved;
+
+    if (!rawCycles) return [];
+
+    const selectedIdx = info.index;
+    const internal = rawCycles.filter(
+      (c) => c.length > 0 && c.every((idx) => remap[idx]! === selectedIdx),
+    );
+    // No further contraction — display each raw cycle's nodes verbatim
+    // so the user can see the actual files that close each loop.
+    const bundled = bundleRawCyclesWithGroups(internal, null);
+
+    return this.#assembleCycleEntries(g, bundled);
+  }
+
+  /**
+   * Shared `bundled cycles → CycleEntry[]` post-pass: build the node
+   * list (with raw-file chips where contraction folded files into a
+   * bundled rep), sort shortest first, assign stable short ids, and
+   * compute the canonical-cycle-id map both panels rely on for the
+   * "smaller cycle inside this one" segment chips.
+   */
+  #assembleCycleEntries(g: LoadedGraph, bundledCycles: BundledWithGroups[]): CycleEntry[] {
     const entries: CycleEntry[] = [];
 
     for (const bundled of bundledCycles) {
       const bundledKey = canonicalCycleKey(bundled.bundled);
       const nodes: CycleNodeEntry[] = bundled.bundled.map((idx, i) => {
         const group = bundled.groups[i]!;
-        // Only surface raw files that differ from the bundled rep —
-        // with no contraction (remap === null) every raw === bundled
-        // and `rawFiles` stays empty so the template renders the
-        // unchanged single-line layout.
         const rawFiles: RawCycleFile[] = [];
 
         for (const rawIdx of group) {
@@ -467,9 +578,6 @@ export default class InfoPanel extends Component {
 
       entries.push({
         nodes,
-        // `id`, `segments`, and `containedLabel` are filled in after
-        // sorting — the canonical-cycle map needs the final shortest-
-        // first order and the short ids derive from the canonical key.
         id: "",
         segments: [],
         containedLabel: "",
@@ -477,20 +585,12 @@ export default class InfoPanel extends Component {
       });
     }
 
-    // Shortest bundled cycles first (matches the floating panel's order).
     entries.sort((a, b) => a.nodes.length - b.nodes.length);
 
-    // Assign each cycle its short, UUID-first-segment-style id
-    // (deterministic from the canonical key). `usedIds` is the
-    // collision-tracking Set that `shortCycleId` extends through if
-    // two cycles hash to the same 8 hex chars.
     const usedIds = new Set<string>();
 
     for (const entry of entries) entry.id = shortCycleId(entry.key, usedIds);
 
-    // Each node's canonical cycle id = the id of the smallest cycle
-    // in this list that contains it. Single pass since entries are
-    // already shortest-first.
     const canonical = new Map<string, string>();
 
     for (const entry of entries) {
@@ -813,7 +913,27 @@ export default class InfoPanel extends Component {
           <details class="panel__section" open={{this.cyclesOpen}}>
             <summary class="panel__subhead" {{on "click" this.toggleCycles}}>
               <IconCaretRight class="summary-caret" />
-              <span>cycles ({{this.cycles.length}})</span>
+              <span>
+                {{if this.showingInternalCycles "internal cycles" "cycles"}}
+                ({{this.cycles.length}})
+              </span>
+              {{#if (or this.showingInternalCycles this.internalCycles.length)}}
+                <button
+                  type="button"
+                  class="panel__subhead-action"
+                  {{on "click" this.toggleInternalCyclesMode}}
+                  title="Toggle between cycles this node sits on (cross-package) and cycles fully inside this node's territory (file-level, hidden by the type filter)"
+                >
+                  {{#if this.showingInternalCycles}}
+                    show cross-package
+                  {{else}}
+                    {{this.internalCycles.length}}
+                    internal
+                    {{if (neq this.internalCycles.length 1) "cycles" "cycle"}}
+                    (hidden)
+                  {{/if}}
+                </button>
+              {{/if}}
               {{#if this.cycles.length}}
                 <button
                   type="button"

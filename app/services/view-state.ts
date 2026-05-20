@@ -4,7 +4,6 @@ import Service, { service } from "@ember/service";
 import { isLabelFilteredOut, normalizeGlobInput, parseGlobs, serializeGlobs } from "#lib/glob";
 
 import type RouterService from "@ember/routing/router-service";
-import type GraphService from "#services/graph";
 import type { PanelGeometry } from "#lib/floating-panel";
 import type { LoadedGraph } from "#lib/types";
 

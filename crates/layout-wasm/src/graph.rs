@@ -507,6 +507,22 @@ fn build_csr_cycles(
     let mut ra = vec![0i32; e];
     let mut rb = vec![0i32; e];
     let mut m = 0usize;
+    // When `node_remap` is supplied many original edges collapse onto
+    // the same `(a, b)` contracted pair (every file of package A that
+    // points at package B contributes another a→b edge). Leaving those
+    // duplicates in the CSR makes Johnson's enumerate the same
+    // elementary cycle once per parallel-edge combination — on
+    // do-not-commit.json this exploded a 4-cycle truth into ~1000
+    // emitted dupes, filling the `max_cycles` cap with copies and
+    // swamping the info-panel cycle list. Dedupe at insert time so each
+    // contracted pair appears at most once. Skip the per-node `HashSet`
+    // when `node_remap` is None — raw graphs are already deduped by the
+    // parser and the allocation isn't free.
+    let mut seen_targets: Vec<std::collections::HashSet<i32>> = if node_remap.is_some() {
+        (0..n).map(|_| std::collections::HashSet::new()).collect()
+    } else {
+        Vec::new()
+    };
     for i in 0..e {
         if let Some(h) = hidden {
             let t = edge_type_ids.get(i).copied().unwrap_or(0) as usize;
@@ -520,6 +536,9 @@ fn build_csr_cycles(
             a = rm[a as usize];
             b = rm[b as usize];
             if a < 0 || b < 0 || a == b {
+                continue;
+            }
+            if !seen_targets[a as usize].insert(b) {
                 continue;
             }
         }
