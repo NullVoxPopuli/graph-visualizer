@@ -539,11 +539,10 @@ fn build_csr_cycles(
     // duplicates in the CSR makes Johnson's enumerate the same
     // elementary cycle once per parallel-edge combination — on
     // do-not-commit.json this exploded a 4-cycle truth into ~1000
-    // emitted dupes, filling the `max_cycles` cap with copies and
-    // swamping the info-panel cycle list. Dedupe at insert time so each
-    // contracted pair appears at most once. Skip the per-node `HashSet`
-    // when `node_remap` is None — raw graphs are already deduped by the
-    // parser and the allocation isn't free.
+    // emitted dupes that swamped the info-panel cycle list. Dedupe at
+    // insert time so each contracted pair appears at most once. Skip
+    // the per-node `HashSet` when `node_remap` is None — raw graphs are
+    // already deduped by the parser and the allocation isn't free.
     let mut seen_targets: Vec<std::collections::HashSet<i32>> = if node_remap.is_some() {
         (0..n).map(|_| std::collections::HashSet::new()).collect()
     } else {
@@ -676,19 +675,17 @@ fn tarjan_scc(
 /// Iterative Johnson's over one SCC (port of
 /// `enumerateElementaryCyclesInScc`), B stored as a linked list.
 ///
-/// `seen_keys` and `max_unique` together turn the original "cap raw
-/// emissions" budget into "cap *visually-distinct* emissions". The
-/// `visualCycleKey` collapses cycles that share head/second/last/length
-/// (>5 nodes) or the full canonical sequence (≤5 nodes), so on dense
-/// SCCs we no longer waste the cap on hundreds of near-duplicates that
-/// the panels would have deduped client-side anyway.
+/// `seen_keys` deduplicates by *visual key* — the same one the panels
+/// would apply client-side. `visualCycleKey` collapses cycles that
+/// share head/second/last/length (>5 nodes) or the full canonical
+/// sequence (≤5 nodes), so dense SCCs don't flood the output with
+/// near-duplicates that all render to the same panel row.
 ///
-/// `raw_emitted` / `max_raw` is the safety hatch: even with the unique-
-/// cap, a pathological SCC could enumerate exponentially many raw
-/// cycles before any of them turn up new visual keys, so we also bail
-/// out after a hard raw-emission ceiling. On well-behaved graphs this
-/// ceiling never fires.
-#[allow(clippy::too_many_arguments)]
+/// Enumeration runs to completion: Johnson's is exponential in the
+/// worst case, and on pathological inputs this can take a long time.
+/// That's the user-visible trade-off of unbounded cycle detection —
+/// the previous emission/unique caps traded completeness for a hard
+/// upper bound on work.
 fn enumerate_cycles_in_scc(
     scc: &[i32],
     n: usize,
@@ -697,9 +694,6 @@ fn enumerate_cycles_in_scc(
     in_scc: &[bool],
     out: &mut Vec<Vec<i32>>,
     seen_keys: &mut std::collections::HashSet<String>,
-    max_unique: usize,
-    raw_emitted: &mut usize,
-    max_raw: usize,
 ) {
     let mut blocked = vec![false; n];
     let mut b_head = vec![-1i32; n];
@@ -711,9 +705,6 @@ fn enumerate_cycles_in_scc(
     let mut unblock_stack: Vec<i32> = Vec::new();
 
     for &start in scc {
-        if seen_keys.len() >= max_unique || *raw_emitted >= max_raw {
-            break;
-        }
         for &v in scc {
             blocked[v as usize] = false;
             b_head[v as usize] = -1;
@@ -728,9 +719,6 @@ fn enumerate_cycles_in_scc(
         blocked[start as usize] = true;
 
         while !path.is_empty() {
-            if seen_keys.len() >= max_unique || *raw_emitted >= max_raw {
-                break;
-            }
             let depth = path.len() - 1;
             let v = path[depth];
             let end = out_idx[v as usize + 1];
@@ -744,15 +732,11 @@ fn enumerate_cycles_in_scc(
                     continue;
                 }
                 if w == start {
-                    *raw_emitted += 1;
                     let key = visual_cycle_key(&path);
                     if seen_keys.insert(key) {
                         out.push(path.clone());
                     }
                     found_at_depth[depth] = true;
-                    if seen_keys.len() >= max_unique || *raw_emitted >= max_raw {
-                        break;
-                    }
                     continue;
                 }
                 if !blocked[w as usize] {
@@ -819,19 +803,18 @@ fn enumerate_cycles_in_scc(
 
 /// Port of cycle.ts `findAllCycles`.
 ///
-/// `max_cycles` now caps **visually-distinct** cycles in the output, not
-/// raw Johnson's emissions. The hard raw-emission ceiling is set to
-/// `MAX_RAW_PER_UNIQUE × max_cycles` and stops the enumeration on
-/// pathological SCCs where Johnson's would otherwise grind through
-/// exponentially many parallel-edge-style duplicates before turning up
-/// new visual keys. On well-behaved graphs the raw ceiling never fires.
+/// Enumerates every elementary directed cycle, deduplicated by
+/// `visual_cycle_key` (the same key the JS panels apply downstream).
+/// No emission cap — Johnson's runs to completion. On pathological
+/// SCCs this is exponential in the worst case; callers that drive the
+/// resident session should keep that in mind when invoking
+/// cycle-detection on user-supplied graphs.
 pub fn find_all_cycles(
     n: usize,
     edges_flat: &[i32],
     edge_type_ids: &[i32],
     node_remap: Option<&[i32]>,
     hidden: Option<&[bool]>,
-    max_cycles: usize,
 ) -> Vec<Vec<i32>> {
     if n == 0 {
         return Vec::new();
@@ -840,17 +823,8 @@ pub fn find_all_cycles(
     let sccs = tarjan_scc(n, &out_idx, &out_adj, 0, node_remap);
     let mut cycles: Vec<Vec<i32>> = Vec::new();
     let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut raw_emitted: usize = 0;
-    // 200× headroom: in practice we see roughly 50–100× compression on
-    // do-not-commit.json's contracted SCC; double it so the safety bail
-    // only fires on truly pathological inputs, not normal ones.
-    const MAX_RAW_PER_UNIQUE: usize = 200;
-    let max_raw = max_cycles.saturating_mul(MAX_RAW_PER_UNIQUE);
     for mut scc in sccs {
-        if scc.len() < 2 || seen_keys.len() >= max_cycles || raw_emitted >= max_raw {
-            if seen_keys.len() >= max_cycles || raw_emitted >= max_raw {
-                break;
-            }
+        if scc.len() < 2 {
             continue;
         }
         scc.sort_unstable();
@@ -866,9 +840,6 @@ pub fn find_all_cycles(
             &in_scc,
             &mut cycles,
             &mut seen_keys,
-            max_cycles,
-            &mut raw_emitted,
-            max_raw,
         );
     }
     cycles.sort_by_key(|c| c.len());
@@ -936,9 +907,8 @@ pub fn find_bundled_cycles_via_raw(
     edge_type_ids: &[i32],
     node_remap: Option<&[i32]>,
     hidden: Option<&[bool]>,
-    max_cycles: usize,
 ) -> Vec<Vec<i32>> {
-    let raw = find_all_cycles(n, edges_flat, edge_type_ids, node_remap, hidden, max_cycles);
+    let raw = find_all_cycles(n, edges_flat, edge_type_ids, node_remap, hidden);
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<Vec<i32>> = Vec::new();
     for r in &raw {

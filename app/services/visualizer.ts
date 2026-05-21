@@ -318,10 +318,12 @@ export default class VisualizerService extends Service {
    * Elementary cycles computed in the resident Rust session as
    * `number[][]` node-index lists. Memoized per (graph, edge-type
    * filter, node-contraction map): the remap key matters because Rust
-   * enumerates on the *contracted* CSR when a remap is passed — so the
-   * `maxCycles` cap bounds bundled cycles instead of raw ones. Same
-   * non-blocking promise-state contract as `orphanIndices`. `null`
-   * until a graph + session exist.
+   * enumerates on the *contracted* CSR when a remap is passed — so a
+   * type-toggle forces a fresh run. Same non-blocking promise-state
+   * contract as `orphanIndices`. `null` until a graph + session exist.
+   *
+   * Enumeration is unbounded (Johnson's, exponential worst case);
+   * runs in the worker so the main thread stays responsive.
    */
   #cycleGraph: LoadedGraph | null = null;
   #cycleCache = new Map<string, Promise<number[][]>>();
@@ -345,7 +347,6 @@ export default class VisualizerService extends Service {
   cycleRaw(
     hiddenEdgeTypeIds: Int32Array,
     nodeRemap: Int32Array | null,
-    maxCycles: number,
   ): Promise<number[][]> | null {
     void this.analysis;
 
@@ -367,11 +368,11 @@ export default class VisualizerService extends Service {
     // entry; without that, toggling a type would silently reuse stale
     // cycles enumerated on a different remap.
     const remapKey = nodeRemap ? fingerprintRemap(nodeRemap) : "";
-    const key = `${hiddenEdgeTypeIds.join(",")}|${remapKey}|${maxCycles}`;
+    const key = `${hiddenEdgeTypeIds.join(",")}|${remapKey}`;
     let p = this.#cycleCache.get(key);
 
     if (!p) {
-      p = pipeline.rawCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP, maxCycles);
+      p = pipeline.rawCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP);
       this.#cycleCache.set(key, p);
     }
 

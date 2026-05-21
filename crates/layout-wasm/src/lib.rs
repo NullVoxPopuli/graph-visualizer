@@ -444,26 +444,20 @@ impl GraphSession {
     /// All elementary directed cycles (Tarjan SCC + Johnson's, the
     /// exponential-worst-case enumeration), as a flat buffer:
     /// `[len0, n0_0, n0_1, …, len1, n1_0, …]`. Node indices,
-    /// `hidden_edge_type_ids` restricts to visible edges, `max_cycles`
-    /// caps the (potentially exponential) enumeration.
+    /// `hidden_edge_type_ids` restricts to visible edges. The
+    /// enumeration runs to completion — there is no emission cap.
     ///
     /// **`node_remap`** is critical for type-hide flows. When non-empty
     /// it must be a per-node `i32` array (length == node count): visible
     /// nodes map to themselves, hidden nodes to their nearest visible
     /// owner, unmappable nodes to `-1`. With a remap supplied the CSR is
     /// built on the *contracted* graph, so the enumeration finds cycles
-    /// between visible reps directly — and the `max_cycles` cap then
-    /// bounds *bundled* cycles, not raw ones. Without this, a graph
-    /// whose first 1000 raw cycles all live inside a single package's
-    /// file SCC would surface zero package-level cycles even when the
-    /// contracted graph has many; see the do-not-commit.json
-    /// regression. Pass empty `&[i32]` for the original raw behavior.
-    pub fn raw_cycles(
-        &self,
-        hidden_edge_type_ids: &[i32],
-        node_remap: &[i32],
-        max_cycles: usize,
-    ) -> Vec<i32> {
+    /// between visible reps directly. Without this, a graph whose raw
+    /// cycles all live inside a single package's file SCC would surface
+    /// zero package-level cycles even when the contracted graph has
+    /// many; see the do-not-commit.json regression. Pass empty `&[i32]`
+    /// for the original raw behavior.
+    pub fn raw_cycles(&self, hidden_edge_type_ids: &[i32], node_remap: &[i32]) -> Vec<i32> {
         let hidden = self.hidden_type_mask(hidden_edge_type_ids);
         let remap = if node_remap.is_empty() { None } else { Some(node_remap) };
         let cycles = graph::find_all_cycles(
@@ -472,7 +466,6 @@ impl GraphSession {
             &self.parsed.edge_type_ids,
             remap,
             hidden.as_deref(),
-            max_cycles,
         );
         let mut flat = Vec::new();
         for c in &cycles {

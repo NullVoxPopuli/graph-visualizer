@@ -113,7 +113,7 @@ fn main() {
 
     let t = Instant::now();
     let bundled =
-        graph::find_bundled_cycles_via_raw(n, &g.edges_flat, &g.edge_type_ids, None, None, 1000);
+        graph::find_bundled_cycles_via_raw(n, &g.edges_flat, &g.edge_type_ids, None, None);
     let bnd_ms = t.elapsed().as_secs_f64() * 1000.0;
     let mut lens: Vec<usize> = bundled.iter().map(|c| c.len()).collect();
     lens.sort_unstable();

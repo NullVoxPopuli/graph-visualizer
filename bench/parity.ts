@@ -45,7 +45,7 @@ interface RustSession {
   communities(): Int32Array;
   radii(): Float32Array;
   has_any_cycle(hiddenEdgeTypeIds: Int32Array): boolean;
-  raw_cycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array, maxCycles: number): Int32Array;
+  raw_cycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Int32Array;
   has_any_orphan(hiddenEdgeTypeIds: Int32Array): boolean;
   find_orphans(hiddenEdgeTypeIds: Int32Array, rootIndices: Int32Array): Int32Array;
   free(): void;
@@ -331,7 +331,7 @@ function checkCycleFixtures(GraphSession: RustModule["GraphSession"]): string[] 
     try {
       const ids = JSON.parse(s.ids_json()) as string[];
       const hidden = Int32Array.from(fx.hidden ?? []);
-      const got = decodeCycles(s.raw_cycles(hidden, EMPTY, 1000))
+      const got = decodeCycles(s.raw_cycles(hidden, EMPTY))
         .map((c) => canonIds(c.map((i) => ids[i]!)))
         .sort();
       const want = fx.expectCycles.map((c) => canonIds(c)).sort();
@@ -403,7 +403,7 @@ function main(): void {
       }
 
       // --- cycles (no JS copy; consistency smoke + checkCycleFixtures) ---
-      if (rust.raw_cycles(EMPTY, EMPTY, 1000).length > 0 !== rust.has_any_cycle(EMPTY)) {
+      if (rust.raw_cycles(EMPTY, EMPTY).length > 0 !== rust.has_any_cycle(EMPTY)) {
         fail("raw_cycles / has_any_cycle disagree");
       }
 

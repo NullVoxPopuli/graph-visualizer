@@ -12,7 +12,6 @@ import {
   type BundledWithGroups,
   bundleRawCyclesWithGroups,
   canonicalCycleKey,
-  MAX_CYCLES,
   shortCycleId,
 } from "#lib/cycle";
 import {
@@ -460,11 +459,7 @@ export default class InfoPanel extends Component {
     // node (its loops are absorbed into the owner).
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    const rawPromise = this.visualizer.cycleRaw(
-      Int32Array.from(vs.hiddenEdgeTypes),
-      remap,
-      MAX_CYCLES,
-    );
+    const rawPromise = this.visualizer.cycleRaw(Int32Array.from(vs.hiddenEdgeTypes), remap);
 
     if (!rawPromise) return [];
 
@@ -529,11 +524,7 @@ export default class InfoPanel extends Component {
     // file-level cycles. Cached separately from the contracted path —
     // the visualizer's cycle cache keys on the remap, so the two
     // promises coexist without invalidating each other.
-    const rawPromise = this.visualizer.cycleRaw(
-      Int32Array.from(vs.hiddenEdgeTypes),
-      null,
-      MAX_CYCLES,
-    );
+    const rawPromise = this.visualizer.cycleRaw(Int32Array.from(vs.hiddenEdgeTypes), null);
 
     if (!rawPromise) return [];
 

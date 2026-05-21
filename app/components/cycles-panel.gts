@@ -12,7 +12,6 @@ import {
   bundleAlreadyContractedCycles,
   bundleRawCyclesWithGroups,
   canonicalCycleKey,
-  MAX_CYCLES,
   shortCycleId,
 } from "#lib/cycle";
 import {
@@ -258,12 +257,12 @@ export default class CyclesPanel extends Component {
 
     // Build the contraction up-front so we can hand the resident Rust
     // session a node-remap. With a remap supplied, Rust's Johnson's runs
-    // on the *contracted* CSR — the 1000-cycle cap then bounds bundled
-    // cycles instead of raw ones. Without that change a graph like
-    // do-not-commit.json (11k files, mostly intra-package cycles) would
-    // fill the cap with file cycles that all collapse to a single
-    // package, leaving zero entries visible after files are hidden even
-    // though the contracted graph has plenty of real package cycles.
+    // on the *contracted* CSR — necessary for graphs like
+    // do-not-commit.json (11k files, mostly intra-package cycles) where
+    // the raw enumeration is dominated by file cycles that all collapse
+    // to a single package, leaving zero entries visible after files are
+    // hidden even though the contracted graph has plenty of real
+    // package cycles.
     const radii = computeRadii(g.inDegree, g.outDegree);
     const contraction = buildContraction(
       g,
@@ -277,7 +276,6 @@ export default class CyclesPanel extends Component {
     const rawPromise = this.visualizer.cycleRaw(
       Int32Array.from(this.viewState.hiddenEdgeTypes),
       remap,
-      MAX_CYCLES,
     );
 
     if (!rawPromise) return [];

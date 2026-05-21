@@ -178,20 +178,20 @@ export class SessionPipeline {
    *
    * `nodeRemap` is the JS contraction map (visible→self, hidden→owner,
    * unmappable→-1). When non-empty Rust enumerates on the *contracted*
-   * CSR — the returned cycles are already in bundled form, and
-   * `maxCycles` bounds bundled cycles. When empty Rust returns raw
-   * cycles and the JS pass (`bundleRawCyclesWithGroups`) does the
-   * contraction. The non-empty path is what saves do-not-commit-shaped
-   * graphs where intra-package file cycles otherwise fill the cap.
+   * CSR — the returned cycles are already in bundled form. When empty
+   * Rust returns raw cycles and the JS pass
+   * (`bundleRawCyclesWithGroups`) does the contraction. The non-empty
+   * path is what saves do-not-commit-shaped graphs where intra-package
+   * file cycles otherwise dominate.
+   *
+   * Enumeration is unbounded (exponential worst case); the call lives
+   * in the worker and the main thread ignores stale results via
+   * `getPromiseState`.
    */
-  rawCycles(
-    hiddenEdgeTypeIds: Int32Array,
-    nodeRemap: Int32Array,
-    maxCycles: number,
-  ): Promise<number[][]> {
+  rawCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Promise<number[][]> {
     return waitForPromise(
       this.#loaded
-        .then(() => this.#engine.rawCycles(hiddenEdgeTypeIds, nodeRemap, maxCycles))
+        .then(() => this.#engine.rawCycles(hiddenEdgeTypeIds, nodeRemap))
         .then((flat) => {
           const cycles: number[][] = [];
 

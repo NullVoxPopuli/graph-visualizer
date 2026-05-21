@@ -1,18 +1,6 @@
 import type { LoadedGraph } from "./types.ts";
 
 /**
- * Cap on raw cycles Rust returns per enumeration. Johnson's elementary
- * cycle enumeration is exponential worst-case, and on dense contracted
- * SCCs the count explodes (do-not-commit.json's 92-package SCC has
- * thousands of visually-distinct elementary cycles). The cap lives in
- * one place so the cycles-panel and info-panel ask for the same budget
- * and so it's easy to tune: bumped from 1000 to 5000 once parallel-edge
- * dedupe and JS visual-key dedupe made each emitted cycle pull its
- * weight instead of being a near-duplicate.
- */
-export const MAX_CYCLES = 5000;
-
-/**
  * Cheap cycle *presentation* helpers.
  *
  * The expensive elementary-cycle enumeration (Tarjan SCC + Johnson's,

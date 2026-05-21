@@ -11,7 +11,7 @@ import Flatbush from "flatbush";
 import { Camera } from "#lib/camera";
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
-import { bundleAlreadyContractedCycles, bundleRawCyclesWithGroups, MAX_CYCLES } from "#lib/cycle";
+import { bundleAlreadyContractedCycles, bundleRawCyclesWithGroups } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { RenderProxy } from "#lib/render-proxy";
@@ -504,7 +504,7 @@ export default class Visualizer extends Component {
     // cycle-membership mask used by the `cyclesOnly` filter is
     // available — the user can flip "cycles only" with no selection
     // and we still need to know which nodes are in cycles.
-    const rawPromise = this.visualizer.cycleRaw(NO_HIDDEN, this.nodeRemap, MAX_CYCLES);
+    const rawPromise = this.visualizer.cycleRaw(NO_HIDDEN, this.nodeRemap);
 
     if (rawPromise !== this.#rawPromise) {
       this.#rawPromise = rawPromise;

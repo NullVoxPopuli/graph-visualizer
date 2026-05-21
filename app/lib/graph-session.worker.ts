@@ -147,15 +147,18 @@ const sessionEngine = {
    *
    * `nodeRemap` is the contraction map (visible→self, hidden→owner,
    * unmappable→-1). Empty means "no contraction — return raw cycles".
-   * Non-empty means "enumerate on the contracted CSR" so `maxCycles`
-   * bounds *bundled* cycles, not raw ones. Without this, a graph
-   * whose raw cycles all sit inside one package collapses to zero
-   * bundled cycles after JS contraction; see the do-not-commit.json
-   * regression where the contracted graph has a 92-package SCC but
-   * Johnson's only saw 30 intra-package raw cycles.
+   * Non-empty means "enumerate on the contracted CSR". Without this, a
+   * graph whose raw cycles all sit inside one package collapses to
+   * zero bundled cycles after JS contraction; see the
+   * do-not-commit.json regression where the contracted graph has a
+   * 92-package SCC but Johnson's only saw 30 intra-package raw cycles.
+   *
+   * Enumeration runs to completion — no emission cap. On pathological
+   * inputs this can take a long time; the call is async and the main
+   * thread is expected to ignore stale results via `getPromiseState`.
    */
-  rawCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array, maxCycles: number): Int32Array {
-    return activeSession().raw_cycles(hiddenEdgeTypeIds, nodeRemap, maxCycles);
+  rawCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Int32Array {
+    return activeSession().raw_cycles(hiddenEdgeTypeIds, nodeRemap);
   },
 
   /** Drop the resident graph and free its WASM memory. */
