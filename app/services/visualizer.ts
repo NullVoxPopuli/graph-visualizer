@@ -3,6 +3,7 @@ import Service, { service } from "@ember/service";
 
 import { getPromiseState, type State } from "reactiveweb/get-promise-state";
 
+import { clusterByLcp, extractClusterStrings, isClusterMode } from "#lib/cluster";
 import { SessionPipeline } from "#lib/session-pipeline";
 
 import type GraphService from "./graph";
@@ -78,7 +79,7 @@ export default class VisualizerService extends Service {
    */
   #lastGraph: LoadedGraph | null = null;
   #lastClustering = Number.NaN;
-  #lastClusterByLabel = false;
+  #lastClusterBy: string | null = null;
   #lastAnalysisPromise: Promise<Analysis> | null = null;
 
   get analysis(): Promise<Analysis> | null {
@@ -94,12 +95,17 @@ export default class VisualizerService extends Service {
     }
 
     const clustering = this.viewState.clustering;
-    const clusterByLabel = this.viewState.clusterByLabel;
+    // URL strings that aren't one of the recognized cluster modes
+    // (`id` / `label` / `type` / `meta.<path>`) round down to `null`
+    // so the rest of the pipeline only sees "use Louvain" vs. "use
+    // these custom communities" — no scattered fallbacks elsewhere.
+    const rawMode = this.viewState.clusterBy;
+    const clusterBy = isClusterMode(rawMode) ? rawMode : null;
 
     if (
       g === this.#lastGraph &&
       clustering === this.#lastClustering &&
-      clusterByLabel === this.#lastClusterByLabel &&
+      clusterBy === this.#lastClusterBy &&
       this.#lastAnalysisPromise !== null
     ) {
       return this.#lastAnalysisPromise;
@@ -114,15 +120,18 @@ export default class VisualizerService extends Service {
 
     this.#lastGraph = g;
     this.#lastClustering = clustering;
-    this.#lastClusterByLabel = clusterByLabel;
+    this.#lastClusterBy = clusterBy;
 
     const pipeline = this.#pipeline!;
-    // Label-prefix grouping has no Louvain analogue — compute it here
-    // (cheap string ops) and inject it into the resident session.
-    const labelCommunities = clusterByLabel ? clusterByLabelPrefix(g) : null;
+    // Custom modes pull a string per node (from id / label / type /
+    // meta-path) and dynamically cluster by longest-common-prefix.
+    // Computed here (cheap) and injected into the resident session;
+    // `null` → Louvain runs at `clustering` resolution instead.
+    const customCommunities =
+      clusterBy !== null ? clusterByLcp(extractClusterStrings(g, clusterBy)) : null;
 
     this.#lastAnalysisPromise = pipeline
-      .analyze({ clusterByLabel, resolution: clustering, labelCommunities })
+      .analyze({ resolution: clustering, communities: customCommunities })
       .then(
         (info): Analysis => ({
           graph: g,
@@ -545,47 +554,4 @@ function fingerprintRemap(remap: Int32Array): string {
   }
 
   return `${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}:${remap.length}`;
-}
-
-/**
- * Group nodes by their label's parent prefix — everything before the last
- * "/" or "." separator, whichever appears later. Falls back to the whole
- * label when the label has no separator, so an `index.ts` and an `app.css`
- * at the root end up in their own buckets but `src/foo/a.ts` and
- * `src/foo/b.ts` cluster together as `src/foo`.
- */
-function clusterByLabelPrefix(graph: LoadedGraph): Int32Array {
-  const N = graph.labels.length;
-  const communities = new Int32Array(N);
-  const bucket = new Map<string, number>();
-
-  for (let i = 0; i < N; i++) {
-    const key = labelPrefix(graph.labels[i] ?? "");
-    let id = bucket.get(key);
-
-    if (id === undefined) {
-      id = bucket.size;
-      bucket.set(key, id);
-    }
-
-    communities[i] = id;
-  }
-
-  return communities;
-}
-
-function labelPrefix(label: string): string {
-  // Prefer "/" — paths group by parent directory. Fall back to "." only when
-  // there's no slash, so dotted namespaces like `com.foo.Bar` still cluster
-  // (`com.foo`). Naively taking the rightmost "/" or "." would treat the
-  // extension as a separator and put every file in its own bucket.
-  const slash = label.lastIndexOf("/");
-
-  if (slash > 0) return label.slice(0, slash);
-
-  const dot = label.lastIndexOf(".");
-
-  if (dot > 0) return label.slice(0, dot);
-
-  return label;
 }

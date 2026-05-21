@@ -721,6 +721,22 @@ pre code {
   cursor: pointer;
 }
 
+.cluster-by select,
+.cluster-by .cluster-by__path {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  padding: 2px 6px;
+}
+
+.cluster-by .cluster-by__path {
+  width: 12ch;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
 .controls__row button:hover {
   border-color: #3e4a5e;
 }

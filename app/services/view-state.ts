@@ -560,16 +560,28 @@ export default class ViewStateService extends Service {
   }
 
   /**
-   * When on, skip Louvain and bucket nodes by their label's path-style
-   * parent prefix (split on "/" or ".") — useful when the graph is
-   * organized by file path / package and topology-based communities don't
-   * line up with intuitive groupings. Off by default.
+   * Custom clustering mode. `null` (the URL param missing or empty) →
+   * fall back to Louvain at `clustering` resolution. Recognized
+   * non-null values:
+   *
+   * - `"id"` — group nodes whose ids share a longest common prefix
+   * - `"label"` — same, over display labels
+   * - `"type"` — same, over node type names (so all `package` nodes
+   *   land in one cluster, all `file` nodes in another)
+   * - `"meta.<dot.path>"` — walk per-node `meta` JSON at that path,
+   *   stringify the leaf, group by LCP across nodes
+   *
+   * The clustering itself is dynamic — there's no hard-coded `/` or
+   * `.` separator; `app/lib/cluster.ts` finds wherever the strings
+   * actually diverge. Any unrecognized value rounds back to Louvain.
    */
-  get clusterByLabel(): boolean {
-    return this.#qps["labelCluster"] === "1";
+  get clusterBy(): string | null {
+    const v = this.#qps["cluster"];
+
+    return typeof v === "string" && v.length > 0 ? v : null;
   }
-  set clusterByLabel(v: boolean) {
-    this.#setParam("labelCluster", v ? "1" : null);
+  set clusterBy(v: string | null) {
+    this.#setParam("cluster", v && v.length > 0 ? v : null);
   }
 
   /**

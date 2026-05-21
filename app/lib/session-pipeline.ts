@@ -71,24 +71,16 @@ export class SessionPipeline {
   }
 
   /**
-   * Community assignment for the requested clustering. `labelCommunities`
-   * is the JS label-prefix assignment (only used when `clusterByLabel`);
-   * otherwise Rust Louvain runs at `resolution`.
+   * Community assignment for the requested clustering. `communities`
+   * is a precomputed per-node Int32Array (currently produced by the
+   * JS-side `cluster.ts` for `id` / `label` / `type` / `meta.path`
+   * modes); pass `null` to run Rust Louvain at the given
+   * `resolution`.
    */
-  analyze(opts: {
-    clusterByLabel: boolean;
-    resolution: number;
-    labelCommunities: Int32Array | null;
-  }): Promise<SessionInfo> {
+  analyze(opts: { resolution: number; communities: Int32Array | null }): Promise<SessionInfo> {
     return waitForPromise(
       this.#loaded.then(() => {
-        if (opts.clusterByLabel) {
-          if (!opts.labelCommunities) {
-            throw new Error("SessionPipeline.analyze: clusterByLabel needs labelCommunities");
-          }
-
-          return this.#engine.setCommunities(opts.labelCommunities);
-        }
+        if (opts.communities !== null) return this.#engine.setCommunities(opts.communities);
 
         return this.#engine.setResolution(opts.resolution);
       }),
