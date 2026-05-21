@@ -320,7 +320,7 @@ export default class VisualizerService extends Service {
    * filter or a contraction forces a fresh run, but two callers
    * with the same view share one enumeration.
    *
-   * `#firstCycleByHidden` is the @tracked sister: set by the
+   * `firstCycleByHidden` is the @tracked sister: set by the
    * streaming `onFirstCycle` callback the moment the BFS finds its
    * first hit (~ first millisecond on most graphs), so `hasAnyCycle`
    * can short-circuit before the full sweep finishes. Reactive
@@ -335,7 +335,7 @@ export default class VisualizerService extends Service {
    *  signal lands after a pending DFS was already installed, we know to
    *  upgrade the cache. */
   #hasCycleShortcutKeys = new Set<string>();
-  @tracked #firstCycleByHidden: Map<string, true> = new Map();
+  @tracked private firstCycleByHidden: Map<string, true> = new Map();
 
   #resetCycleCachesIfStale(g: LoadedGraph): void {
     if (g !== this.#cycleGraph) {
@@ -343,7 +343,7 @@ export default class VisualizerService extends Service {
       this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
       this.#hasCycleShortcutKeys.clear();
-      this.#firstCycleByHidden = new Map();
+      this.firstCycleByHidden = new Map();
     }
   }
 
@@ -374,7 +374,7 @@ export default class VisualizerService extends Service {
       this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
       this.#hasCycleShortcutKeys.clear();
-      this.#firstCycleByHidden = new Map();
+      this.firstCycleByHidden = new Map();
 
       return null;
     }
@@ -390,16 +390,16 @@ export default class VisualizerService extends Service {
       // Streaming first-cycle callback. Worker calls this back via
       // Comlink.proxy the moment the BFS finds its first hit (~ first
       // millisecond on most graphs). Reassign the @tracked map so
-      // anyone reading `#firstCycleByHidden` (notably `hasAnyCycle`)
+      // anyone reading `firstCycleByHidden` (notably `hasAnyCycle`)
       // re-evaluates immediately — well before the full enumeration
       // finishes.
       p = pipeline.shortestCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP, () => {
-        if (this.#firstCycleByHidden.has(hiddenKey)) return;
+        if (this.firstCycleByHidden.has(hiddenKey)) return;
 
-        const next = new Map(this.#firstCycleByHidden);
+        const next = new Map(this.firstCycleByHidden);
 
         next.set(hiddenKey, true);
-        this.#firstCycleByHidden = next;
+        this.firstCycleByHidden = next;
       });
       this.#shortestCycleCache.set(key, p);
     }
@@ -412,7 +412,7 @@ export default class VisualizerService extends Service {
    *
    * Shares state with `cycleShortest`: when the BFS-per-node
    * enumeration fires its `onFirstCycle` streaming callback we set
-   * `#firstCycleByHidden[key] = true` and `hasAnyCycle` short-circuits
+   * `firstCycleByHidden[key] = true` and `hasAnyCycle` short-circuits
    * to `Promise.resolve(true)` immediately — even while the rest of
    * the enumeration is still running. Same answer for the case where
    * a `cycleShortest` for this filter has already *resolved* with
@@ -436,7 +436,7 @@ export default class VisualizerService extends Service {
       this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
       this.#hasCycleShortcutKeys.clear();
-      this.#firstCycleByHidden = new Map();
+      this.firstCycleByHidden = new Map();
 
       return null;
     }
@@ -445,12 +445,12 @@ export default class VisualizerService extends Service {
 
     const key = hiddenEdgeTypeIds.join(",");
 
-    // Streaming shortcut. Reading `#firstCycleByHidden` (tracked) makes
+    // Streaming shortcut. Reading `firstCycleByHidden` (tracked) makes
     // this getter re-evaluate the moment the worker fires its first-
     // cycle callback — much sooner than the full cycleShortest
     // resolution and much, much sooner than queueing a separate DFS
     // call behind it on the single-threaded worker.
-    let shortcutTrue = this.#firstCycleByHidden.has(key);
+    let shortcutTrue = this.firstCycleByHidden.has(key);
 
     // Also check already-resolved cycleShortest entries (any remap) —
     // a remap can only collapse cycles, not invent them, so a positive
