@@ -393,13 +393,9 @@ export default class VisualizerService extends Service {
       // Reset the tracker for the new run; the worker will start
       // calling the progress callback as soon as cycles surface.
       this.cycleAnalysisProgress = 0;
-      p = pipeline.rawCycles(
-        hiddenEdgeTypeIds,
-        nodeRemap ?? EMPTY_REMAP,
-        (count: number) => {
-          this.cycleAnalysisProgress = count;
-        },
-      );
+      p = pipeline.rawCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP, (count: number) => {
+        this.cycleAnalysisProgress = count;
+      });
 
       // Clear the tracker once this specific promise resolves — guards
       // against an older run's late `then` clobbering a newer run's

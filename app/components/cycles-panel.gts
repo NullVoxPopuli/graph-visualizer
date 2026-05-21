@@ -506,8 +506,9 @@ export default class CyclesPanel extends Component {
         {{#unless this.cycles.length}}
           <p class="cycles-panel__empty">
             {{#if (neq this.analysisProgress null)}}
-              Analyzing cycles… {{this.analysisProgress}} found so far. Johnson's is
-              exponential on dense components — this may take a while.
+              Analyzing cycles…
+              {{this.analysisProgress}}
+              found so far. Johnson's is exponential on dense components — this may take a while.
             {{else if (eq this.emptyReason "scoped")}}
               No cycles match the current view. Try clearing the selection (right-click in the
               canvas) or unhiding nodes.
