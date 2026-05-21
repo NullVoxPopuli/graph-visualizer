@@ -283,7 +283,15 @@ export default class CyclesPanel extends Component {
     );
     const remap = contraction?.nodeRemap ?? null;
 
-    const rawPromise = this.visualizer.cycleRaw(
+    // Polynomial-time shortest-cycle-per-node enumeration: bounded by V,
+    // runs in milliseconds on dense graphs where Johnson's
+    // (`cycleRaw`) would grind exponentially. The trade-off is that
+    // longer cycles built from shorter "shortcut" sub-cycles don't
+    // surface — for the panel's purpose (point users at actionable
+    // loops) the short cycles are the actionable thing anyway. The
+    // comprehensive Johnson's path stays in the service for future
+    // opt-in.
+    const rawPromise = this.visualizer.cycleShortest(
       Int32Array.from(this.viewState.hiddenEdgeTypes),
       remap,
     );

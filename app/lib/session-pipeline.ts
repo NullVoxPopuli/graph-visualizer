@@ -204,19 +204,25 @@ export class SessionPipeline {
             onProgress ? Comlink.proxy(onProgress) : null,
           ),
         )
-        .then((flat) => {
-          const cycles: number[][] = [];
-
-          for (let i = 0; i < flat.length; ) {
-            const len = flat[i++]!;
-
-            cycles.push(Array.from(flat.subarray(i, i + len)));
-            i += len;
-          }
-
-          return cycles;
-        }),
+        .then(decodeCycles),
       "graph-session:raw-cycles",
+    );
+  }
+
+  /**
+   * Polynomial-time cycle list — shortest cycle through each node in
+   * each non-trivial SCC, deduped and sorted shortest-first. Always
+   * bounded by V; runs in milliseconds even on dense graphs.
+   *
+   * Default view for the panels. Use `rawCycles` only when the user
+   * explicitly asks for the comprehensive elementary-cycle set.
+   */
+  shortestCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Promise<number[][]> {
+    return waitForPromise(
+      this.#loaded
+        .then(() => this.#engine.shortestCycles(hiddenEdgeTypeIds, nodeRemap))
+        .then(decodeCycles),
+      "graph-session:shortest-cycles",
     );
   }
 
@@ -227,4 +233,21 @@ export class SessionPipeline {
     void this.#engine.dispose().catch(() => {});
     this.#worker.terminate();
   }
+}
+
+/**
+ * Decode the worker's flat `[len0, n0_0, n0_1, …, len1, n1_0, …]` cycle
+ * buffer into `number[][]`. Shared by `rawCycles` and `shortestCycles`.
+ */
+function decodeCycles(flat: Int32Array): number[][] {
+  const cycles: number[][] = [];
+
+  for (let i = 0; i < flat.length; ) {
+    const len = flat[i++]!;
+
+    cycles.push(Array.from(flat.subarray(i, i + len)));
+    i += len;
+  }
+
+  return cycles;
 }

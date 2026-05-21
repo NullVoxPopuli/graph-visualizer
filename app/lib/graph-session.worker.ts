@@ -178,6 +178,20 @@ const sessionEngine = {
     );
   },
 
+  /**
+   * Polynomial-time cycle finder — for each node in a non-trivial SCC,
+   * returns the shortest cycle through that node (BFS in the SCC
+   * subgraph). Deduped by visual key, sorted shortest-first. At most
+   * `V` cycles total; in practice far fewer after dedup.
+   *
+   * Use this for the panels' default view. `rawCycles` (Johnson's,
+   * exponential worst case) is only worth running when the user
+   * explicitly asks for the comprehensive elementary-cycle list.
+   */
+  shortestCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Int32Array {
+    return activeSession().shortest_cycles(hiddenEdgeTypeIds, nodeRemap);
+  },
+
   /** Drop the resident graph and free its WASM memory. */
   dispose(): void {
     session?.free();

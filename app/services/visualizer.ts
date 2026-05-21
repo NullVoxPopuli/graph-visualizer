@@ -327,6 +327,7 @@ export default class VisualizerService extends Service {
    */
   #cycleGraph: LoadedGraph | null = null;
   #cycleCache = new Map<string, Promise<number[][]>>();
+  #shortestCycleCache = new Map<string, Promise<number[][]>>();
   #hasCycleCache = new Map<string, Promise<boolean>>();
 
   /**
@@ -349,6 +350,7 @@ export default class VisualizerService extends Service {
     if (g !== this.#cycleGraph) {
       this.#cycleGraph = g;
       this.#cycleCache.clear();
+      this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
       this.cycleAnalysisProgress = null;
     }
@@ -373,6 +375,7 @@ export default class VisualizerService extends Service {
     if (!g || !pipeline) {
       this.#cycleGraph = null;
       this.#cycleCache.clear();
+      this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
       this.cycleAnalysisProgress = null;
 
@@ -414,6 +417,49 @@ export default class VisualizerService extends Service {
           }
         });
       this.#cycleCache.set(key, p);
+    }
+
+    return p;
+  }
+
+  /**
+   * Shortest cycle through each node in each non-trivial SCC, deduped
+   * and sorted shortest-first. Polynomial time (`O(V·(V+E))` per SCC),
+   * runs in milliseconds even on dense graphs — the default cycle view
+   * for the panels. Use `cycleRaw` only when the user explicitly asks
+   * for the comprehensive elementary-cycle enumeration.
+   *
+   * Same caching contract as `cycleRaw`: per-graph + edge-type +
+   * contraction fingerprint, and `null` until a graph + session exist.
+   */
+  cycleShortest(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array | null,
+  ): Promise<number[][]> | null {
+    void this.analysis;
+
+    const g = this.graph.current;
+    const pipeline = this.#pipeline;
+
+    if (!g || !pipeline) {
+      this.#cycleGraph = null;
+      this.#cycleCache.clear();
+      this.#shortestCycleCache.clear();
+      this.#hasCycleCache.clear();
+      this.cycleAnalysisProgress = null;
+
+      return null;
+    }
+
+    this.#resetCycleCachesIfStale(g);
+
+    const remapKey = nodeRemap ? fingerprintRemap(nodeRemap) : "";
+    const key = `${hiddenEdgeTypeIds.join(",")}|${remapKey}`;
+    let p = this.#shortestCycleCache.get(key);
+
+    if (!p) {
+      p = pipeline.shortestCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP);
+      this.#shortestCycleCache.set(key, p);
     }
 
     return p;

@@ -885,6 +885,150 @@ pub fn find_all_cycles(
     cycles
 }
 
+/// Polynomial-time alternative to `find_all_cycles`. For each node v
+/// in a non-trivial SCC, BFS the SCC subgraph from v to find the
+/// shortest cycle through v (i.e. the shortest v → … → v path of
+/// length ≥ 2). Dedupe by visual key, return sorted shortest-first.
+///
+/// Returns at most `V` cycles in total — usually far fewer after
+/// dedup, since many nodes share their shortest cycle. Time
+/// O(V·(V+E)) per SCC; memory O(V+E) working plus O(output).
+///
+/// Trade-off vs. `find_all_cycles`: misses longer cycles that aren't
+/// "shortest through any node" — e.g. a 4-cycle built from two
+/// 2-cycle "shortcuts" surfaces as the two 2-cycles, not as the
+/// 4-cycle. For a human reading the panel that's typically the right
+/// call: the actionable loops are the small tight ones, and large
+/// overlapping cycles are just compositions of them. Bounded output
+/// also means the panel always renders something — no spinner, no
+/// exponential blowup, no "analyzing… N found" copy.
+pub fn shortest_cycles_per_node(
+    n: usize,
+    edges_flat: &[i32],
+    edge_type_ids: &[i32],
+    node_remap: Option<&[i32]>,
+    hidden: Option<&[bool]>,
+) -> Vec<Vec<i32>> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let (out_idx, out_adj) = build_csr_cycles(n, edges_flat, edge_type_ids, node_remap, hidden);
+    let sccs = tarjan_scc(n, &out_idx, &out_adj, 0, node_remap);
+
+    // Map each node to its non-trivial SCC id (-1 means "not in any
+    // cycle"). Tarjan returns single-node SCCs too; we want only those
+    // with size ≥ 2 (self-loops are stripped in `build_csr_cycles`, so
+    // a 1-node SCC means a node with no in-cycle membership).
+    let mut node_scc = vec![-1i32; n];
+    for (i, scc) in sccs.iter().enumerate() {
+        if scc.len() < 2 {
+            continue;
+        }
+        for &v in scc {
+            node_scc[v as usize] = i as i32;
+        }
+    }
+
+    let mut cycles: Vec<Vec<i32>> = Vec::new();
+    let mut seen: std::collections::HashSet<VisualKey> = std::collections::HashSet::new();
+
+    // Scratch buffers reused across BFS runs. `visited_nodes` lists the
+    // nodes we touched so we can selectively reset just those entries
+    // instead of zeroing the whole `dist`/`parent` arrays per call —
+    // cheap on big graphs where each BFS touches only its SCC.
+    let mut dist = vec![-1i32; n];
+    let mut parent = vec![-1i32; n];
+    let mut queue: std::collections::VecDeque<i32> = std::collections::VecDeque::new();
+    let mut visited_nodes: Vec<i32> = Vec::new();
+
+    for v in 0..n as i32 {
+        let scc_id = node_scc[v as usize];
+        if scc_id < 0 {
+            continue;
+        }
+
+        // Reset only what the previous BFS touched.
+        for &u in &visited_nodes {
+            dist[u as usize] = -1;
+            parent[u as usize] = -1;
+        }
+        visited_nodes.clear();
+        queue.clear();
+
+        // Seed BFS with v's out-neighbors at distance 1. We don't mark v
+        // itself as visited so that the first time we re-encounter v
+        // (via an edge from some node u) we close a cycle, not bounce
+        // off a "self-visited" guard.
+        let from = out_idx[v as usize];
+        let to = out_idx[v as usize + 1];
+        for j in from..to {
+            let w = out_adj[j as usize];
+            if w == v {
+                continue; // self-loop already stripped, defensive
+            }
+            if node_scc[w as usize] != scc_id {
+                continue;
+            }
+            if dist[w as usize] != -1 {
+                continue;
+            }
+            dist[w as usize] = 1;
+            parent[w as usize] = v;
+            visited_nodes.push(w);
+            queue.push_back(w);
+        }
+
+        // BFS until we find an out-edge of some `u` that targets v —
+        // that closes the shortest cycle v → … → u → v.
+        let mut found: i32 = -1;
+        'outer: while let Some(u) = queue.pop_front() {
+            let from = out_idx[u as usize];
+            let to = out_idx[u as usize + 1];
+            for j in from..to {
+                let w = out_adj[j as usize];
+                if w == v {
+                    found = u;
+                    break 'outer;
+                }
+                if node_scc[w as usize] != scc_id {
+                    continue;
+                }
+                if dist[w as usize] != -1 {
+                    continue;
+                }
+                dist[w as usize] = dist[u as usize] + 1;
+                parent[w as usize] = u;
+                visited_nodes.push(w);
+                queue.push_back(w);
+            }
+        }
+
+        if found < 0 {
+            continue; // shouldn't happen for a node in a non-trivial SCC
+        }
+
+        // Reconstruct the cycle: walk parent pointers from `found` back
+        // to v, push each node, then reverse. Result is [v, n1, n2, …,
+        // found] with the closing edge found → v implicit.
+        let mut cycle: Vec<i32> = Vec::new();
+        let mut cur = found;
+        while cur != v {
+            cycle.push(cur);
+            cur = parent[cur as usize];
+        }
+        cycle.push(v);
+        cycle.reverse();
+
+        let key = visual_cycle_key(&cycle);
+        if seen.insert(key) {
+            cycles.push(cycle);
+        }
+    }
+
+    cycles.sort_by_key(|c| c.len());
+    cycles
+}
+
 /// Port of cycle.ts `contractCycle`.
 fn contract_cycle(raw: &[i32], node_remap: Option<&[i32]>) -> Option<Vec<i32>> {
     let Some(rm) = node_remap else {

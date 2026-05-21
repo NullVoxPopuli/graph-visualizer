@@ -492,6 +492,39 @@ impl GraphSession {
         flat
     }
 
+    /// Polynomial-time cycle finder. For each node in a non-trivial
+    /// SCC, returns the shortest cycle through that node (BFS in the
+    /// SCC subgraph). Deduped by visual key, sorted shortest-first.
+    /// At most `V` cycles total.
+    ///
+    /// Same flat encoding as `raw_cycles`:
+    /// `[len0, n0_0, n0_1, …, len1, n1_0, …]`. Same `node_remap` /
+    /// `hidden_edge_type_ids` semantics — empty `&[i32]` means "no
+    /// remap" / "no edge-type filter".
+    ///
+    /// Use this instead of `raw_cycles` whenever the panel just needs
+    /// "what are the actionable loops here?" — `raw_cycles` enumerates
+    /// every elementary cycle (Tarjan + Johnson's, exponential worst
+    /// case) and is only worth its cost when the user explicitly asks
+    /// for the comprehensive set.
+    pub fn shortest_cycles(&self, hidden_edge_type_ids: &[i32], node_remap: &[i32]) -> Vec<i32> {
+        let hidden = self.hidden_type_mask(hidden_edge_type_ids);
+        let remap = if node_remap.is_empty() { None } else { Some(node_remap) };
+        let cycles = graph::shortest_cycles_per_node(
+            self.parsed.ids.len(),
+            &self.parsed.edges_flat,
+            &self.parsed.edge_type_ids,
+            remap,
+            hidden.as_deref(),
+        );
+        let mut flat = Vec::new();
+        for c in &cycles {
+            flat.push(c.len() as i32);
+            flat.extend_from_slice(c);
+        }
+        flat
+    }
+
     /// Boolean mask over edge-type ids: `mask[t] == true` ⇒ edges of
     /// type `t` are hidden. Empty input ⇒ no filter (`None`).
     fn hidden_type_mask(&self, hidden_edge_type_ids: &[i32]) -> Option<Vec<bool>> {

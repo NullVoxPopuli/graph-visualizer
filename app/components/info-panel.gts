@@ -459,7 +459,9 @@ export default class InfoPanel extends Component {
     // node (its loops are absorbed into the owner).
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    const rawPromise = this.visualizer.cycleRaw(Int32Array.from(vs.hiddenEdgeTypes), remap);
+    // Polynomial shortest-cycle-per-node enumeration; see the matching
+    // call site in `cycles-panel.gts` for the trade-off note.
+    const rawPromise = this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), remap);
 
     if (!rawPromise) return [];
 
@@ -520,11 +522,11 @@ export default class InfoPanel extends Component {
     // sense. The user should select the owner instead.
     if (remap[info.index]! !== info.index) return [];
 
-    // Ask Rust for the *raw* (un-contracted) enumeration so we can see
-    // file-level cycles. Cached separately from the contracted path —
-    // the visualizer's cycle cache keys on the remap, so the two
-    // promises coexist without invalidating each other.
-    const rawPromise = this.visualizer.cycleRaw(Int32Array.from(vs.hiddenEdgeTypes), null);
+    // Shortest cycles on the *un-contracted* CSR so file-level loops
+    // surface. Cached separately from the contracted path — the
+    // visualizer's cycle cache keys on the remap, so the two promises
+    // coexist without invalidating each other.
+    const rawPromise = this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), null);
 
     if (!rawPromise) return [];
 
