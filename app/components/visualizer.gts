@@ -13,7 +13,7 @@ import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
 import { bundleAlreadyContractedCycles, bundleRawCyclesWithGroups } from "#lib/cycle";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
-import { packArrows, packEdges, packNodes } from "#lib/pack";
+import { packArrows, packEdges, packNodeFlags, packNodes } from "#lib/pack";
 import { RenderProxy } from "#lib/render-proxy";
 
 import Controls from "./controls.gts";
@@ -503,12 +503,23 @@ export default class Visualizer extends Component {
    * iteration *after* the selection change so the ring uniform paints
    * first; latest selection wins because we always read the current
    * scene + `selectedIdx`.
+   *
+   * The instance-flags patch (`repackNodeFlagsOnly`) is the perf-
+   * critical bit on big graphs: on a 100k-node graph the full
+   * `packNodes` walk runs `communityColorInto` per node (≈20 ms of
+   * HSL→RGB math) for no semantic reason — community palette and
+   * node geometry don't move on selection. The flags-only path
+   * patches just the bitmask column in the existing instance buffer
+   * (~2 ms on 100k nodes), skipping the entire color recompute. Full
+   * `repackNodes` is reserved for events that actually invalidate
+   * the static columns (initial load, scene swap, node-type filter,
+   * layout settle).
    */
   private flushSelectionRepack(scene: ProcessedScene): void {
-    // Cycle must come first — `repackNodes` reads `cycleMask` so the
-    // red outline shows up the same frame the cycle edges do.
+    // Cycle must come first — `repackNodeFlagsOnly` reads `cycleMask`
+    // so the red outline shows up the same frame the cycle edges do.
     this.repackCycle(scene);
-    this.repackNodes(scene);
+    this.repackNodeFlagsOnly(scene);
 
     // When the global edges toggle is off we only show the edges touching
     // the selected node, so changing the selection swaps the visible set.
@@ -519,6 +530,31 @@ export default class Visualizer extends Component {
     }
 
     this.dirty = true;
+  }
+
+  /**
+   * Patch only the per-instance `flags` byte of `nodeInstanceBuf` and
+   * re-upload — skipping the per-node community color computation
+   * that dominates `packNodes`. Safe whenever the static columns
+   * (position, radius, color, alpha) haven't moved since the last full
+   * `repackNodes` — i.e. on selection / hover / dim / cycle changes.
+   */
+  private repackNodeFlagsOnly(scene: ProcessedScene): void {
+    if (!this.renderer) return;
+
+    const N = scene.communities.length;
+
+    // If we somehow haven't done a full pack yet (e.g. flush fires
+    // before the initial scene-load rebuild), fall back — static
+    // columns need to land first.
+    if (this.nodeInstanceBuf.length < N * 8) {
+      this.repackNodes(scene);
+
+      return;
+    }
+
+    packNodeFlags(this.nodeInstanceBuf, N, this.hoveredIdx, this.dimMask, this.cycleMask);
+    this.renderer.uploadNodeInstances(this.nodeInstanceBuf, N);
   }
 
   /**
@@ -1215,7 +1251,10 @@ export default class Visualizer extends Component {
     if (resolved === this.hoveredIdx && externalId === this.lastExternalHoverId) return;
     this.hoveredIdx = resolved;
     this.lastExternalHoverId = externalId;
-    this.repackNodes(scene);
+    // Hover changes only flip the per-node flags byte — same path the
+    // selection-deferred flush uses to avoid the per-node community
+    // color recompute that dominates `packNodes` on big graphs.
+    this.repackNodeFlagsOnly(scene);
     this.dirty = true;
   }
 

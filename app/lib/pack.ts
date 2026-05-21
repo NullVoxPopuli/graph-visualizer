@@ -72,6 +72,38 @@ export function packNodes(
 }
 
 /**
+ * Patch only the per-instance `flags` byte (offset 7 of each 8-float
+ * instance) in an existing buffer — leaves position, radius, color,
+ * and alpha untouched. Use this on selection / hover / dim / cycle
+ * changes where the community palette and node geometry haven't
+ * moved: it skips the per-node `communityColorInto` HSL→RGB math,
+ * which dominates `packNodes` on big graphs (≈20 ms on 100k nodes vs
+ * ≈2 ms here).
+ *
+ * Caller is responsible for ensuring `buf` was built by `packNodes`
+ * for the same `(positions, communities, hideMask)` triple — i.e.
+ * nothing structural has changed. If those *do* change (graph swap,
+ * type filter, layout settle), go back through the full `packNodes`
+ * to refresh the static columns too.
+ */
+export function packNodeFlags(
+  buf: Float32Array,
+  count: number,
+  hovered: number,
+  dimMask: Uint8Array | null,
+  cycleMask: Uint8Array | null,
+): void {
+  for (let i = 0; i < count; i++) {
+    let flags = 0;
+
+    if (i === hovered) flags |= 2;
+    if (cycleMask !== null && cycleMask[i] === 1) flags |= 4;
+    if (dimMask !== null && dimMask[i] === 1) flags |= 8;
+    buf[i * 8 + 7] = flags;
+  }
+}
+
+/**
  * Pack edge line vertices (6 floats per vertex, 2 vertices per edge):
  *   (x, y, r, g, b, a)
  * Per-edge alpha is community-cross-aware: edges crossing community
