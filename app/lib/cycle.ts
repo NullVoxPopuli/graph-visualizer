@@ -1,28 +1,16 @@
 import type { LoadedGraph } from "./types.ts";
 
 /**
- * Cap on raw cycles Rust returns per enumeration. Johnson's elementary
- * cycle enumeration is exponential worst-case, and on dense contracted
- * SCCs the count explodes (do-not-commit.json's 92-package SCC has
- * thousands of visually-distinct elementary cycles). The cap lives in
- * one place so the cycles-panel and info-panel ask for the same budget
- * and so it's easy to tune: bumped from 1000 to 5000 once parallel-edge
- * dedupe and JS visual-key dedupe made each emitted cycle pull its
- * weight instead of being a near-duplicate.
- */
-export const MAX_CYCLES = 5000;
-
-/**
  * Cheap cycle *presentation* helpers.
  *
- * The expensive elementary-cycle enumeration (Tarjan SCC + Johnson's,
- * exponential in the worst case) now runs once in the resident Rust
- * session — see `GraphSession.raw_cycles` / `VisualizerService.cycleRaw`.
- * This module is only the synchronous post-processing the panels apply
- * to that fixed raw-cycle list: contract through the collapsed-node
- * remap, dedupe by visual key, and assign stable short ids. None of it
- * touches the graph, so it stays in JS and runs instantly as the user
- * toggles collapse / selection.
+ * The cycle enumeration itself runs once in the resident Rust session
+ * — see `GraphSession.shortest_cycles` / `VisualizerService.cycleShortest`
+ * (Tarjan SCC + BFS-per-node, polynomial). This module is only the
+ * synchronous post-processing the panels apply to that fixed cycle
+ * list: contract through the collapsed-node remap, dedupe by visual
+ * key, and assign stable short ids. None of it touches the graph, so
+ * it stays in JS and runs instantly as the user toggles collapse /
+ * selection.
  */
 
 /**
@@ -217,7 +205,7 @@ function fnv1aHex(input: string): string {
 
 /**
  * When Rust enumerates cycles on the *contracted* CSR (i.e., a non-null
- * `nodeRemap` was passed to `raw_cycles`), each returned cycle is
+ * `nodeRemap` was passed to `shortest_cycles`), each returned cycle is
  * already a sequence of visible reps — none of the hidden files that
  * actually formed the underlying graph cycle survive. The cycles-panel
  * still wants to show those files under each bundled step (so the user

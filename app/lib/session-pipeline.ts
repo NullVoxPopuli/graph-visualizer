@@ -23,8 +23,8 @@
  *    nothing ever awaits them.
  *
  * Test-waiter integration: `load` + every query (`analyze`,
- * `findOrphans`, `hasAnyOrphan`, `hasAnyCycle`, `rawCycles`) is wrapped
- * in `waitForPromise`, so `settled()` / `await render()` block until the
+ * `findOrphans`, `hasAnyOrphan`, `hasAnyCycle`, `shortestCycles`) is
+ * wrapped in `waitForPromise`, so `settled()` / `await render()` block until the
  * worker result the UI consumes is in — tests assert on semantics, no
  * `waitUntil` polling. `waitForPromise` compiles to a plain passthrough
  * in production builds (zero overhead). `layout` is deliberately *not*
@@ -36,13 +36,14 @@ import { waitForPromise } from "@ember/test-waiters";
 import * as Comlink from "comlink";
 
 import type {
+  CycleFirstFound,
   LayoutParams,
   LayoutProgress,
   SessionEngine,
   SessionInfo,
 } from "#lib/graph-session.worker";
 
-export type { LayoutParams, SessionInfo } from "#lib/graph-session.worker";
+export type { CycleFirstFound, LayoutParams, SessionInfo } from "#lib/graph-session.worker";
 
 interface QueuedLayout {
   params: LayoutParams;
@@ -173,38 +174,38 @@ export class SessionPipeline {
   }
 
   /**
-   * Elementary cycles as `number[][]` (node indices). Runs once in Rust
-   * on the resident graph.
+   * Shortest cycle through each node in each non-trivial SCC, as
+   * `number[][]` (node indices). Polynomial time (`O(V·(V+E))` per
+   * SCC), deduped by visual key, sorted shortest-first. Runs once in
+   * Rust on the resident graph.
    *
    * `nodeRemap` is the JS contraction map (visible→self, hidden→owner,
    * unmappable→-1). When non-empty Rust enumerates on the *contracted*
-   * CSR — the returned cycles are already in bundled form, and
-   * `maxCycles` bounds bundled cycles. When empty Rust returns raw
-   * cycles and the JS pass (`bundleRawCyclesWithGroups`) does the
-   * contraction. The non-empty path is what saves do-not-commit-shaped
-   * graphs where intra-package file cycles otherwise fill the cap.
+   * CSR — the returned cycles are already in bundled form. When empty
+   * Rust returns raw cycles and the JS pass
+   * (`bundleRawCyclesWithGroups`) does the contraction. The non-empty
+   * path is what saves do-not-commit-shaped graphs where intra-package
+   * file cycles otherwise dominate.
+   *
+   * `onFirstCycle`, when provided, fires once the first cycle is
+   * found — used by the service to resolve `hasAnyCycle` early.
    */
-  rawCycles(
+  shortestCycles(
     hiddenEdgeTypeIds: Int32Array,
     nodeRemap: Int32Array,
-    maxCycles: number,
+    onFirstCycle: CycleFirstFound | null = null,
   ): Promise<number[][]> {
     return waitForPromise(
       this.#loaded
-        .then(() => this.#engine.rawCycles(hiddenEdgeTypeIds, nodeRemap, maxCycles))
-        .then((flat) => {
-          const cycles: number[][] = [];
-
-          for (let i = 0; i < flat.length; ) {
-            const len = flat[i++]!;
-
-            cycles.push(Array.from(flat.subarray(i, i + len)));
-            i += len;
-          }
-
-          return cycles;
-        }),
-      "graph-session:raw-cycles",
+        .then(() =>
+          this.#engine.shortestCycles(
+            hiddenEdgeTypeIds,
+            nodeRemap,
+            onFirstCycle ? Comlink.proxy(onFirstCycle) : null,
+          ),
+        )
+        .then(decodeCycles),
+      "graph-session:shortest-cycles",
     );
   }
 
@@ -215,4 +216,21 @@ export class SessionPipeline {
     void this.#engine.dispose().catch(() => {});
     this.#worker.terminate();
   }
+}
+
+/**
+ * Decode the worker's flat `[len0, n0_0, n0_1, …, len1, n1_0, …]` cycle
+ * buffer into `number[][]`.
+ */
+function decodeCycles(flat: Int32Array): number[][] {
+  const cycles: number[][] = [];
+
+  for (let i = 0; i < flat.length; ) {
+    const len = flat[i++]!;
+
+    cycles.push(Array.from(flat.subarray(i, i + len)));
+    i += len;
+  }
+
+  return cycles;
 }

@@ -28,6 +28,14 @@ import init, { GraphSession } from "#lib/wasm/layout_wasm";
  */
 export type LayoutProgress = (tick: number, total: number) => void;
 
+/**
+ * One-shot signal from `shortestCycles` fired the moment a cycle is
+ * first found — lets the main thread resolve `hasAnyCycle` early
+ * without queueing a separate DFS call. Comlink-proxied like the
+ * other worker callbacks.
+ */
+export type CycleFirstFound = () => void;
+
 let wasmReady: Promise<unknown> | null = null;
 let session: GraphSession | null = null;
 
@@ -142,20 +150,37 @@ const sessionEngine = {
   },
 
   /**
-   * Elementary cycles (Tarjan+Johnson's, exponential-worst-case) as a
-   * flat `[len, …nodes, len, …nodes]` buffer.
+   * Polynomial shortest-cycle-per-node enumeration as a flat
+   * `[len, …nodes, len, …nodes]` buffer. For each node in a
+   * non-trivial SCC, returns the shortest cycle through that node
+   * (BFS in the SCC subgraph). Deduped by visual key, sorted
+   * shortest-first. At most `V` cycles total; in practice far fewer
+   * after dedup.
    *
    * `nodeRemap` is the contraction map (visible→self, hidden→owner,
    * unmappable→-1). Empty means "no contraction — return raw cycles".
-   * Non-empty means "enumerate on the contracted CSR" so `maxCycles`
-   * bounds *bundled* cycles, not raw ones. Without this, a graph
-   * whose raw cycles all sit inside one package collapses to zero
-   * bundled cycles after JS contraction; see the do-not-commit.json
-   * regression where the contracted graph has a 92-package SCC but
-   * Johnson's only saw 30 intra-package raw cycles.
+   * Non-empty means "enumerate on the contracted CSR". Without this, a
+   * graph whose raw cycles all sit inside one package collapses to
+   * zero bundled cycles after JS contraction; see the
+   * do-not-commit.json regression where the contracted graph has a
+   * 92-package SCC but raw enumeration only saw 30 intra-package
+   * cycles.
+   *
+   * `onFirstCycle`, when provided, is fired once the first cycle is
+   * found — the main thread uses it to resolve `hasAnyCycle` ahead of
+   * the full enumeration. Worker is single-threaded, so queueing a
+   * separate DFS call would just serialize behind this anyway.
    */
-  rawCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array, maxCycles: number): Int32Array {
-    return activeSession().raw_cycles(hiddenEdgeTypeIds, nodeRemap, maxCycles);
+  shortestCycles(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array,
+    onFirstCycle: CycleFirstFound | null = null,
+  ): Int32Array {
+    return activeSession().shortest_cycles(
+      hiddenEdgeTypeIds,
+      nodeRemap,
+      onFirstCycle ? () => onFirstCycle() : undefined,
+    );
   },
 
   /** Drop the resident graph and free its WASM memory. */

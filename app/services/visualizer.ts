@@ -315,37 +315,54 @@ export default class VisualizerService extends Service {
   }
 
   /**
-   * Elementary cycles computed in the resident Rust session as
-   * `number[][]` node-index lists. Memoized per (graph, edge-type
-   * filter, node-contraction map): the remap key matters because Rust
-   * enumerates on the *contracted* CSR when a remap is passed — so the
-   * `maxCycles` cap bounds bundled cycles instead of raw ones. Same
-   * non-blocking promise-state contract as `orphanIndices`. `null`
-   * until a graph + session exist.
+   * Cache for the resident Rust session's cycle enumeration. Keyed
+   * by `${hiddenEdgeTypes}|${remapFingerprint}` so toggling a type
+   * filter or a contraction forces a fresh run, but two callers
+   * with the same view share one enumeration.
+   *
+   * `firstCycleByHidden` is the @tracked sister: set by the
+   * streaming `onFirstCycle` callback the moment the BFS finds its
+   * first hit (~ first millisecond on most graphs), so `hasAnyCycle`
+   * can short-circuit before the full sweep finishes. Reactive
+   * consumers re-evaluate when it's reassigned in the callback.
    */
   #cycleGraph: LoadedGraph | null = null;
-  #cycleCache = new Map<string, Promise<number[][]>>();
+  #shortestCycleCache = new Map<string, Promise<number[][]>>();
   #hasCycleCache = new Map<string, Promise<boolean>>();
+  /** Keys in `#hasCycleCache` filled via the streaming/cache shortcut
+   *  rather than the dedicated DFS. Lets us tell a "resolved-true via
+   *  shortcut" entry from a pending DFS promise — so when the streaming
+   *  signal lands after a pending DFS was already installed, we know to
+   *  upgrade the cache. */
+  #hasCycleShortcutKeys = new Set<string>();
+  @tracked private firstCycleByHidden: Map<string, true> = new Map();
 
   #resetCycleCachesIfStale(g: LoadedGraph): void {
     if (g !== this.#cycleGraph) {
       this.#cycleGraph = g;
-      this.#cycleCache.clear();
+      this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
+      this.#hasCycleShortcutKeys.clear();
+      this.firstCycleByHidden = new Map();
     }
   }
 
   /**
-   * `nodeRemap` lets the caller hand the resident Rust session a JS-built
-   * contraction map (see `buildContraction`). Pass `null` when no
-   * contraction is active. The remap is fingerprinted into the cache key
-   * — two callers that build the same remap reuse one enumeration, but
-   * toggling a node-type filter forces a fresh Rust run.
+   * Shortest cycle through each node in each non-trivial SCC, deduped
+   * and sorted shortest-first. Polynomial time (`O(V·(V+E))` per SCC),
+   * runs in milliseconds even on dense graphs.
+   *
+   * `nodeRemap` lets the caller hand the resident Rust session a
+   * JS-built contraction map (see `buildContraction`). Pass `null`
+   * when no contraction is active. The remap is fingerprinted into
+   * the cache key so two callers that build the same remap reuse one
+   * enumeration; a different remap forces a fresh Rust run.
+   *
+   * `null` until a graph + session exist.
    */
-  cycleRaw(
+  cycleShortest(
     hiddenEdgeTypeIds: Int32Array,
     nodeRemap: Int32Array | null,
-    maxCycles: number,
   ): Promise<number[][]> | null {
     void this.analysis;
 
@@ -354,32 +371,60 @@ export default class VisualizerService extends Service {
 
     if (!g || !pipeline) {
       this.#cycleGraph = null;
-      this.#cycleCache.clear();
+      this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
+      this.#hasCycleShortcutKeys.clear();
+      this.firstCycleByHidden = new Map();
 
       return null;
     }
 
     this.#resetCycleCachesIfStale(g);
 
-    // Empty remap == "no contraction" on the Rust side. Hashing it into
-    // the key keeps every distinct visibility filter as its own cached
-    // entry; without that, toggling a type would silently reuse stale
-    // cycles enumerated on a different remap.
+    const hiddenKey = hiddenEdgeTypeIds.join(",");
     const remapKey = nodeRemap ? fingerprintRemap(nodeRemap) : "";
-    const key = `${hiddenEdgeTypeIds.join(",")}|${remapKey}|${maxCycles}`;
-    let p = this.#cycleCache.get(key);
+    const key = `${hiddenKey}|${remapKey}`;
+    let p = this.#shortestCycleCache.get(key);
 
     if (!p) {
-      p = pipeline.rawCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP, maxCycles);
-      this.#cycleCache.set(key, p);
+      // Streaming first-cycle callback. Worker calls this back via
+      // Comlink.proxy the moment the BFS finds its first hit (~ first
+      // millisecond on most graphs). Reassign the @tracked map so
+      // anyone reading `firstCycleByHidden` (notably `hasAnyCycle`)
+      // re-evaluates immediately — well before the full enumeration
+      // finishes.
+      p = pipeline.shortestCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP, () => {
+        if (this.firstCycleByHidden.has(hiddenKey)) return;
+
+        const next = new Map(this.firstCycleByHidden);
+
+        next.set(hiddenKey, true);
+        this.firstCycleByHidden = next;
+      });
+      this.#shortestCycleCache.set(key, p);
     }
 
     return p;
   }
 
-  /** Whether any cycle exists under the edge-type filter. Memoized;
-   *  same non-blocking contract as the rest. `null` until ready. */
+  /**
+   * Whether any cycle exists under the edge-type filter.
+   *
+   * Shares state with `cycleShortest`: when the BFS-per-node
+   * enumeration fires its `onFirstCycle` streaming callback we set
+   * `firstCycleByHidden[key] = true` and `hasAnyCycle` short-circuits
+   * to `Promise.resolve(true)` immediately — even while the rest of
+   * the enumeration is still running. Same answer for the case where
+   * a `cycleShortest` for this filter has already *resolved* with
+   * cycles (e.g., a panel asked first and the result is cached).
+   *
+   * Falls back to the dedicated O(V+E) coloured-DFS in Rust when
+   * neither signal is available — e.g. nobody has asked for
+   * `cycleShortest` yet, or the graph genuinely has no cycles.
+   *
+   * Memoized; same non-blocking contract as the rest. `null` until
+   * ready.
+   */
   hasAnyCycle(hiddenEdgeTypeIds: Int32Array): Promise<boolean> | null {
     void this.analysis;
 
@@ -388,8 +433,10 @@ export default class VisualizerService extends Service {
 
     if (!g || !pipeline) {
       this.#cycleGraph = null;
-      this.#cycleCache.clear();
+      this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
+      this.#hasCycleShortcutKeys.clear();
+      this.firstCycleByHidden = new Map();
 
       return null;
     }
@@ -397,6 +444,47 @@ export default class VisualizerService extends Service {
     this.#resetCycleCachesIfStale(g);
 
     const key = hiddenEdgeTypeIds.join(",");
+
+    // Streaming shortcut. Reading `firstCycleByHidden` (tracked) makes
+    // this getter re-evaluate the moment the worker fires its first-
+    // cycle callback — much sooner than the full cycleShortest
+    // resolution and much, much sooner than queueing a separate DFS
+    // call behind it on the single-threaded worker.
+    let shortcutTrue = this.firstCycleByHidden.has(key);
+
+    // Also check already-resolved cycleShortest entries (any remap) —
+    // a remap can only collapse cycles, not invent them, so a positive
+    // contracted result implies the raw graph has cycles. This covers
+    // the case where cycleShortest finished before `hasAnyCycle` was
+    // first called and the streaming callback already fired.
+    if (!shortcutTrue) {
+      const prefix = `${key}|`;
+
+      for (const [cacheKey, sp] of this.#shortestCycleCache) {
+        if (!cacheKey.startsWith(prefix)) continue;
+
+        const resolved = getPromiseState(sp).resolved;
+
+        if (resolved !== undefined && resolved.length > 0) {
+          shortcutTrue = true;
+
+          break;
+        }
+      }
+    }
+
+    if (shortcutTrue) {
+      // Upgrade-or-install the cached truthy promise. The shortcut-key
+      // set lets us tell a fresh shortcut entry from a pending DFS
+      // promise installed before the signal landed.
+      if (!this.#hasCycleShortcutKeys.has(key)) {
+        this.#hasCycleCache.set(key, Promise.resolve(true));
+        this.#hasCycleShortcutKeys.add(key);
+      }
+
+      return this.#hasCycleCache.get(key)!;
+    }
+
     let p = this.#hasCycleCache.get(key);
 
     if (!p) {
