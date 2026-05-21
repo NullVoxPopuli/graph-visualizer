@@ -42,6 +42,16 @@ import type { ProcessedScene } from "#services/visualizer";
  *  key for the unfiltered raw-cycle enumeration. */
 const NO_HIDDEN = new Int32Array(0);
 
+/**
+ * How many cycles to emit (and re-upload) per rAF tick while streaming
+ * the red cycle-edge highlight in. Tuned so that the common case
+ * (selected node sits on a handful of cycles) drains in the first
+ * chunk — invisible to the user — while pathological cases (hundreds
+ * of cycles through one hub) reveal smoothly over ~10 frames instead
+ * of blowing a single deferred frame's budget on a giant upload.
+ */
+const CYCLE_EDGE_CHUNK_CYCLES = 32;
+
 export default class Visualizer extends Component {
   @service declare visualizer: VisualizerService;
   @service declare viewState: ViewStateService;
@@ -126,6 +136,26 @@ export default class Visualizer extends Component {
    * `selectedIdx`.
    */
   #selectionRepackPending = false;
+
+  /**
+   * In-flight progressive cycle-edge upload. `flushSelectionRepack`
+   * fills `cycleMask` (drives the red node rings — cheap, lands on the
+   * first deferred frame) but the connecting red **edges** can be many
+   * thousands on a node that sits on lots of cycles, and a single
+   * upload spike on the deferred frame would re-stall the click. We
+   * drain the cycle list `CYCLE_EDGE_CHUNK_CYCLES` cycles at a time
+   * across rAF iterations until empty — the rings appear immediately
+   * and the edges fill in over a handful of frames at most.
+   *
+   * `null` outside of an active stream (no selection, no cycles through
+   * the selected node, or stream just drained).
+   */
+  #cycleEdgeStream: {
+    cycles: number[][];
+    cursor: number;
+    edgesDrawn: number;
+    seenEdges: Set<number>;
+  } | null = null;
 
   /**
    * Cached "hidden by node type" mask, keyed on `lastHiddenNodeKey`. `null`
@@ -492,6 +522,79 @@ export default class Visualizer extends Component {
   }
 
   /**
+   * Emit up to `CYCLE_EDGE_CHUNK_CYCLES` cycles worth of red edges into
+   * `cycleBuf` and upload the accumulated buffer. Pulled from
+   * `#cycleEdgeStream` initialized in `repackCycle`; called once from
+   * that same method (to land the first chunk on the same deferred
+   * frame as the cycle node-rings) and then once per subsequent rAF
+   * iteration from `loop()` until the stream drains.
+   *
+   * The dedup set (`seenEdges`) is persistent across chunks so an edge
+   * shared by multiple cycles still draws once. The buffer is grown by
+   * doubling to amortize the allocations; everything written below
+   * `edgesDrawn * 12` stays valid across chunks, so subsequent uploads
+   * cover the full accumulated set.
+   */
+  private emitCycleEdgeChunk(scene: ProcessedScene): void {
+    const stream = this.#cycleEdgeStream;
+
+    if (!stream || !this.renderer) return;
+
+    const N = scene.communities.length;
+    const end = Math.min(stream.cursor + CYCLE_EDGE_CHUNK_CYCLES, stream.cycles.length);
+    // Bright red — pops over the dim community-colored edges.
+    const R = 1.0;
+    const G = 0.25;
+    const B = 0.3;
+    const A = 0.95;
+    let k = stream.edgesDrawn * 12;
+
+    for (let ci = stream.cursor; ci < end; ci++) {
+      const cycle = stream.cycles[ci]!;
+
+      for (let i = 0; i < cycle.length; i++) {
+        const a = cycle[i]!;
+        const b = cycle[(i + 1) % cycle.length]!;
+        const key = a * N + b;
+
+        if (stream.seenEdges.has(key)) continue;
+        stream.seenEdges.add(key);
+
+        if (k + 12 > this.cycleBuf.length) {
+          // Grow by doubling so total allocations are O(log n) across
+          // the full enumeration. `set` copies the existing prefix.
+          const next = new Float32Array(Math.max(this.cycleBuf.length * 2, k + 12));
+
+          next.set(this.cycleBuf);
+          this.cycleBuf = next;
+        }
+
+        this.cycleBuf[k++] = scene.positions[2 * a]!;
+        this.cycleBuf[k++] = scene.positions[2 * a + 1]!;
+        this.cycleBuf[k++] = R;
+        this.cycleBuf[k++] = G;
+        this.cycleBuf[k++] = B;
+        this.cycleBuf[k++] = A;
+        this.cycleBuf[k++] = scene.positions[2 * b]!;
+        this.cycleBuf[k++] = scene.positions[2 * b + 1]!;
+        this.cycleBuf[k++] = R;
+        this.cycleBuf[k++] = G;
+        this.cycleBuf[k++] = B;
+        this.cycleBuf[k++] = A;
+        stream.edgesDrawn++;
+      }
+    }
+
+    stream.cursor = end;
+    this.renderer.uploadCycleEdges(this.cycleBuf, stream.edgesDrawn * 2);
+    this.dirty = true;
+
+    if (stream.cursor >= stream.cycles.length) {
+      this.#cycleEdgeStream = null;
+    }
+  }
+
+  /**
    * Pick up a pending "focus on this id" request from the visualizer
    * service (set by the search component) and animate the camera to the
    * node if it's outside the current viewport. No-op when the node is
@@ -637,65 +740,35 @@ export default class Visualizer extends Component {
     let cycleMask: Uint8Array | null = null;
 
     if (cycles.length > 0) {
+      // Build the membership mask up-front (cheap — sum of cycle lengths,
+      // bounded by V). Drives the red ring on cycle-member nodes via
+      // packNodes; landing all rings on the *first* deferred frame is
+      // the visual anchor for the user — they see which nodes are
+      // involved immediately, even while the connecting red edges are
+      // still painting in.
       cycleMask = new Uint8Array(N);
-
-      // Total edge segments across every highlighted cycle. Each cycle of
-      // length L contributes L edges (L-1 in-order + 1 closing), and each
-      // edge is 2 vertices × 6 floats.
-      let totalEdges = 0;
-
-      for (const cycle of cycles) totalEdges += cycle.length;
-
-      const need = totalEdges * 12;
-
-      if (this.cycleBuf.length < need) this.cycleBuf = new Float32Array(need);
-
-      const buf = this.cycleBuf;
-      // Bright red so it pops over the dim community-colored edges.
-      const R = 1.0;
-      const G = 0.25;
-      const B = 0.3;
-      const A = 0.95;
-      let k = 0;
-
-      const emit = (a: number, b: number): void => {
-        buf[k++] = scene.positions[2 * a]!;
-        buf[k++] = scene.positions[2 * a + 1]!;
-        buf[k++] = R;
-        buf[k++] = G;
-        buf[k++] = B;
-        buf[k++] = A;
-        buf[k++] = scene.positions[2 * b]!;
-        buf[k++] = scene.positions[2 * b + 1]!;
-        buf[k++] = R;
-        buf[k++] = G;
-        buf[k++] = B;
-        buf[k++] = A;
-      };
-
-      // Dedupe edges across cycles — overlapping segments are drawn once
-      // instead of stacked, otherwise the line alpha compounds and the
-      // shared edges read brighter than the others.
-      const seenEdges = new Set<number>();
-      let drawnEdges = 0;
 
       for (const cycle of cycles) {
         for (const idx of cycle) cycleMask[idx] = 1;
-
-        for (let i = 0; i < cycle.length; i++) {
-          const a = cycle[i]!;
-          const b = cycle[(i + 1) % cycle.length]!;
-          const key = a * N + b;
-
-          if (seenEdges.has(key)) continue;
-          seenEdges.add(key);
-          emit(a, b);
-          drawnEdges++;
-        }
       }
 
-      this.renderer.uploadCycleEdges(buf, drawnEdges * 2);
+      // The edges between those nodes stream in across rAF iterations:
+      // on graphs where the selected node sits on dozens-to-thousands
+      // of cycles, the single big upload would otherwise blow the
+      // budget on the deferred frame. Reset the cycle buffer to empty
+      // (so the previous selection's edges clear immediately) and
+      // queue the rest via `#cycleEdgeStream`; the rAF loop drains it
+      // a chunk at a time.
+      this.#cycleEdgeStream = {
+        cycles,
+        cursor: 0,
+        edgesDrawn: 0,
+        seenEdges: new Set<number>(),
+      };
+      this.renderer.uploadCycleEdges(new Float32Array(0), 0);
+      this.emitCycleEdgeChunk(scene);
     } else {
+      this.#cycleEdgeStream = null;
       this.renderer.uploadCycleEdges(new Float32Array(0), 0);
     }
 
@@ -1267,6 +1340,13 @@ export default class Visualizer extends Component {
       if (this.#selectionRepackPending) {
         this.#selectionRepackPending = false;
         this.flushSelectionRepack(scene);
+      } else if (this.#cycleEdgeStream !== null) {
+        // Drain the streaming cycle-edge upload one chunk per tick.
+        // First chunk already landed inside `flushSelectionRepack` (so
+        // the user sees some red on the same frame as the ring node
+        // outlines); each subsequent tick adds more until the queue
+        // empties.
+        this.emitCycleEdgeChunk(scene);
       }
 
       this.reactToScene(scene);
