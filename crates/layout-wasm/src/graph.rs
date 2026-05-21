@@ -894,6 +894,13 @@ pub fn find_all_cycles(
 /// dedup, since many nodes share their shortest cycle. Time
 /// O(V·(V+E)) per SCC; memory O(V+E) working plus O(output).
 ///
+/// `first_cycle`, when provided, is called *exactly once* the first
+/// time a unique cycle is added to the output. The main thread uses
+/// this to resolve `hasAnyCycle` early — Johnson's-and-friends mean
+/// "is there a cycle?" used to wait for an entirely separate DFS, but
+/// this BFS finds the first cycle in O(V+E) anyway, so the callback
+/// gives the same asymptotic without a duplicate worker call.
+///
 /// Trade-off vs. `find_all_cycles`: misses longer cycles that aren't
 /// "shortest through any node" — e.g. a 4-cycle built from two
 /// 2-cycle "shortcuts" surfaces as the two 2-cycles, not as the
@@ -908,6 +915,7 @@ pub fn shortest_cycles_per_node(
     edge_type_ids: &[i32],
     node_remap: Option<&[i32]>,
     hidden: Option<&[bool]>,
+    first_cycle: Option<&dyn Fn()>,
 ) -> Vec<Vec<i32>> {
     if n == 0 {
         return Vec::new();
@@ -1021,6 +1029,14 @@ pub fn shortest_cycles_per_node(
 
         let key = visual_cycle_key(&cycle);
         if seen.insert(key) {
+            // First unique cycle of this enumeration — fire the early
+            // signal exactly once so the main thread's `hasAnyCycle`
+            // can resolve without waiting for the rest of the BFS sweep.
+            if cycles.is_empty() {
+                if let Some(cb) = first_cycle {
+                    cb();
+                }
+            }
             cycles.push(cycle);
         }
     }

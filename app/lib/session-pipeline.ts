@@ -36,6 +36,7 @@ import { waitForPromise } from "@ember/test-waiters";
 import * as Comlink from "comlink";
 
 import type {
+  CycleFirstFound,
   CycleProgress,
   LayoutParams,
   LayoutProgress,
@@ -43,7 +44,12 @@ import type {
   SessionInfo,
 } from "#lib/graph-session.worker";
 
-export type { CycleProgress, LayoutParams, SessionInfo } from "#lib/graph-session.worker";
+export type {
+  CycleFirstFound,
+  CycleProgress,
+  LayoutParams,
+  SessionInfo,
+} from "#lib/graph-session.worker";
 
 interface QueuedLayout {
   params: LayoutParams;
@@ -214,13 +220,26 @@ export class SessionPipeline {
    * each non-trivial SCC, deduped and sorted shortest-first. Always
    * bounded by V; runs in milliseconds even on dense graphs.
    *
+   * `onFirstCycle`, when provided, fires once the first cycle is
+   * found — used by the service to resolve `hasAnyCycle` early.
+   *
    * Default view for the panels. Use `rawCycles` only when the user
    * explicitly asks for the comprehensive elementary-cycle set.
    */
-  shortestCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Promise<number[][]> {
+  shortestCycles(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array,
+    onFirstCycle: CycleFirstFound | null = null,
+  ): Promise<number[][]> {
     return waitForPromise(
       this.#loaded
-        .then(() => this.#engine.shortestCycles(hiddenEdgeTypeIds, nodeRemap))
+        .then(() =>
+          this.#engine.shortestCycles(
+            hiddenEdgeTypeIds,
+            nodeRemap,
+            onFirstCycle ? Comlink.proxy(onFirstCycle) : null,
+          ),
+        )
         .then(decodeCycles),
       "graph-session:shortest-cycles",
     );

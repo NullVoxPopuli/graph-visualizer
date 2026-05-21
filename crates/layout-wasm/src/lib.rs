@@ -502,20 +502,38 @@ impl GraphSession {
     /// `hidden_edge_type_ids` semantics — empty `&[i32]` means "no
     /// remap" / "no edge-type filter".
     ///
+    /// `first_cycle`, when provided, is invoked exactly once the first
+    /// time a unique cycle is found. Lets the main thread resolve
+    /// `hasAnyCycle` early without spawning a separate DFS call —
+    /// since the worker is single-threaded, queueing both would
+    /// serialize anyway.
+    ///
     /// Use this instead of `raw_cycles` whenever the panel just needs
     /// "what are the actionable loops here?" — `raw_cycles` enumerates
     /// every elementary cycle (Tarjan + Johnson's, exponential worst
     /// case) and is only worth its cost when the user explicitly asks
     /// for the comprehensive set.
-    pub fn shortest_cycles(&self, hidden_edge_type_ids: &[i32], node_remap: &[i32]) -> Vec<i32> {
+    pub fn shortest_cycles(
+        &self,
+        hidden_edge_type_ids: &[i32],
+        node_remap: &[i32],
+        first_cycle: Option<js_sys::Function>,
+    ) -> Vec<i32> {
         let hidden = self.hidden_type_mask(hidden_edge_type_ids);
         let remap = if node_remap.is_empty() { None } else { Some(node_remap) };
+        let cb = first_cycle.as_ref().map(|f| {
+            move || {
+                let _ = f.call0(&JsValue::NULL);
+            }
+        });
+        let cb_ref: Option<&dyn Fn()> = cb.as_ref().map(|c| c as &dyn Fn());
         let cycles = graph::shortest_cycles_per_node(
             self.parsed.ids.len(),
             &self.parsed.edges_flat,
             &self.parsed.edge_type_ids,
             remap,
             hidden.as_deref(),
+            cb_ref,
         );
         let mut flat = Vec::new();
         for c in &cycles {

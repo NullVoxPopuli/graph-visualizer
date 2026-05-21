@@ -35,6 +35,14 @@ export type LayoutProgress = (tick: number, total: number) => void;
  */
 export type CycleProgress = (count: number) => void;
 
+/**
+ * One-shot signal from `shortestCycles` fired the moment a cycle is
+ * first found — lets the main thread resolve `hasAnyCycle` early
+ * without queueing a separate DFS call. Comlink-proxied like the
+ * other worker callbacks.
+ */
+export type CycleFirstFound = () => void;
+
 let wasmReady: Promise<unknown> | null = null;
 let session: GraphSession | null = null;
 
@@ -184,12 +192,25 @@ const sessionEngine = {
    * subgraph). Deduped by visual key, sorted shortest-first. At most
    * `V` cycles total; in practice far fewer after dedup.
    *
+   * `onFirstCycle`, when provided, is fired once the first cycle is
+   * found — the main thread uses it to resolve `hasAnyCycle` ahead of
+   * the full enumeration. Worker is single-threaded, so queueing a
+   * separate DFS call would just serialize behind this anyway.
+   *
    * Use this for the panels' default view. `rawCycles` (Johnson's,
    * exponential worst case) is only worth running when the user
    * explicitly asks for the comprehensive elementary-cycle list.
    */
-  shortestCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Int32Array {
-    return activeSession().shortest_cycles(hiddenEdgeTypeIds, nodeRemap);
+  shortestCycles(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array,
+    onFirstCycle: CycleFirstFound | null = null,
+  ): Int32Array {
+    return activeSession().shortest_cycles(
+      hiddenEdgeTypeIds,
+      nodeRemap,
+      onFirstCycle ? () => onFirstCycle() : undefined,
+    );
   },
 
   /** Drop the resident graph and free its WASM memory. */
