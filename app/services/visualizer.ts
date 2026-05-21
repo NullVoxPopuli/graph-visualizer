@@ -329,11 +329,28 @@ export default class VisualizerService extends Service {
   #cycleCache = new Map<string, Promise<number[][]>>();
   #hasCycleCache = new Map<string, Promise<boolean>>();
 
+  /**
+   * Live count of unique cycles the resident Rust enumerator has found
+   * so far for an *in-flight* `cycleRaw` call. `null` when nothing is
+   * running. Updated by the Rust→worker→main-thread progress callback
+   * (throttled, ~every 4096 raw emissions) and reset to `null` when the
+   * promise resolves. Tracked so the cycles panel can render a live
+   * "Analyzing… N found" loading state instead of looking dead during
+   * a long enumeration.
+   *
+   * Single global tracker rather than per-key — only one
+   * user-perceptible enumeration runs at a time in practice, and
+   * keying it per cache entry would create a tracked-map invalidation
+   * dance for no gain.
+   */
+  @tracked cycleAnalysisProgress: number | null = null;
+
   #resetCycleCachesIfStale(g: LoadedGraph): void {
     if (g !== this.#cycleGraph) {
       this.#cycleGraph = g;
       this.#cycleCache.clear();
       this.#hasCycleCache.clear();
+      this.cycleAnalysisProgress = null;
     }
   }
 
@@ -357,6 +374,7 @@ export default class VisualizerService extends Service {
       this.#cycleGraph = null;
       this.#cycleCache.clear();
       this.#hasCycleCache.clear();
+      this.cycleAnalysisProgress = null;
 
       return null;
     }
@@ -372,7 +390,33 @@ export default class VisualizerService extends Service {
     let p = this.#cycleCache.get(key);
 
     if (!p) {
-      p = pipeline.rawCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP);
+      // Reset the tracker for the new run; the worker will start
+      // calling the progress callback as soon as cycles surface.
+      this.cycleAnalysisProgress = 0;
+      p = pipeline.rawCycles(
+        hiddenEdgeTypeIds,
+        nodeRemap ?? EMPTY_REMAP,
+        (count: number) => {
+          this.cycleAnalysisProgress = count;
+        },
+      );
+
+      // Clear the tracker once this specific promise resolves — guards
+      // against an older run's late `then` clobbering a newer run's
+      // tracker by checking the cache still maps to the same promise.
+      const owned = p;
+
+      owned
+        .then(() => {
+          if (this.#cycleCache.get(key) === owned) {
+            this.cycleAnalysisProgress = null;
+          }
+        })
+        .catch(() => {
+          if (this.#cycleCache.get(key) === owned) {
+            this.cycleAnalysisProgress = null;
+          }
+        });
       this.#cycleCache.set(key, p);
     }
 

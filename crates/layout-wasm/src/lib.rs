@@ -457,15 +457,32 @@ impl GraphSession {
     /// zero package-level cycles even when the contracted graph has
     /// many; see the do-not-commit.json regression. Pass empty `&[i32]`
     /// for the original raw behavior.
-    pub fn raw_cycles(&self, hidden_edge_type_ids: &[i32], node_remap: &[i32]) -> Vec<i32> {
+    ///
+    /// `progress`, when provided, is called periodically with the
+    /// running count of unique cycles found so the cycles panel can
+    /// render a "Analyzing… N found" loading state during the
+    /// (potentially long) enumeration.
+    pub fn raw_cycles(
+        &self,
+        hidden_edge_type_ids: &[i32],
+        node_remap: &[i32],
+        progress: Option<js_sys::Function>,
+    ) -> Vec<i32> {
         let hidden = self.hidden_type_mask(hidden_edge_type_ids);
         let remap = if node_remap.is_empty() { None } else { Some(node_remap) };
+        let cb = progress.as_ref().map(|f| {
+            move |count: u32| {
+                let _ = f.call1(&JsValue::NULL, &JsValue::from(count));
+            }
+        });
+        let cb_ref: Option<&dyn Fn(u32)> = cb.as_ref().map(|c| c as &dyn Fn(u32));
         let cycles = graph::find_all_cycles(
             self.parsed.ids.len(),
             &self.parsed.edges_flat,
             &self.parsed.edge_type_ids,
             remap,
             hidden.as_deref(),
+            cb_ref,
         );
         let mut flat = Vec::new();
         for c in &cycles {

@@ -28,6 +28,13 @@ import init, { GraphSession } from "#lib/wasm/layout_wasm";
  */
 export type LayoutProgress = (tick: number, total: number) => void;
 
+/**
+ * Progress hook the cycle enumerator calls every few thousand raw
+ * emissions with the running count of unique cycles found. Same
+ * `Comlink.proxy(...)` contract as `LayoutProgress`.
+ */
+export type CycleProgress = (count: number) => void;
+
 let wasmReady: Promise<unknown> | null = null;
 let session: GraphSession | null = null;
 
@@ -154,11 +161,21 @@ const sessionEngine = {
    * 92-package SCC but Johnson's only saw 30 intra-package raw cycles.
    *
    * Enumeration runs to completion — no emission cap. On pathological
-   * inputs this can take a long time; the call is async and the main
-   * thread is expected to ignore stale results via `getPromiseState`.
+   * inputs this can take a long time; `onProgress` is the panel's only
+   * signal that work is happening (the resolved value is the final
+   * list; nothing in between is visible). The main thread is expected
+   * to ignore stale results via `getPromiseState`.
    */
-  rawCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Int32Array {
-    return activeSession().raw_cycles(hiddenEdgeTypeIds, nodeRemap);
+  rawCycles(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array,
+    onProgress: CycleProgress | null = null,
+  ): Int32Array {
+    return activeSession().raw_cycles(
+      hiddenEdgeTypeIds,
+      nodeRemap,
+      onProgress ? (count: number) => onProgress(count) : undefined,
+    );
   },
 
   /** Drop the resident graph and free its WASM memory. */

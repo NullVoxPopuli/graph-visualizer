@@ -36,13 +36,14 @@ import { waitForPromise } from "@ember/test-waiters";
 import * as Comlink from "comlink";
 
 import type {
+  CycleProgress,
   LayoutParams,
   LayoutProgress,
   SessionEngine,
   SessionInfo,
 } from "#lib/graph-session.worker";
 
-export type { LayoutParams, SessionInfo } from "#lib/graph-session.worker";
+export type { CycleProgress, LayoutParams, SessionInfo } from "#lib/graph-session.worker";
 
 interface QueuedLayout {
   params: LayoutParams;
@@ -185,13 +186,24 @@ export class SessionPipeline {
    * file cycles otherwise dominate.
    *
    * Enumeration is unbounded (exponential worst case); the call lives
-   * in the worker and the main thread ignores stale results via
-   * `getPromiseState`.
+   * in the worker. `onProgress` drives the panel's loading state with a
+   * live count of unique cycles found. Main thread ignores stale
+   * results via `getPromiseState`.
    */
-  rawCycles(hiddenEdgeTypeIds: Int32Array, nodeRemap: Int32Array): Promise<number[][]> {
+  rawCycles(
+    hiddenEdgeTypeIds: Int32Array,
+    nodeRemap: Int32Array,
+    onProgress: CycleProgress | null = null,
+  ): Promise<number[][]> {
     return waitForPromise(
       this.#loaded
-        .then(() => this.#engine.rawCycles(hiddenEdgeTypeIds, nodeRemap))
+        .then(() =>
+          this.#engine.rawCycles(
+            hiddenEdgeTypeIds,
+            nodeRemap,
+            onProgress ? Comlink.proxy(onProgress) : null,
+          ),
+        )
         .then((flat) => {
           const cycles: number[][] = [];
 

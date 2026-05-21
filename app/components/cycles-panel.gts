@@ -221,6 +221,16 @@ export default class CyclesPanel extends Component {
   }
 
   /**
+   * Live progress for an in-flight cycle enumeration, or `null` when
+   * none is running. Drives the panel's loading copy so the user has
+   * proof analysis is happening — Johnson's is exponential on dense
+   * SCCs and otherwise the panel looks dead while the worker grinds.
+   */
+  get analysisProgress(): number | null {
+    return this.visualizer.cycleAnalysisProgress;
+  }
+
+  /**
    * Reason the cycles list is empty — drives the empty-state copy.
    * `"none"` is the all-good case where there's something to show.
    * `"graph"` means the raw graph has no cycles at all (uses the cheap
@@ -477,6 +487,13 @@ export default class CyclesPanel extends Component {
           <h3 class="cycles-panel__title">
             Cycles
             <span class="cycles-panel__count">{{this.cycles.length}}</span>
+            {{#if (neq this.analysisProgress null)}}
+              <span
+                class="cycles-panel__progress"
+                aria-live="polite"
+                title="Cycle enumeration is running"
+              >analyzing… {{this.analysisProgress}} found</span>
+            {{/if}}
           </h3>
           <button
             type="button"
@@ -488,7 +505,10 @@ export default class CyclesPanel extends Component {
         </div>
         {{#unless this.cycles.length}}
           <p class="cycles-panel__empty">
-            {{#if (eq this.emptyReason "scoped")}}
+            {{#if (neq this.analysisProgress null)}}
+              Analyzing cycles… {{this.analysisProgress}} found so far. Johnson's is
+              exponential on dense components — this may take a while.
+            {{else if (eq this.emptyReason "scoped")}}
               No cycles match the current view. Try clearing the selection (right-click in the
               canvas) or unhiding nodes.
             {{else}}

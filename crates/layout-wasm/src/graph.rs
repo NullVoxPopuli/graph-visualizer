@@ -686,6 +686,11 @@ fn tarjan_scc(
 /// That's the user-visible trade-off of unbounded cycle detection —
 /// the previous emission/unique caps traded completeness for a hard
 /// upper bound on work.
+///
+/// `progress`, when provided, is called every `PROGRESS_EVERY` raw
+/// emissions with `(unique_cycles_so_far)` so the panel can show a
+/// live count while the enumeration runs.
+#[allow(clippy::too_many_arguments)]
 fn enumerate_cycles_in_scc(
     scc: &[i32],
     n: usize,
@@ -694,6 +699,8 @@ fn enumerate_cycles_in_scc(
     in_scc: &[bool],
     out: &mut Vec<Vec<i32>>,
     seen_keys: &mut std::collections::HashSet<String>,
+    progress: Option<&dyn Fn(u32)>,
+    raw_emitted: &mut u64,
 ) {
     let mut blocked = vec![false; n];
     let mut b_head = vec![-1i32; n];
@@ -737,6 +744,17 @@ fn enumerate_cycles_in_scc(
                         out.push(path.clone());
                     }
                     found_at_depth[depth] = true;
+                    *raw_emitted += 1;
+                    // Throttle the cross-WASM/JS call: every PROGRESS_EVERY
+                    // raw emissions, post the current unique-cycle count. The
+                    // worker receives it via a Comlink.proxy callback, which
+                    // delivers a postMessage to the main thread; doing it on
+                    // every emission would dominate runtime on dense SCCs.
+                    if *raw_emitted % PROGRESS_EVERY == 0 {
+                        if let Some(f) = progress {
+                            f(seen_keys.len() as u32);
+                        }
+                    }
                     continue;
                 }
                 if !blocked[w as usize] {
@@ -801,6 +819,13 @@ fn enumerate_cycles_in_scc(
     }
 }
 
+/// How often (in raw Johnson's emissions) to fire the progress callback
+/// during cycle enumeration. Power of two so the modulo lowers to a
+/// mask; large enough that the per-SCC progress chatter is dominated by
+/// the actual enumeration work, small enough that the panel sees a tick
+/// every few ms on dense SCCs.
+const PROGRESS_EVERY: u64 = 1 << 12;
+
 /// Port of cycle.ts `findAllCycles`.
 ///
 /// Enumerates every elementary directed cycle, deduplicated by
@@ -809,12 +834,17 @@ fn enumerate_cycles_in_scc(
 /// SCCs this is exponential in the worst case; callers that drive the
 /// resident session should keep that in mind when invoking
 /// cycle-detection on user-supplied graphs.
+///
+/// `progress`, when provided, fires every `PROGRESS_EVERY` raw
+/// emissions with the running unique-cycle count so the cycles panel
+/// can render a live count while the worker is busy.
 pub fn find_all_cycles(
     n: usize,
     edges_flat: &[i32],
     edge_type_ids: &[i32],
     node_remap: Option<&[i32]>,
     hidden: Option<&[bool]>,
+    progress: Option<&dyn Fn(u32)>,
 ) -> Vec<Vec<i32>> {
     if n == 0 {
         return Vec::new();
@@ -823,6 +853,7 @@ pub fn find_all_cycles(
     let sccs = tarjan_scc(n, &out_idx, &out_adj, 0, node_remap);
     let mut cycles: Vec<Vec<i32>> = Vec::new();
     let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut raw_emitted: u64 = 0;
     for mut scc in sccs {
         if scc.len() < 2 {
             continue;
@@ -840,6 +871,8 @@ pub fn find_all_cycles(
             &in_scc,
             &mut cycles,
             &mut seen_keys,
+            progress,
+            &mut raw_emitted,
         );
     }
     cycles.sort_by_key(|c| c.len());
@@ -908,7 +941,7 @@ pub fn find_bundled_cycles_via_raw(
     node_remap: Option<&[i32]>,
     hidden: Option<&[bool]>,
 ) -> Vec<Vec<i32>> {
-    let raw = find_all_cycles(n, edges_flat, edge_type_ids, node_remap, hidden);
+    let raw = find_all_cycles(n, edges_flat, edge_type_ids, node_remap, hidden, None);
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<Vec<i32>> = Vec::new();
     for r in &raw {
