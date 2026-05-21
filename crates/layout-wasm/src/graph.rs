@@ -698,14 +698,26 @@ fn enumerate_cycles_in_scc(
     out_adj: &[i32],
     in_scc: &[bool],
     out: &mut Vec<Vec<i32>>,
-    seen_keys: &mut std::collections::HashSet<String>,
+    seen_keys: &mut std::collections::HashSet<VisualKey>,
     progress: Option<&dyn Fn(u32)>,
     raw_emitted: &mut u64,
 ) {
     let mut blocked = vec![false; n];
-    let mut b_head = vec![-1i32; n];
-    let mut b_node: Vec<i32> = Vec::new();
-    let mut b_next: Vec<i32> = Vec::new();
+    // Blocked-set per node, classical Johnson's formulation: B(w) is a
+    // **set** of nodes blocked because of w. The previous implementation
+    // stored B as an append-only linked list (`b_node` / `b_next` Vecs
+    // threaded by `b_head`); unblock() detached B(u) by setting
+    // `b_head[u] = -1` but the orphaned linked-list entries were never
+    // reclaimed, and the buffers grew without bound. A first refactor to
+    // `Vec<Vec<i32>>` still leaked, because the same `(v, w)` pair was
+    // pushed into `b[w]` every time `v` popped as a dead-end while `w`
+    // was blocked — so the Vec's capacity grew with the duplicate
+    // pushes. `HashSet<i32>` per node dedupes at insert and bounds
+    // capacity to the actual set of distinct blocked-because-of-w nodes
+    // (≤ V - 1). On `medium.json` this drops the in-flight WASM heap
+    // from 2 GB (and growing until abort) to a few MB.
+    let mut b: Vec<std::collections::HashSet<i32>> =
+        (0..n).map(|_| std::collections::HashSet::new()).collect();
     let mut path: Vec<i32> = Vec::new();
     let mut cursor: Vec<i32> = Vec::new();
     let mut found_at_depth = vec![false; scc.len()];
@@ -714,10 +726,8 @@ fn enumerate_cycles_in_scc(
     for &start in scc {
         for &v in scc {
             blocked[v as usize] = false;
-            b_head[v as usize] = -1;
+            b[v as usize].clear();
         }
-        b_node.clear();
-        b_next.clear();
         path.clear();
         cursor.clear();
         path.push(start);
@@ -772,28 +782,24 @@ fn enumerate_cycles_in_scc(
 
             let v_found = found_at_depth[depth];
             if v_found {
-                // unblock(v), iterative
-                if b_head[v as usize] == -1 {
-                    blocked[v as usize] = false;
-                } else {
-                    unblock_stack.clear();
-                    unblock_stack.push(v);
-                    while let Some(node) = unblock_stack.pop() {
-                        if !blocked[node as usize] {
-                            continue;
-                        }
-                        blocked[node as usize] = false;
-                        let mut entry = b_head[node as usize];
-                        b_head[node as usize] = -1;
-                        while entry != -1 {
-                            let w = b_node[entry as usize];
-                            let next = b_next[entry as usize];
-                            if blocked[w as usize] {
-                                unblock_stack.push(w);
-                            }
-                            entry = next;
+                // unblock(v), iterative. Take B(node) out, walk it for
+                // recursive unblocks, clear (preserves HashSet capacity
+                // for the next block-episode), and put it back.
+                unblock_stack.clear();
+                unblock_stack.push(v);
+                while let Some(node) = unblock_stack.pop() {
+                    if !blocked[node as usize] {
+                        continue;
+                    }
+                    blocked[node as usize] = false;
+                    let mut bn = std::mem::take(&mut b[node as usize]);
+                    for &w in &bn {
+                        if blocked[w as usize] {
+                            unblock_stack.push(w);
                         }
                     }
+                    bn.clear();
+                    b[node as usize] = bn;
                 }
             } else {
                 let mut j = out_idx[v as usize];
@@ -803,9 +809,9 @@ fn enumerate_cycles_in_scc(
                     if !in_scc[w as usize] || w < start || w == v {
                         continue;
                     }
-                    b_node.push(v);
-                    b_next.push(b_head[w as usize]);
-                    b_head[w as usize] = (b_node.len() - 1) as i32;
+                    // Insert dedupes — duplicate (v, w) pushes are
+                    // exactly what blew the previous Vec impl's capacity.
+                    b[w as usize].insert(v);
                 }
             }
 
@@ -852,7 +858,7 @@ pub fn find_all_cycles(
     let (out_idx, out_adj) = build_csr_cycles(n, edges_flat, edge_type_ids, node_remap, hidden);
     let sccs = tarjan_scc(n, &out_idx, &out_adj, 0, node_remap);
     let mut cycles: Vec<Vec<i32>> = Vec::new();
-    let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_keys: std::collections::HashSet<VisualKey> = std::collections::HashSet::new();
     let mut raw_emitted: u64 = 0;
     for mut scc in sccs {
         if scc.len() < 2 {
@@ -905,11 +911,41 @@ fn contract_cycle(raw: &[i32], node_remap: Option<&[i32]>) -> Option<Vec<i32>> {
     }
 }
 
-/// Port of cycle.ts `visualCycleKey`.
-fn visual_cycle_key(cycle: &[i32]) -> String {
+/// Stack-allocated packed form of the visual-cycle key. Same semantics
+/// as the JS `visualCycleKey` but with **no heap allocation**: each
+/// `seen_keys.insert(key)` during Johnson's used to allocate a fresh
+/// `String`, which on dense SCCs blew WASM linear memory past 2 GB
+/// (WASM memory only grows — never shrinks — so even short-lived
+/// allocations leak via fragmentation). The packed form uses a fixed
+/// 24-byte struct, so an enumeration that previously OOM'd at ~30 s
+/// runs to completion in roughly the same time at a small fraction of
+/// the memory.
+///
+/// Layout encodes both the ≤5-node and >5-node branches of the JS
+/// key:
+/// - `len` is the cycle length.
+/// - `len ≤ 5`: `a..e` are the canonical rotation (smallest-first)
+///   of the actual nodes, padded with `-1` for unused slots.
+/// - `len > 5`: `a` = first, `b` = second, `c` = last, `d` = `e` =
+///   `-1`. (The JS key was `first|second|last|n`; the four anchors
+///   plus the length match it byte-for-byte semantically.)
+///
+/// Different lengths produce different `len`, so the two branches'
+/// keys can't collide.
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+struct VisualKey {
+    len: u32,
+    a: i32,
+    b: i32,
+    c: i32,
+    d: i32,
+    e: i32,
+}
+
+fn visual_cycle_key(cycle: &[i32]) -> VisualKey {
     let n = cycle.len();
     if n == 0 {
-        return String::new();
+        return VisualKey { len: 0, a: -1, b: -1, c: -1, d: -1, e: -1 };
     }
     let mut min_idx = 0;
     for i in 1..n {
@@ -917,20 +953,25 @@ fn visual_cycle_key(cycle: &[i32]) -> String {
             min_idx = i;
         }
     }
+    let at = |k: usize| cycle[(min_idx + k) % n];
     if n <= 5 {
-        let mut s = String::new();
-        for i in 0..n {
-            if i > 0 {
-                s.push(',');
-            }
-            s.push_str(&cycle[(min_idx + i) % n].to_string());
-        }
-        return s;
+        return VisualKey {
+            len: n as u32,
+            a: at(0),
+            b: if n > 1 { at(1) } else { -1 },
+            c: if n > 2 { at(2) } else { -1 },
+            d: if n > 3 { at(3) } else { -1 },
+            e: if n > 4 { at(4) } else { -1 },
+        };
     }
-    let first = cycle[min_idx];
-    let second = cycle[(min_idx + 1) % n];
-    let last = cycle[(min_idx + n - 1) % n];
-    format!("{first}|{second}|{last}|{n}")
+    VisualKey {
+        len: n as u32,
+        a: at(0),
+        b: at(1),
+        c: at(n - 1),
+        d: -1,
+        e: -1,
+    }
 }
 
 /// Port of cycle.ts `findBundledCyclesViaRaw` (find_all + dedup-bundle).
@@ -942,7 +983,7 @@ pub fn find_bundled_cycles_via_raw(
     hidden: Option<&[bool]>,
 ) -> Vec<Vec<i32>> {
     let raw = find_all_cycles(n, edges_flat, edge_type_ids, node_remap, hidden, None);
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<VisualKey> = std::collections::HashSet::new();
     let mut out: Vec<Vec<i32>> = Vec::new();
     for r in &raw {
         if let Some(bundled) = contract_cycle(r, node_remap) {
