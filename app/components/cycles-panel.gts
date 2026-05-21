@@ -1,5 +1,5 @@
 import Component from "@glimmer/component";
-import { tracked } from "@glimmer/tracking";
+import { cached, tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
@@ -245,24 +245,20 @@ export default class CyclesPanel extends Component {
     return getPromiseState(p).resolved === true ? "scoped" : "graph";
   }
 
-  get cycles(): CycleEntry[] {
-    // Skip the expensive enumeration entirely when the panel is closed —
-    // nothing in the template renders it, and `findAllCycles` on a
-    // ~10k-node graph is enough to freeze the tab for several seconds.
-    if (!this.viewState.cyclesPanelOpen) return [];
-
+  /**
+   * Contraction map used to drive the cycle enumeration on the
+   * *visible-rep* CSR (so cycles whose nodes live inside a hidden
+   * package still surface as package-level rows). `@cached` keeps both
+   * the `cyclesRawPromise` getter and the per-cycle entry build below
+   * from rebuilding the contraction on every read — collapse/expand
+   * UI toggles don't change the inputs, only the displayed state.
+   */
+  @cached
+  private get contractionRemap(): Int32Array | null {
     const g = this.graph.current;
 
-    if (!g) return [];
+    if (!g || !this.viewState.cyclesPanelOpen) return null;
 
-    // Build the contraction up-front so we can hand the resident Rust
-    // session a node-remap. With a remap supplied, Rust's Johnson's runs
-    // on the *contracted* CSR — necessary for graphs like
-    // do-not-commit.json (11k files, mostly intra-package cycles) where
-    // the raw enumeration is dominated by file cycles that all collapse
-    // to a single package, leaving zero entries visible after files are
-    // hidden even though the contracted graph has plenty of real
-    // package cycles.
     const radii = computeRadii(g.inDegree, g.outDegree);
     const contraction = buildContraction(
       g,
@@ -271,18 +267,50 @@ export default class CyclesPanel extends Component {
       this.viewState.collapsedIds,
       this.viewState.effectiveHiddenNodeIds(g),
     );
-    const remap = contraction?.nodeRemap ?? null;
 
-    // Polynomial-time shortest-cycle-per-node enumeration: bounded by V,
-    // runs in milliseconds even on dense graphs. The trade-off is that
-    // longer cycles built from shorter "shortcut" sub-cycles don't
-    // surface as their own rows — for the panel's purpose (point users
-    // at actionable loops) the short cycles are the actionable thing
-    // anyway.
-    const rawPromise = this.visualizer.cycleShortest(
+    return contraction?.nodeRemap ?? null;
+  }
+
+  /**
+   * The pending/resolved cycle list from the resident Rust session.
+   * Shared between `cycles` (entry build) and `isCalculating` (titlebar
+   * + empty-state copy) so both observe the same promise reference and
+   * the service's cache only sees one call per filter+remap key.
+   */
+  @cached
+  private get cyclesRawPromise(): Promise<number[][]> | null {
+    if (!this.viewState.cyclesPanelOpen) return null;
+
+    return this.visualizer.cycleShortest(
       Int32Array.from(this.viewState.hiddenEdgeTypes),
-      remap,
+      this.contractionRemap,
     );
+  }
+
+  /**
+   * True while the resident Rust session is still computing the
+   * shortest-cycle-per-node list for the current filter / remap. The
+   * titlebar count and the empty-state copy use this to say
+   * "calculating…" instead of "0" — without it the panel briefly looks
+   * like the graph has no cycles before the first hit lands.
+   */
+  get isCalculating(): boolean {
+    const p = this.cyclesRawPromise;
+
+    if (!p) return false;
+
+    return getPromiseState(p).resolved === undefined;
+  }
+
+  get cycles(): CycleEntry[] {
+    if (!this.viewState.cyclesPanelOpen) return [];
+
+    const g = this.graph.current;
+
+    if (!g) return [];
+
+    const remap = this.contractionRemap;
+    const rawPromise = this.cyclesRawPromise;
 
     if (!rawPromise) return [];
 
@@ -482,7 +510,13 @@ export default class CyclesPanel extends Component {
         <div class="cycles-panel__titlebar" {{this.setupDrag}}>
           <h3 class="cycles-panel__title">
             Cycles
-            <span class="cycles-panel__count">{{this.cycles.length}}</span>
+            <span class="cycles-panel__count" aria-live="polite">
+              {{#if this.isCalculating}}
+                calculating…
+              {{else}}
+                {{this.cycles.length}}
+              {{/if}}
+            </span>
           </h3>
           <button
             type="button"
@@ -494,7 +528,9 @@ export default class CyclesPanel extends Component {
         </div>
         {{#unless this.cycles.length}}
           <p class="cycles-panel__empty">
-            {{#if (eq this.emptyReason "scoped")}}
+            {{#if this.isCalculating}}
+              Analyzing cycles…
+            {{else if (eq this.emptyReason "scoped")}}
               No cycles match the current view. Try clearing the selection (right-click in the
               canvas) or unhiding nodes.
             {{else}}
