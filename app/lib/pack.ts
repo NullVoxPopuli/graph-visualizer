@@ -7,12 +7,14 @@ import { communityColorInto } from "./colors.ts";
  *
  * `flags` is a small bitmask consumed by the vertex/fragment shader so
  * states compose freely:
- *   bit 0 (1) = selected     → animated dashed halo
  *   bit 1 (2) = hovered      → body grows
  *   bit 2 (4) = cycle member → red outline
  *   bit 3 (8) = dimmed       → vertex shader fades alpha further at low zoom
- * (selected and hovered are still mutually exclusive at pack time —
- * selection wins — but selected + cycle and/or dimmed can compose freely.)
+ *
+ * Bit 0 used to be `selected`; the dashed halo is now driven by a
+ * `uSelectedIdx` shader uniform instead — clicking a node doesn't
+ * have to rewrite the entire instance buffer to flip one bit. See
+ * `Renderer.setSelectedIdx` / the `NODE_VS`/`NODE_FS` shaders.
  *
  * `dimMask` is encoded as a flag rather than a baked alpha so the shader
  * can scale the dim with the current zoom level (overlapping nodes hide
@@ -26,7 +28,6 @@ export function packNodes(
   positions: Float32Array,
   radii: Float32Array,
   communities: Int32Array,
-  selected: number,
   hovered: number,
   dimMask: Uint8Array | null,
   hideMask: Uint8Array | null,
@@ -61,8 +62,7 @@ export function packNodes(
 
     let flags = 0;
 
-    if (i === selected) flags |= 1;
-    else if (i === hovered) flags |= 2;
+    if (i === hovered) flags |= 2;
     if (cycleMask !== null && cycleMask[i] === 1) flags |= 4;
     if (dimMask !== null && dimMask[i] === 1) flags |= 8;
     out[base + 7] = flags;

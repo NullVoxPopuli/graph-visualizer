@@ -115,6 +115,17 @@ export default class Visualizer extends Component {
   private lastCollapsedKey = "";
   private lastSelectedId: string | null = null;
   private lastFocusTs = 0;
+  /**
+   * Set by `reactToScene` when the selection changes; consumed at the
+   * top of the next `loop()` iteration to run the heavier dim/cycle/
+   * node-instance repack. Letting the rAF that detected the click only
+   * push the `uSelectedIdx` uniform (and not the full packNodes) makes
+   * the dashed halo appear on the very next frame even when the
+   * subsequent dimMask build takes 10–30 ms on a big graph. Latest
+   * click wins — the deferred repack always reads the current scene +
+   * `selectedIdx`.
+   */
+  #selectionRepackPending = false;
 
   /**
    * Cached "hidden by node type" mask, keyed on `lastHiddenNodeKey`. `null`
@@ -438,21 +449,46 @@ export default class Visualizer extends Component {
 
     if (selectedId !== this.lastSelectedId) {
       this.lastSelectedId = selectedId;
-      // Cycle must come first — `repackNodes` reads `cycleMask` so the
-      // red outline shows up the same frame the cycle edges do.
-      this.repackCycle(scene);
-      this.repackNodes(scene);
-
-      // When the global edges toggle is off we only show the edges touching
-      // the selected node, so changing the selection swaps the visible set.
-      // Same idea for arrows.
-      if (!showEdges) {
-        this.repackEdges(scene);
-        this.repackArrows(scene);
-      }
-
+      // Phase 1 — instant: the dashed halo is a `uSelectedIdx` uniform
+      // now, so the ring paints on the very next frame at the cost of a
+      // one-int write. No buffer rewrite needed for the highlight
+      // itself.
+      this.renderer?.setSelectedIdx(this.selectedIdx);
       this.dirty = true;
+
+      // Phase 2 — next frame: the dim/cycle effects DO need the full
+      // packNodes + dimMask build, but they don't need to land the same
+      // frame as the ring. Defer them so the click feels instant even
+      // on big graphs; the lines stream in one frame later. Coalesced
+      // by `#selectionRepackPending` so rapid clicks only run the
+      // latest selection's repack.
+      this.#selectionRepackPending = true;
     }
+  }
+
+  /**
+   * Run the deferred selection-driven repack (dim mask, cycle edges,
+   * node instance buffer, and — when the global edges toggle is off —
+   * the selection-only edges/arrows). Called from the rAF loop on the
+   * iteration *after* the selection change so the ring uniform paints
+   * first; latest selection wins because we always read the current
+   * scene + `selectedIdx`.
+   */
+  private flushSelectionRepack(scene: ProcessedScene): void {
+    // Cycle must come first — `repackNodes` reads `cycleMask` so the
+    // red outline shows up the same frame the cycle edges do.
+    this.repackCycle(scene);
+    this.repackNodes(scene);
+
+    // When the global edges toggle is off we only show the edges touching
+    // the selected node, so changing the selection swaps the visible set.
+    // Same idea for arrows.
+    if (!this.viewState.showEdges) {
+      this.repackEdges(scene);
+      this.repackArrows(scene);
+    }
+
+    this.dirty = true;
   }
 
   /**
@@ -738,7 +774,6 @@ export default class Visualizer extends Component {
       scene.positions,
       this.effectiveRadii ?? scene.radii,
       scene.communities,
-      this.selectedIdx,
       this.hoveredIdx,
       this.dimMask,
       this.effectiveHideMask(scene.communities.length),
@@ -1223,6 +1258,17 @@ export default class Visualizer extends Component {
     }
 
     if (scene) {
+      // Phase 2 of the instant-selection split: the previous frame's
+      // `reactToScene` updated the `uSelectedIdx` uniform (so the ring
+      // paints immediately) and marked this pending; run the heavier
+      // dim/cycle/node-instance repack here, one frame later. Coalesces
+      // rapid clicks naturally — only the latest pending flag survives,
+      // and the repack reads the current `selectedIdx` either way.
+      if (this.#selectionRepackPending) {
+        this.#selectionRepackPending = false;
+        this.flushSelectionRepack(scene);
+      }
+
       this.reactToScene(scene);
       this.maybeReactToHover(scene);
       this.maybeHandleFocus(scene);

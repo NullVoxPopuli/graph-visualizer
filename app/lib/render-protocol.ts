@@ -38,6 +38,12 @@ export type RenderInMsg =
   | { t: "edgeLod"; worldLen: number }
   | { t: "show"; hulls: boolean; arrows: boolean }
   | { t: "selected"; v: boolean }
+  // Selected node's instance index. `-1` clears. Separate from
+  // `selected` (which only tells the worker "keep drawing every tick
+  // for the animated halo") because the actual highlight is now a
+  // shader uniform rather than a packed flag — flipping it is a one-
+  // int write instead of a full instance-buffer rewrite.
+  | { t: "selectedIdx"; idx: number }
   | { t: "upload"; kind: UploadKind; buffer: ArrayBuffer; count: number }
   | { t: "dirty" }
   // Cadence pulse from the main thread's rAF (vsync-aligned — fires at

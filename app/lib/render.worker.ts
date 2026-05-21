@@ -105,6 +105,11 @@ self.onmessage = (e: MessageEvent<RenderInMsg>): void => {
       dirty = true;
 
       break;
+    case "selectedIdx":
+      renderer?.setSelectedIdx(m.idx);
+      dirty = true;
+
+      break;
     case "upload":
       upload(m.kind, m.buffer, m.count);
 

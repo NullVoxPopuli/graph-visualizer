@@ -101,4 +101,14 @@ export class RenderProxy {
   setSelected(v: boolean): void {
     this.#post({ t: "selected", v });
   }
+
+  /**
+   * Set the selected node's instance index for the halo uniform. `-1` =
+   * cleared. Tiny message (one int) — issuing it on every click lets the
+   * worker repaint the ring on the next frame without anyone having to
+   * rebuild the node instance buffer.
+   */
+  setSelectedIdx(idx: number): void {
+    this.#post({ t: "selectedIdx", idx });
+  }
 }

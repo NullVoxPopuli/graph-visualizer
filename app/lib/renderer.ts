@@ -56,15 +56,23 @@ layout(location=4) in float aInstFlags;
 uniform vec2 uCamera;
 uniform float uZoom;
 uniform vec2 uViewport;
+// Selected node index — drives the dashed halo. Moved off the per-
+// instance flags so clicking doesn't have to rewrite the entire
+// instance buffer just to flip one bit on one node; \`gl_InstanceID\`
+// is the per-draw instance counter, which (since we don't reorder
+// nodes) matches the JS-side node index 1:1. \`-1\` = nothing
+// selected.
+uniform int uSelectedIdx;
 out vec2 vQuad;
 out vec4 vColor;
 out float vBodyPx;
 out float vQuadPx;
+flat out int vSelected;
 out float vFlags;
 out float vAlphaScale;
 void main() {
   int flags = int(aInstFlags);
-  bool sel = (flags & 1) != 0;
+  bool sel = (gl_InstanceID == uSelectedIdx);
   bool hov = (flags & 2) != 0;
   bool cyc = (flags & 4) != 0;
   bool dim = (flags & 8) != 0;
@@ -84,6 +92,7 @@ void main() {
   vColor = aInstColor;
   vBodyPx = bodyPx;
   vQuadPx = quadPx;
+  vSelected = sel ? 1 : 0;
   vFlags = aInstFlags;
   // Dim nodes fade further the more zoomed out we are — overlapping nodes
   // mask the dimming when many fit in a small area. mix from 0.06 at
@@ -97,6 +106,7 @@ in vec2 vQuad;
 in vec4 vColor;
 in float vBodyPx;
 in float vQuadPx;
+flat in int vSelected;
 in float vFlags;
 in float vAlphaScale;
 uniform float uTime;
@@ -104,7 +114,7 @@ out vec4 fragColor;
 const float TAU = 6.2831853;
 void main() {
   int flags = int(vFlags);
-  bool sel = (flags & 1) != 0;
+  bool sel = vSelected != 0;
   bool cyc = (flags & 4) != 0;
   float d = length(vQuad);
   float dPx = d * vQuadPx;
@@ -296,6 +306,15 @@ export class Renderer {
 
   private showHulls = false;
   private showArrows = true;
+  /**
+   * Selected node's instance index (matches the JS-side node index since
+   * we don't reorder instances). `-1` = nothing selected. Pushed into the
+   * `uSelectedIdx` uniform on each node draw — flipping selection is a
+   * one-int uniform write instead of rewriting the whole instance buffer
+   * to toggle one flag bit, which makes clicking a node on a 100k-node
+   * graph feel instant.
+   */
+  private selectedIdx = -1;
 
   // Static-layer cache: hulls + edges + cycle + arrows render into an
   // offscreen texture, regenerated only when something affecting them
@@ -505,6 +524,15 @@ export class Renderer {
     this.#staticDirty = true;
   }
 
+  /**
+   * Set the selected node's instance index. Does NOT dirty the static
+   * cache — the selection halo is drawn in the node pass (per-frame
+   * animated) which already runs every tick. Pass `-1` to clear.
+   */
+  setSelectedIdx(idx: number): void {
+    this.selectedIdx = idx;
+  }
+
   /** Upload packed node instances. data length must be >= 8 * count. */
   uploadNodeInstances(data: Float32Array, count: number): void {
     const gl = this.gl;
@@ -681,6 +709,7 @@ export class Renderer {
     if (this.nodeInstCount > 0) {
       this.setCameraUniforms(this.nodeProg);
       gl.uniform1f(gl.getUniformLocation(this.nodeProg, "uTime"), (performance.now() % 1e6) / 1000);
+      gl.uniform1i(gl.getUniformLocation(this.nodeProg, "uSelectedIdx"), this.selectedIdx);
       gl.bindVertexArray(this.nodeVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeInstCount);
     }
