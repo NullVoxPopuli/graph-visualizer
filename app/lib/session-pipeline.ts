@@ -23,8 +23,8 @@
  *    nothing ever awaits them.
  *
  * Test-waiter integration: `load` + every query (`analyze`,
- * `findOrphans`, `hasAnyOrphan`, `hasAnyCycle`, `rawCycles`) is wrapped
- * in `waitForPromise`, so `settled()` / `await render()` block until the
+ * `findOrphans`, `hasAnyOrphan`, `hasAnyCycle`, `shortestCycles`) is
+ * wrapped in `waitForPromise`, so `settled()` / `await render()` block until the
  * worker result the UI consumes is in — tests assert on semantics, no
  * `waitUntil` polling. `waitForPromise` compiles to a plain passthrough
  * in production builds (zero overhead). `layout` is deliberately *not*
@@ -37,19 +37,13 @@ import * as Comlink from "comlink";
 
 import type {
   CycleFirstFound,
-  CycleProgress,
   LayoutParams,
   LayoutProgress,
   SessionEngine,
   SessionInfo,
 } from "#lib/graph-session.worker";
 
-export type {
-  CycleFirstFound,
-  CycleProgress,
-  LayoutParams,
-  SessionInfo,
-} from "#lib/graph-session.worker";
+export type { CycleFirstFound, LayoutParams, SessionInfo } from "#lib/graph-session.worker";
 
 interface QueuedLayout {
   params: LayoutParams;
@@ -180,8 +174,10 @@ export class SessionPipeline {
   }
 
   /**
-   * Elementary cycles as `number[][]` (node indices). Runs once in Rust
-   * on the resident graph.
+   * Shortest cycle through each node in each non-trivial SCC, as
+   * `number[][]` (node indices). Polynomial time (`O(V·(V+E))` per
+   * SCC), deduped by visual key, sorted shortest-first. Runs once in
+   * Rust on the resident graph.
    *
    * `nodeRemap` is the JS contraction map (visible→self, hidden→owner,
    * unmappable→-1). When non-empty Rust enumerates on the *contracted*
@@ -191,40 +187,8 @@ export class SessionPipeline {
    * path is what saves do-not-commit-shaped graphs where intra-package
    * file cycles otherwise dominate.
    *
-   * Enumeration is unbounded (exponential worst case); the call lives
-   * in the worker. `onProgress` drives the panel's loading state with a
-   * live count of unique cycles found. Main thread ignores stale
-   * results via `getPromiseState`.
-   */
-  rawCycles(
-    hiddenEdgeTypeIds: Int32Array,
-    nodeRemap: Int32Array,
-    onProgress: CycleProgress | null = null,
-  ): Promise<number[][]> {
-    return waitForPromise(
-      this.#loaded
-        .then(() =>
-          this.#engine.rawCycles(
-            hiddenEdgeTypeIds,
-            nodeRemap,
-            onProgress ? Comlink.proxy(onProgress) : null,
-          ),
-        )
-        .then(decodeCycles),
-      "graph-session:raw-cycles",
-    );
-  }
-
-  /**
-   * Polynomial-time cycle list — shortest cycle through each node in
-   * each non-trivial SCC, deduped and sorted shortest-first. Always
-   * bounded by V; runs in milliseconds even on dense graphs.
-   *
    * `onFirstCycle`, when provided, fires once the first cycle is
    * found — used by the service to resolve `hasAnyCycle` early.
-   *
-   * Default view for the panels. Use `rawCycles` only when the user
-   * explicitly asks for the comprehensive elementary-cycle set.
    */
   shortestCycles(
     hiddenEdgeTypeIds: Int32Array,
@@ -256,7 +220,7 @@ export class SessionPipeline {
 
 /**
  * Decode the worker's flat `[len0, n0_0, n0_1, …, len1, n1_0, …]` cycle
- * buffer into `number[][]`. Shared by `rawCycles` and `shortestCycles`.
+ * buffer into `number[][]`.
  */
 function decodeCycles(flat: Int32Array): number[][] {
   const cycles: number[][] = [];

@@ -488,23 +488,23 @@ export default class Visualizer extends Component {
     const cyclesOnly = this.viewState.cyclesOnly;
     const N = scene.communities.length;
 
-    // Elementary cycles come from the resident Rust session (the
-    // exponential enumeration, run once, service-memoized per remap +
-    // edge-type filter). Pass the current node remap so the renderer's
-    // bundled-cycle list matches what the cycles panel and info panel
-    // see — without that, the canvas runs on the raw (file-level) CSR,
-    // and on graphs whose raw cycles all live inside one package every
-    // cycle bundles to a self-loop and disappears: the red rings + red
-    // edges silently stop being drawn even though there are dozens of
-    // real package-level cycles through the selected node. Fetch is
-    // async; attach once per (graph, remap), store the resolved list,
-    // and ask the loop to repack when it lands.
+    // Polynomial shortest-cycle-per-node list from the resident Rust
+    // session (service-memoized per remap + edge-type filter). Pass the
+    // current node remap so the renderer's bundled-cycle list matches
+    // what the cycles panel and info panel see — without that, the
+    // canvas runs on the raw (file-level) CSR, and on graphs whose raw
+    // cycles all live inside one package every cycle bundles to a
+    // self-loop and disappears: the red rings + red edges silently
+    // stop being drawn even though there are dozens of real
+    // package-level cycles through the selected node. Fetch is async;
+    // attach once per (graph, remap), store the resolved list, and
+    // ask the loop to repack when it lands.
     //
     // Run the fetch even when nothing is selected so the
     // cycle-membership mask used by the `cyclesOnly` filter is
     // available — the user can flip "cycles only" with no selection
     // and we still need to know which nodes are in cycles.
-    const rawPromise = this.visualizer.cycleRaw(NO_HIDDEN, this.nodeRemap);
+    const rawPromise = this.visualizer.cycleShortest(NO_HIDDEN, this.nodeRemap);
 
     if (rawPromise !== this.#rawPromise) {
       this.#rawPromise = rawPromise;

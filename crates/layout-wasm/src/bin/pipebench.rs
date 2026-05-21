@@ -112,16 +112,16 @@ fn main() {
     );
 
     let t = Instant::now();
-    let bundled =
-        graph::find_bundled_cycles_via_raw(n, &g.edges_flat, &g.edge_type_ids, None, None);
+    let shortest =
+        graph::shortest_cycles_per_node(n, &g.edges_flat, &g.edge_type_ids, None, None, None);
     let bnd_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let mut lens: Vec<usize> = bundled.iter().map(|c| c.len()).collect();
+    let mut lens: Vec<usize> = shortest.iter().map(|c| c.len()).collect();
     lens.sort_unstable();
     let lmin = lens.first().copied().unwrap_or(0);
     let lmax = lens.last().copied().unwrap_or(0);
     println!(
-        "  bundledCycles{bnd_ms:8.3} ms   -> {} (len {}..{})",
-        bundled.len(),
+        "  shortestCycles{bnd_ms:8.3} ms   -> {} (len {}..{})",
+        shortest.len(),
         lmin,
         lmax
     );

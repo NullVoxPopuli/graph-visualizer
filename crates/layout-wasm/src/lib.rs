@@ -441,11 +441,12 @@ impl GraphSession {
         )
     }
 
-    /// All elementary directed cycles (Tarjan SCC + Johnson's, the
-    /// exponential-worst-case enumeration), as a flat buffer:
-    /// `[len0, n0_0, n0_1, …, len1, n1_0, …]`. Node indices,
-    /// `hidden_edge_type_ids` restricts to visible edges. The
-    /// enumeration runs to completion — there is no emission cap.
+    /// Polynomial-time cycle finder. For each node in a non-trivial
+    /// SCC, returns the shortest cycle through that node (BFS in the
+    /// SCC subgraph). Deduped by visual key, sorted shortest-first.
+    /// At most `V` cycles total; flat encoding
+    /// `[len0, n0_0, n0_1, …, len1, n1_0, …]`. Empty `&[i32]` for
+    /// either parameter means "no remap" / "no edge-type filter".
     ///
     /// **`node_remap`** is critical for type-hide flows. When non-empty
     /// it must be a per-node `i32` array (length == node count): visible
@@ -455,64 +456,13 @@ impl GraphSession {
     /// between visible reps directly. Without this, a graph whose raw
     /// cycles all live inside a single package's file SCC would surface
     /// zero package-level cycles even when the contracted graph has
-    /// many; see the do-not-commit.json regression. Pass empty `&[i32]`
-    /// for the original raw behavior.
-    ///
-    /// `progress`, when provided, is called periodically with the
-    /// running count of unique cycles found so the cycles panel can
-    /// render a "Analyzing… N found" loading state during the
-    /// (potentially long) enumeration.
-    pub fn raw_cycles(
-        &self,
-        hidden_edge_type_ids: &[i32],
-        node_remap: &[i32],
-        progress: Option<js_sys::Function>,
-    ) -> Vec<i32> {
-        let hidden = self.hidden_type_mask(hidden_edge_type_ids);
-        let remap = if node_remap.is_empty() { None } else { Some(node_remap) };
-        let cb = progress.as_ref().map(|f| {
-            move |count: u32| {
-                let _ = f.call1(&JsValue::NULL, &JsValue::from(count));
-            }
-        });
-        let cb_ref: Option<&dyn Fn(u32)> = cb.as_ref().map(|c| c as &dyn Fn(u32));
-        let cycles = graph::find_all_cycles(
-            self.parsed.ids.len(),
-            &self.parsed.edges_flat,
-            &self.parsed.edge_type_ids,
-            remap,
-            hidden.as_deref(),
-            cb_ref,
-        );
-        let mut flat = Vec::new();
-        for c in &cycles {
-            flat.push(c.len() as i32);
-            flat.extend_from_slice(c);
-        }
-        flat
-    }
-
-    /// Polynomial-time cycle finder. For each node in a non-trivial
-    /// SCC, returns the shortest cycle through that node (BFS in the
-    /// SCC subgraph). Deduped by visual key, sorted shortest-first.
-    /// At most `V` cycles total.
-    ///
-    /// Same flat encoding as `raw_cycles`:
-    /// `[len0, n0_0, n0_1, …, len1, n1_0, …]`. Same `node_remap` /
-    /// `hidden_edge_type_ids` semantics — empty `&[i32]` means "no
-    /// remap" / "no edge-type filter".
+    /// many; see the do-not-commit.json regression.
     ///
     /// `first_cycle`, when provided, is invoked exactly once the first
     /// time a unique cycle is found. Lets the main thread resolve
     /// `hasAnyCycle` early without spawning a separate DFS call —
     /// since the worker is single-threaded, queueing both would
     /// serialize anyway.
-    ///
-    /// Use this instead of `raw_cycles` whenever the panel just needs
-    /// "what are the actionable loops here?" — `raw_cycles` enumerates
-    /// every elementary cycle (Tarjan + Johnson's, exponential worst
-    /// case) and is only worth its cost when the user explicitly asks
-    /// for the comprehensive set.
     pub fn shortest_cycles(
         &self,
         hidden_edge_type_ids: &[i32],

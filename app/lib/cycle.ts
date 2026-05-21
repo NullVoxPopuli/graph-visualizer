@@ -3,14 +3,14 @@ import type { LoadedGraph } from "./types.ts";
 /**
  * Cheap cycle *presentation* helpers.
  *
- * The expensive elementary-cycle enumeration (Tarjan SCC + Johnson's,
- * exponential in the worst case) now runs once in the resident Rust
- * session — see `GraphSession.raw_cycles` / `VisualizerService.cycleRaw`.
- * This module is only the synchronous post-processing the panels apply
- * to that fixed raw-cycle list: contract through the collapsed-node
- * remap, dedupe by visual key, and assign stable short ids. None of it
- * touches the graph, so it stays in JS and runs instantly as the user
- * toggles collapse / selection.
+ * The cycle enumeration itself runs once in the resident Rust session
+ * — see `GraphSession.shortest_cycles` / `VisualizerService.cycleShortest`
+ * (Tarjan SCC + BFS-per-node, polynomial). This module is only the
+ * synchronous post-processing the panels apply to that fixed cycle
+ * list: contract through the collapsed-node remap, dedupe by visual
+ * key, and assign stable short ids. None of it touches the graph, so
+ * it stays in JS and runs instantly as the user toggles collapse /
+ * selection.
  */
 
 /**
@@ -205,7 +205,7 @@ function fnv1aHex(input: string): string {
 
 /**
  * When Rust enumerates cycles on the *contracted* CSR (i.e., a non-null
- * `nodeRemap` was passed to `raw_cycles`), each returned cycle is
+ * `nodeRemap` was passed to `shortest_cycles`), each returned cycle is
  * already a sequence of visible reps — none of the hidden files that
  * actually formed the underlying graph cycle survive. The cycles-panel
  * still wants to show those files under each bundled step (so the user

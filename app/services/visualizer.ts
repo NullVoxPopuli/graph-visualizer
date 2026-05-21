@@ -315,142 +315,50 @@ export default class VisualizerService extends Service {
   }
 
   /**
-   * Elementary cycles computed in the resident Rust session as
-   * `number[][]` node-index lists. Memoized per (graph, edge-type
-   * filter, node-contraction map): the remap key matters because Rust
-   * enumerates on the *contracted* CSR when a remap is passed — so a
-   * type-toggle forces a fresh run. Same non-blocking promise-state
-   * contract as `orphanIndices`. `null` until a graph + session exist.
+   * Cache for the resident Rust session's cycle enumeration. Keyed
+   * by `${hiddenEdgeTypes}|${remapFingerprint}` so toggling a type
+   * filter or a contraction forces a fresh run, but two callers
+   * with the same view share one enumeration.
    *
-   * Enumeration is unbounded (Johnson's, exponential worst case);
-   * runs in the worker so the main thread stays responsive.
+   * `#firstCycleByHidden` is the @tracked sister: set by the
+   * streaming `onFirstCycle` callback the moment the BFS finds its
+   * first hit (~ first millisecond on most graphs), so `hasAnyCycle`
+   * can short-circuit before the full sweep finishes. Reactive
+   * consumers re-evaluate when it's reassigned in the callback.
    */
   #cycleGraph: LoadedGraph | null = null;
-  #cycleCache = new Map<string, Promise<number[][]>>();
   #shortestCycleCache = new Map<string, Promise<number[][]>>();
   #hasCycleCache = new Map<string, Promise<boolean>>();
-  /**
-   * Hidden-filter keys for which a running (or completed) `cycleShortest`
-   * call has already proved at least one cycle exists. Set by the
-   * streaming `onFirstCycle` callback the moment the BFS finds its
-   * first hit — usually within the first millisecond, long before the
-   * full polynomial sweep finishes. `hasAnyCycle` reads this to
-   * short-circuit; reactive consumers re-evaluate when the @tracked
-   * map is reassigned in the callback.
-   */
-  @tracked #firstCycleByHidden: Map<string, true> = new Map();
-  /**
-   * Mirror of `#hasCycleCache` keys that were filled via the shortcut
-   * path (firstCycle stream or already-resolved cycleShortest result),
-   * so we know which entries are "shortcut-resolved-true" versus
-   * "pending DFS". Without this we couldn't tell when to upgrade a
-   * cached pending DFS promise after the streaming signal lands.
-   */
+  /** Keys in `#hasCycleCache` filled via the streaming/cache shortcut
+   *  rather than the dedicated DFS. Lets us tell a "resolved-true via
+   *  shortcut" entry from a pending DFS promise — so when the streaming
+   *  signal lands after a pending DFS was already installed, we know to
+   *  upgrade the cache. */
   #hasCycleShortcutKeys = new Set<string>();
-
-  /**
-   * Live count of unique cycles the resident Rust enumerator has found
-   * so far for an *in-flight* `cycleRaw` call. `null` when nothing is
-   * running. Updated by the Rust→worker→main-thread progress callback
-   * (throttled, ~every 4096 raw emissions) and reset to `null` when the
-   * promise resolves. Tracked so the cycles panel can render a live
-   * "Analyzing… N found" loading state instead of looking dead during
-   * a long enumeration.
-   *
-   * Single global tracker rather than per-key — only one
-   * user-perceptible enumeration runs at a time in practice, and
-   * keying it per cache entry would create a tracked-map invalidation
-   * dance for no gain.
-   */
-  @tracked cycleAnalysisProgress: number | null = null;
+  @tracked #firstCycleByHidden: Map<string, true> = new Map();
 
   #resetCycleCachesIfStale(g: LoadedGraph): void {
     if (g !== this.#cycleGraph) {
       this.#cycleGraph = g;
-      this.#cycleCache.clear();
       this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
       this.#hasCycleShortcutKeys.clear();
       this.#firstCycleByHidden = new Map();
-      this.cycleAnalysisProgress = null;
     }
-  }
-
-  /**
-   * `nodeRemap` lets the caller hand the resident Rust session a JS-built
-   * contraction map (see `buildContraction`). Pass `null` when no
-   * contraction is active. The remap is fingerprinted into the cache key
-   * — two callers that build the same remap reuse one enumeration, but
-   * toggling a node-type filter forces a fresh Rust run.
-   */
-  cycleRaw(
-    hiddenEdgeTypeIds: Int32Array,
-    nodeRemap: Int32Array | null,
-  ): Promise<number[][]> | null {
-    void this.analysis;
-
-    const g = this.graph.current;
-    const pipeline = this.#pipeline;
-
-    if (!g || !pipeline) {
-      this.#cycleGraph = null;
-      this.#cycleCache.clear();
-      this.#shortestCycleCache.clear();
-      this.#hasCycleCache.clear();
-      this.cycleAnalysisProgress = null;
-
-      return null;
-    }
-
-    this.#resetCycleCachesIfStale(g);
-
-    // Empty remap == "no contraction" on the Rust side. Hashing it into
-    // the key keeps every distinct visibility filter as its own cached
-    // entry; without that, toggling a type would silently reuse stale
-    // cycles enumerated on a different remap.
-    const remapKey = nodeRemap ? fingerprintRemap(nodeRemap) : "";
-    const key = `${hiddenEdgeTypeIds.join(",")}|${remapKey}`;
-    let p = this.#cycleCache.get(key);
-
-    if (!p) {
-      // Reset the tracker for the new run; the worker will start
-      // calling the progress callback as soon as cycles surface.
-      this.cycleAnalysisProgress = 0;
-      p = pipeline.rawCycles(hiddenEdgeTypeIds, nodeRemap ?? EMPTY_REMAP, (count: number) => {
-        this.cycleAnalysisProgress = count;
-      });
-
-      // Clear the tracker once this specific promise resolves — guards
-      // against an older run's late `then` clobbering a newer run's
-      // tracker by checking the cache still maps to the same promise.
-      const owned = p;
-
-      owned
-        .then(() => {
-          if (this.#cycleCache.get(key) === owned) {
-            this.cycleAnalysisProgress = null;
-          }
-        })
-        .catch(() => {
-          if (this.#cycleCache.get(key) === owned) {
-            this.cycleAnalysisProgress = null;
-          }
-        });
-      this.#cycleCache.set(key, p);
-    }
-
-    return p;
   }
 
   /**
    * Shortest cycle through each node in each non-trivial SCC, deduped
    * and sorted shortest-first. Polynomial time (`O(V·(V+E))` per SCC),
-   * runs in milliseconds even on dense graphs — the default cycle view
-   * for the panels. Use `cycleRaw` only when the user explicitly asks
-   * for the comprehensive elementary-cycle enumeration.
+   * runs in milliseconds even on dense graphs.
    *
-   * Same caching contract as `cycleRaw`: per-graph + edge-type +
-   * contraction fingerprint, and `null` until a graph + session exist.
+   * `nodeRemap` lets the caller hand the resident Rust session a
+   * JS-built contraction map (see `buildContraction`). Pass `null`
+   * when no contraction is active. The remap is fingerprinted into
+   * the cache key so two callers that build the same remap reuse one
+   * enumeration; a different remap forces a fresh Rust run.
+   *
+   * `null` until a graph + session exist.
    */
   cycleShortest(
     hiddenEdgeTypeIds: Int32Array,
@@ -463,10 +371,10 @@ export default class VisualizerService extends Service {
 
     if (!g || !pipeline) {
       this.#cycleGraph = null;
-      this.#cycleCache.clear();
       this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
-      this.cycleAnalysisProgress = null;
+      this.#hasCycleShortcutKeys.clear();
+      this.#firstCycleByHidden = new Map();
 
       return null;
     }
@@ -525,12 +433,10 @@ export default class VisualizerService extends Service {
 
     if (!g || !pipeline) {
       this.#cycleGraph = null;
-      this.#cycleCache.clear();
       this.#shortestCycleCache.clear();
       this.#hasCycleCache.clear();
       this.#hasCycleShortcutKeys.clear();
       this.#firstCycleByHidden = new Map();
-      this.cycleAnalysisProgress = null;
 
       return null;
     }

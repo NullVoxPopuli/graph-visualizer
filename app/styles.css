@@ -1808,14 +1808,6 @@ pre code {
   font-variant-numeric: tabular-nums;
 }
 
-.cycles-panel__progress {
-  color: var(--dim);
-  font-size: 11px;
-  font-style: italic;
-  letter-spacing: 0;
-  font-variant-numeric: tabular-nums;
-}
-
 .cycles-panel__list {
   margin: 0;
   padding: 0 10px 6px;

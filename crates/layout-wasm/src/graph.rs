@@ -672,223 +672,10 @@ fn tarjan_scc(
     sccs
 }
 
-/// Iterative Johnson's over one SCC (port of
-/// `enumerateElementaryCyclesInScc`), B stored as a linked list.
-///
-/// `seen_keys` deduplicates by *visual key* — the same one the panels
-/// would apply client-side. `visualCycleKey` collapses cycles that
-/// share head/second/last/length (>5 nodes) or the full canonical
-/// sequence (≤5 nodes), so dense SCCs don't flood the output with
-/// near-duplicates that all render to the same panel row.
-///
-/// Enumeration runs to completion: Johnson's is exponential in the
-/// worst case, and on pathological inputs this can take a long time.
-/// That's the user-visible trade-off of unbounded cycle detection —
-/// the previous emission/unique caps traded completeness for a hard
-/// upper bound on work.
-///
-/// `progress`, when provided, is called every `PROGRESS_EVERY` raw
-/// emissions with `(unique_cycles_so_far)` so the panel can show a
-/// live count while the enumeration runs.
-#[allow(clippy::too_many_arguments)]
-fn enumerate_cycles_in_scc(
-    scc: &[i32],
-    n: usize,
-    out_idx: &[i32],
-    out_adj: &[i32],
-    in_scc: &[bool],
-    out: &mut Vec<Vec<i32>>,
-    seen_keys: &mut std::collections::HashSet<VisualKey>,
-    progress: Option<&dyn Fn(u32)>,
-    raw_emitted: &mut u64,
-) {
-    let mut blocked = vec![false; n];
-    // Blocked-set per node, classical Johnson's formulation: B(w) is a
-    // **set** of nodes blocked because of w. The previous implementation
-    // stored B as an append-only linked list (`b_node` / `b_next` Vecs
-    // threaded by `b_head`); unblock() detached B(u) by setting
-    // `b_head[u] = -1` but the orphaned linked-list entries were never
-    // reclaimed, and the buffers grew without bound. A first refactor to
-    // `Vec<Vec<i32>>` still leaked, because the same `(v, w)` pair was
-    // pushed into `b[w]` every time `v` popped as a dead-end while `w`
-    // was blocked — so the Vec's capacity grew with the duplicate
-    // pushes. `HashSet<i32>` per node dedupes at insert and bounds
-    // capacity to the actual set of distinct blocked-because-of-w nodes
-    // (≤ V - 1). On `medium.json` this drops the in-flight WASM heap
-    // from 2 GB (and growing until abort) to a few MB.
-    let mut b: Vec<std::collections::HashSet<i32>> =
-        (0..n).map(|_| std::collections::HashSet::new()).collect();
-    let mut path: Vec<i32> = Vec::new();
-    let mut cursor: Vec<i32> = Vec::new();
-    let mut found_at_depth = vec![false; scc.len()];
-    let mut unblock_stack: Vec<i32> = Vec::new();
-
-    for &start in scc {
-        for &v in scc {
-            blocked[v as usize] = false;
-            b[v as usize].clear();
-        }
-        path.clear();
-        cursor.clear();
-        path.push(start);
-        cursor.push(out_idx[start as usize]);
-        found_at_depth[0] = false;
-        blocked[start as usize] = true;
-
-        while !path.is_empty() {
-            let depth = path.len() - 1;
-            let v = path[depth];
-            let end = out_idx[v as usize + 1];
-            let mut recursed = false;
-
-            while cursor[depth] < end {
-                let j = cursor[depth];
-                let w = out_adj[j as usize];
-                cursor[depth] = j + 1;
-                if !in_scc[w as usize] || w < start {
-                    continue;
-                }
-                if w == start {
-                    let key = visual_cycle_key(&path);
-                    if seen_keys.insert(key) {
-                        out.push(path.clone());
-                    }
-                    found_at_depth[depth] = true;
-                    *raw_emitted += 1;
-                    // Throttle the cross-WASM/JS call: every PROGRESS_EVERY
-                    // raw emissions, post the current unique-cycle count. The
-                    // worker receives it via a Comlink.proxy callback, which
-                    // delivers a postMessage to the main thread; doing it on
-                    // every emission would dominate runtime on dense SCCs.
-                    if *raw_emitted % PROGRESS_EVERY == 0 {
-                        if let Some(f) = progress {
-                            f(seen_keys.len() as u32);
-                        }
-                    }
-                    continue;
-                }
-                if !blocked[w as usize] {
-                    path.push(w);
-                    cursor.push(out_idx[w as usize]);
-                    found_at_depth[path.len() - 1] = false;
-                    blocked[w as usize] = true;
-                    recursed = true;
-                    break;
-                }
-            }
-            if recursed {
-                continue;
-            }
-
-            let v_found = found_at_depth[depth];
-            if v_found {
-                // unblock(v), iterative. Take B(node) out, walk it for
-                // recursive unblocks, clear (preserves HashSet capacity
-                // for the next block-episode), and put it back.
-                unblock_stack.clear();
-                unblock_stack.push(v);
-                while let Some(node) = unblock_stack.pop() {
-                    if !blocked[node as usize] {
-                        continue;
-                    }
-                    blocked[node as usize] = false;
-                    let mut bn = std::mem::take(&mut b[node as usize]);
-                    for &w in &bn {
-                        if blocked[w as usize] {
-                            unblock_stack.push(w);
-                        }
-                    }
-                    bn.clear();
-                    b[node as usize] = bn;
-                }
-            } else {
-                let mut j = out_idx[v as usize];
-                while j < end {
-                    let w = out_adj[j as usize];
-                    j += 1;
-                    if !in_scc[w as usize] || w < start || w == v {
-                        continue;
-                    }
-                    // Insert dedupes — duplicate (v, w) pushes are
-                    // exactly what blew the previous Vec impl's capacity.
-                    b[w as usize].insert(v);
-                }
-            }
-
-            path.pop();
-            cursor.pop();
-            if v_found && !path.is_empty() {
-                let d = path.len() - 1;
-                found_at_depth[d] = true;
-            }
-        }
-    }
-}
-
-/// How often (in raw Johnson's emissions) to fire the progress callback
-/// during cycle enumeration. Power of two so the modulo lowers to a
-/// mask; large enough that the per-SCC progress chatter is dominated by
-/// the actual enumeration work, small enough that the panel sees a tick
-/// every few ms on dense SCCs.
-const PROGRESS_EVERY: u64 = 1 << 12;
-
-/// Port of cycle.ts `findAllCycles`.
-///
-/// Enumerates every elementary directed cycle, deduplicated by
-/// `visual_cycle_key` (the same key the JS panels apply downstream).
-/// No emission cap — Johnson's runs to completion. On pathological
-/// SCCs this is exponential in the worst case; callers that drive the
-/// resident session should keep that in mind when invoking
-/// cycle-detection on user-supplied graphs.
-///
-/// `progress`, when provided, fires every `PROGRESS_EVERY` raw
-/// emissions with the running unique-cycle count so the cycles panel
-/// can render a live count while the worker is busy.
-pub fn find_all_cycles(
-    n: usize,
-    edges_flat: &[i32],
-    edge_type_ids: &[i32],
-    node_remap: Option<&[i32]>,
-    hidden: Option<&[bool]>,
-    progress: Option<&dyn Fn(u32)>,
-) -> Vec<Vec<i32>> {
-    if n == 0 {
-        return Vec::new();
-    }
-    let (out_idx, out_adj) = build_csr_cycles(n, edges_flat, edge_type_ids, node_remap, hidden);
-    let sccs = tarjan_scc(n, &out_idx, &out_adj, 0, node_remap);
-    let mut cycles: Vec<Vec<i32>> = Vec::new();
-    let mut seen_keys: std::collections::HashSet<VisualKey> = std::collections::HashSet::new();
-    let mut raw_emitted: u64 = 0;
-    for mut scc in sccs {
-        if scc.len() < 2 {
-            continue;
-        }
-        scc.sort_unstable();
-        let mut in_scc = vec![false; n];
-        for &v in &scc {
-            in_scc[v as usize] = true;
-        }
-        enumerate_cycles_in_scc(
-            &scc,
-            n,
-            &out_idx,
-            &out_adj,
-            &in_scc,
-            &mut cycles,
-            &mut seen_keys,
-            progress,
-            &mut raw_emitted,
-        );
-    }
-    cycles.sort_by_key(|c| c.len());
-    cycles
-}
-
-/// Polynomial-time alternative to `find_all_cycles`. For each node v
-/// in a non-trivial SCC, BFS the SCC subgraph from v to find the
-/// shortest cycle through v (i.e. the shortest v → … → v path of
-/// length ≥ 2). Dedupe by visual key, return sorted shortest-first.
+/// Polynomial-time cycle finder. For each node v in a non-trivial
+/// SCC, BFS the SCC subgraph from v to find the shortest cycle
+/// through v (i.e. the shortest v → … → v path of length ≥ 2).
+/// Dedupe by visual key, return sorted shortest-first.
 ///
 /// Returns at most `V` cycles in total — usually far fewer after
 /// dedup, since many nodes share their shortest cycle. Time
@@ -896,19 +683,18 @@ pub fn find_all_cycles(
 ///
 /// `first_cycle`, when provided, is called *exactly once* the first
 /// time a unique cycle is added to the output. The main thread uses
-/// this to resolve `hasAnyCycle` early — Johnson's-and-friends mean
-/// "is there a cycle?" used to wait for an entirely separate DFS, but
-/// this BFS finds the first cycle in O(V+E) anyway, so the callback
-/// gives the same asymptotic without a duplicate worker call.
+/// this to resolve `hasAnyCycle` early — the BFS finds the first
+/// cycle in O(V+E), same asymptotic as the dedicated DFS, without a
+/// duplicate worker call.
 ///
-/// Trade-off vs. `find_all_cycles`: misses longer cycles that aren't
-/// "shortest through any node" — e.g. a 4-cycle built from two
-/// 2-cycle "shortcuts" surfaces as the two 2-cycles, not as the
-/// 4-cycle. For a human reading the panel that's typically the right
-/// call: the actionable loops are the small tight ones, and large
-/// overlapping cycles are just compositions of them. Bounded output
-/// also means the panel always renders something — no spinner, no
-/// exponential blowup, no "analyzing… N found" copy.
+/// Trade-off vs. full elementary-cycle enumeration: misses longer
+/// cycles that aren't "shortest through any node" — e.g. a 4-cycle
+/// built from two 2-cycle "shortcuts" surfaces as the two 2-cycles,
+/// not as the 4-cycle. For a human reading the panel that's
+/// typically the right call: the actionable loops are the small
+/// tight ones, and large overlapping cycles are just compositions
+/// of them. Bounded output also means the panel always renders
+/// something — no spinner, no exponential blowup.
 pub fn shortest_cycles_per_node(
     n: usize,
     edges_flat: &[i32],
@@ -1045,41 +831,10 @@ pub fn shortest_cycles_per_node(
     cycles
 }
 
-/// Port of cycle.ts `contractCycle`.
-fn contract_cycle(raw: &[i32], node_remap: Option<&[i32]>) -> Option<Vec<i32>> {
-    let Some(rm) = node_remap else {
-        return Some(raw.to_vec());
-    };
-    let mut out: Vec<i32> = Vec::new();
-    for &idx in raw {
-        let r = rm[idx as usize];
-        if r < 0 {
-            return None;
-        }
-        if out.last() == Some(&r) {
-            continue;
-        }
-        out.push(r);
-    }
-    while out.len() > 1 && out[0] == out[out.len() - 1] {
-        out.pop();
-    }
-    if out.len() >= 2 {
-        Some(out)
-    } else {
-        None
-    }
-}
-
 /// Stack-allocated packed form of the visual-cycle key. Same semantics
-/// as the JS `visualCycleKey` but with **no heap allocation**: each
-/// `seen_keys.insert(key)` during Johnson's used to allocate a fresh
-/// `String`, which on dense SCCs blew WASM linear memory past 2 GB
-/// (WASM memory only grows — never shrinks — so even short-lived
-/// allocations leak via fragmentation). The packed form uses a fixed
-/// 24-byte struct, so an enumeration that previously OOM'd at ~30 s
-/// runs to completion in roughly the same time at a small fraction of
-/// the memory.
+/// as the JS `visualCycleKey` but with **no heap allocation**: a fixed
+/// 24-byte struct keeps the dedup HashSet's insert cost out of the
+/// allocator hot path.
 ///
 /// Layout encodes both the ≤5-node and >5-node branches of the JS
 /// key:
@@ -1134,25 +889,3 @@ fn visual_cycle_key(cycle: &[i32]) -> VisualKey {
     }
 }
 
-/// Port of cycle.ts `findBundledCyclesViaRaw` (find_all + dedup-bundle).
-pub fn find_bundled_cycles_via_raw(
-    n: usize,
-    edges_flat: &[i32],
-    edge_type_ids: &[i32],
-    node_remap: Option<&[i32]>,
-    hidden: Option<&[bool]>,
-) -> Vec<Vec<i32>> {
-    let raw = find_all_cycles(n, edges_flat, edge_type_ids, node_remap, hidden, None);
-    let mut seen: std::collections::HashSet<VisualKey> = std::collections::HashSet::new();
-    let mut out: Vec<Vec<i32>> = Vec::new();
-    for r in &raw {
-        if let Some(bundled) = contract_cycle(r, node_remap) {
-            let key = visual_cycle_key(&bundled);
-            if seen.insert(key) {
-                out.push(bundled);
-            }
-        }
-    }
-    out.sort_by_key(|c| c.len());
-    out
-}
