@@ -2,7 +2,7 @@ import { render, settled } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
-import DocumentDrop from "#components/document-drop";
+import { DocumentDrop } from "#components/document-drop";
 import { stubRouterTransitions } from "#test-helpers/render";
 
 import type GraphService from "#services/graph";

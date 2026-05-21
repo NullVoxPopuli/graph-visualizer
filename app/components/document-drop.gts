@@ -19,7 +19,7 @@ import type GraphLoaderService from "#services/graph-loader";
  * viewport is the drop zone; the overlay is purely visual and only
  * appears while a file is actually being dragged over the page.
  */
-export default class DocumentDrop extends Component {
+export class DocumentDrop extends Component {
   @service declare graphLoader: GraphLoaderService;
 
   @tracked isDragging = false;

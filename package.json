@@ -76,6 +76,7 @@
     "@glint/template": "1.7.7",
     "@glint/tsserver-plugin": "2.5.2",
     "@iconify-json/ph": "^1.2.2",
+    "@iconify-json/simple-icons": "^1.2.83",
     "@nullvoxpopuli/eslint-configs": "6.0.0",
     "@rollup/plugin-babel": "7.0.0",
     "@types/d3-polygon": "^3.0.2",

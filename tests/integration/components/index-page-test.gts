@@ -26,7 +26,7 @@ module("Integration | app shell + analyze screen", function (hooks) {
       .hasAttribute("href", "/analyze", "it points at the dedicated /analyze URL");
 
     // The wordmark is no longer a link.
-    assert.dom(".app-header__brand").exists().hasText("Graph Visualizer");
+    assert.dom(".app-header__brand").exists().hasText("graph visualizer");
     assert.dom("a.app-header__brand").doesNotExist("brand is not a link anymore");
   });
 
