@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
-import { click, findAll, render } from "@ember/test-helpers";
+import { click, findAll, render, settled } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
@@ -197,9 +197,16 @@ module("Integration | info-panel", function (hooks) {
     await click(summary("cycles"));
     assert.false(isOpen("cycles"), "cycles section now closed");
 
-    // Click a node inside the cycle to view it (selection → "b").
-    await click('.panel__cycle .panel__neighbor[title="b"]');
-    assert.dom(".panel__title").hasText("b", "navigated to the clicked cycle node");
+    // Navigate to "b". In the live app this happens via the canvas
+    // click, the search box, or a neighbor row — all of which boil
+    // down to setting `viewState.selectedId`. Drive it directly here
+    // rather than clicking the cycle list, because that list is no
+    // longer rendered while the section is closed (the closed-state
+    // body is intentionally elided — building it eagerly was the
+    // selection-perf regression these guards address).
+    viewState(this.owner).selectedId = "b";
+    await settled();
+    assert.dom(".panel__title").hasText("b", "navigated to the selected node");
 
     // The regression: re-deriving open state from b's counts flipped
     // the untouched `in` section open and sprang the explicitly-closed
