@@ -648,46 +648,6 @@ export default class Controls extends Component<Signature> {
             cluster hulls
           </label>
           <label
-            class="cluster-by"
-            title="Cluster nodes by the longest common prefix of their id, label, type, or a custom meta path. Empty / Louvain falls back to topology-based community detection."
-          >
-            <span>cluster by</span>
-            <select {{on "change" this.setClusterMode}}>
-              <option value="louvain" selected={{eq this.currentClusterMode "louvain"}}>
-                Louvain (default)
-              </option>
-              <option value="id" selected={{eq this.currentClusterMode "id"}}>id</option>
-              <option value="label" selected={{eq this.currentClusterMode "label"}}>label</option>
-              <option value="type" selected={{eq this.currentClusterMode "type"}}>type</option>
-              <option value="custom" selected={{eq this.currentClusterMode "custom"}}>
-                meta path…
-              </option>
-            </select>
-            {{#if (eq this.currentClusterMode "custom")}}
-              <input
-                type="text"
-                class="cluster-by__path"
-                placeholder="e.g. team or layer.tier"
-                value={{this.displayedCustomMetaPath}}
-                {{on "input" this.setCustomMetaPath}}
-                aria-label="Meta path to cluster by (dot-separated, without the `meta.` prefix)"
-              />
-            {{/if}}
-            {{#if (neq this.currentClusterMode "louvain")}}
-              <input
-                type="number"
-                class="cluster-by__segments"
-                min="1"
-                step="1"
-                placeholder="segments"
-                value={{this.displayedSegments}}
-                {{on "input" this.setSegments}}
-                title="Target number of clusters. Empty = natural LCP (wherever the strings diverge)."
-                aria-label="Target cluster count for the LCP clusterer (blank for natural)"
-              />
-            {{/if}}
-          </label>
-          <label
             title="Hide every visible node that doesn't sit on at least one cycle. Lets you focus on the cyclic backbone of the graph without manually grooming filters."
           >
             <input
@@ -863,6 +823,46 @@ export default class Controls extends Component<Signature> {
           <summary class="controls__section-label"><IconCaretRight
               class="summary-caret"
             />layout</summary>
+          <label
+            class="cluster-by"
+            title="Cluster nodes by the longest common prefix of their id, label, type, or a custom meta path. Louvain falls back to topology-based community detection."
+          >
+            <span class="cluster-by__name">cluster by</span>
+            <select class="cluster-by__mode" {{on "change" this.setClusterMode}}>
+              <option value="louvain" selected={{eq this.currentClusterMode "louvain"}}>
+                Louvain (default)
+              </option>
+              <option value="id" selected={{eq this.currentClusterMode "id"}}>id</option>
+              <option value="label" selected={{eq this.currentClusterMode "label"}}>label</option>
+              <option value="type" selected={{eq this.currentClusterMode "type"}}>type</option>
+              <option value="custom" selected={{eq this.currentClusterMode "custom"}}>
+                meta path…
+              </option>
+            </select>
+            {{#if (eq this.currentClusterMode "custom")}}
+              <input
+                type="text"
+                class="cluster-by__path"
+                placeholder="e.g. team or layer.tier"
+                value={{this.displayedCustomMetaPath}}
+                {{on "input" this.setCustomMetaPath}}
+                aria-label="Meta path to cluster by (dot-separated, without the `meta.` prefix)"
+              />
+            {{/if}}
+            {{#if (neq this.currentClusterMode "louvain")}}
+              <input
+                type="number"
+                class="cluster-by__segments"
+                min="1"
+                step="1"
+                placeholder="depth"
+                value={{this.displayedSegments}}
+                {{on "input" this.setSegments}}
+                title="Segment depth — N-th dynamically-discovered prefix segment from the root. Empty = natural (deepest segment available per string)."
+                aria-label="Segment depth for the LCP clusterer (blank for natural)"
+              />
+            {{/if}}
+          </label>
           <label class="controls__slider">
             <span class="controls__slider-name">node distance</span>
             <input

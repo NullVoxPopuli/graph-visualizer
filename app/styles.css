@@ -721,7 +721,24 @@ pre code {
   cursor: pointer;
 }
 
-.cluster-by select,
+.cluster-by {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+  cursor: default;
+}
+
+.cluster-by .cluster-by__name {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cluster-by .cluster-by__mode,
 .cluster-by .cluster-by__path,
 .cluster-by .cluster-by__segments {
   background: var(--input-bg);
@@ -732,15 +749,23 @@ pre code {
   padding: 2px 6px;
 }
 
+.cluster-by .cluster-by__mode {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .cluster-by .cluster-by__path {
-  width: 12ch;
+  flex: 1 1 12ch;
+  min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
 
 .cluster-by .cluster-by__segments {
-  width: 5ch;
+  flex: 0 0 6ch;
+  width: 6ch;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .controls__row button:hover {

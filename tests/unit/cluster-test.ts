@@ -66,33 +66,52 @@ module("Unit | lib/cluster | clusterByLcp", () => {
     assert.strictEqual(ids[0], 0);
   });
 
-  test("targetK collapses the natural clusters down to K via LCP-descending merges", (assert) => {
-    // Five strings, three natural prefix groups (@acme/, @beta/, @gamma/).
-    // targetK = 2 merges the two least-similar groups (highest-LCP
-    // adjacencies merged first → low-LCP adjacency between two of the
-    // groups is the *kept* boundary).
-    const strings = ["@acme/utils", "@acme/db", "@beta/x", "@beta/y", "@gamma/z"];
-    const ids = clusterByLcp(strings, 2);
-    const distinct = new Set(Array.from(ids));
+  test("segments=N counts segments from root in the dynamic cluster tree", (assert) => {
+    // Six strings, three natural prefix groups under a shared `@`.
+    // The cluster tree has root @, branching into @acme/ (with deeper
+    // @acme/db/, @acme/utils/) and @beta/foo/ (single deep branch).
+    const strings = [
+      "@acme/db/x.ts",
+      "@acme/db/y.ts",
+      "@acme/utils/a.ts",
+      "@acme/utils/b.ts",
+      "@beta/foo/p.ts",
+      "@beta/foo/q.ts",
+    ];
+    // segments=1 → root segment `@`; everything collapses to one
+    // cluster.
+    const s1 = clusterByLcp(strings, 1);
 
-    assert.strictEqual(distinct.size, 2, "exactly 2 clusters when targetK = 2");
+    assert.strictEqual(new Set(Array.from(s1)).size, 1, "segments=1 → 1 cluster");
+
+    // segments=2 → `@acme/` (×4) + `@beta/foo/` (×2) → 2 clusters.
+    const s2 = clusterByLcp(strings, 2);
+
+    assert.strictEqual(new Set(Array.from(s2)).size, 2, "segments=2 → 2 clusters");
+    assert.strictEqual(s2[0], s2[2], "@acme/db/* and @acme/utils/* share cluster at depth 2");
+    assert.notStrictEqual(s2[0], s2[4], "@acme/* and @beta/foo/* are distinct at depth 2");
+
+    // segments=3 → `@acme/db/`, `@acme/utils/`, `@beta/foo/` (clamped
+    // — only 2 segments for `@beta/foo/`). 3 clusters total.
+    const s3 = clusterByLcp(strings, 3);
+
+    assert.strictEqual(new Set(Array.from(s3)).size, 3, "segments=3 → 3 clusters (one clamped)");
+    assert.strictEqual(s3[0], s3[1], "@acme/db/x and @acme/db/y share a cluster");
+    assert.strictEqual(s3[2], s3[3], "@acme/utils/a and @acme/utils/b share a cluster");
+    assert.strictEqual(s3[4], s3[5], "@beta/foo/p and @beta/foo/q stay together (clamped)");
+    assert.notStrictEqual(s3[0], s3[2], "db/ and utils/ are distinct at depth 3");
   });
 
-  test("targetK = 1 collapses everything into a single cluster", (assert) => {
-    const ids = clusterByLcp(["a", "b", "c", "d"], 1);
-    const distinct = new Set(Array.from(ids));
+  test("segments=N clamps strings with fewer than N segments to their deepest depth", (assert) => {
+    // `@beta/foo/*` has 2 segments (`@` and `@beta/foo/`). Asking for
+    // 5 still leaves them under `@beta/foo/`.
+    const ids = clusterByLcp(["@beta/foo/p", "@beta/foo/q", "@beta/x"], 5);
 
-    assert.strictEqual(distinct.size, 1);
+    assert.strictEqual(ids[0], ids[1], "p and q stay together at their deepest available depth");
+    assert.notStrictEqual(ids[0], ids[2], "but `@beta/x` is a different cluster");
   });
 
-  test("targetK >= N keeps every string in its own cluster", (assert) => {
-    const ids = clusterByLcp(["aa", "ab", "ac"], 99);
-    const distinct = new Set(Array.from(ids));
-
-    assert.strictEqual(distinct.size, 3, "no merges happen when K >= N");
-  });
-
-  test("targetK = null preserves the natural-mode result", (assert) => {
+  test("segments=null preserves the natural-mode result", (assert) => {
     const a = clusterByLcp(["@acme/utils", "@acme/db", "@beta/x"]);
     const b = clusterByLcp(["@acme/utils", "@acme/db", "@beta/x"], null);
 
