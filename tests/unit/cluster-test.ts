@@ -66,10 +66,13 @@ module("Unit | lib/cluster | clusterByLcp", () => {
     assert.strictEqual(ids[0], 0);
   });
 
-  test("segments=N counts segments from root in the dynamic cluster tree", (assert) => {
+  test("segments=N counts distinct trie depths from root", (assert) => {
     // Six strings, three natural prefix groups under a shared `@`.
-    // The cluster tree has root @, branching into @acme/ (with deeper
-    // @acme/db/, @acme/utils/) and @beta/foo/ (single deep branch).
+    // Cluster tree (trie) has these distinct branch depths:
+    //   1 (`@`), 6 (`@acme/`/`@beta/foo/`), 10 (`@acme/db/`/etc.).
+    // The fix dedupes consecutive same-depth ancestors in the binary
+    // cluster tree, so a string with several pairwise merges at the
+    // same LCP value counts that as ONE trie segment.
     const strings = [
       "@acme/db/x.ts",
       "@acme/db/y.ts",
@@ -78,21 +81,20 @@ module("Unit | lib/cluster | clusterByLcp", () => {
       "@beta/foo/p.ts",
       "@beta/foo/q.ts",
     ];
-    // segments=1 → root segment `@`; everything collapses to one
-    // cluster.
+    // segments=1 → root segment `@`; one cluster.
     const s1 = clusterByLcp(strings, 1);
 
     assert.strictEqual(new Set(Array.from(s1)).size, 1, "segments=1 → 1 cluster");
 
-    // segments=2 → `@acme/` (×4) + `@beta/foo/` (×2) → 2 clusters.
+    // segments=2 → `@acme/` + `@beta/foo/` → 2 clusters.
     const s2 = clusterByLcp(strings, 2);
 
     assert.strictEqual(new Set(Array.from(s2)).size, 2, "segments=2 → 2 clusters");
     assert.strictEqual(s2[0], s2[2], "@acme/db/* and @acme/utils/* share cluster at depth 2");
     assert.notStrictEqual(s2[0], s2[4], "@acme/* and @beta/foo/* are distinct at depth 2");
 
-    // segments=3 → `@acme/db/`, `@acme/utils/`, `@beta/foo/` (clamped
-    // — only 2 segments for `@beta/foo/`). 3 clusters total.
+    // segments=3 → `@acme/db/`, `@acme/utils/`, `@beta/foo/`
+    // (clamped — `@beta/foo/*` only has 2 trie segments).
     const s3 = clusterByLcp(strings, 3);
 
     assert.strictEqual(new Set(Array.from(s3)).size, 3, "segments=3 → 3 clusters (one clamped)");
@@ -100,6 +102,18 @@ module("Unit | lib/cluster | clusterByLcp", () => {
     assert.strictEqual(s3[2], s3[3], "@acme/utils/a and @acme/utils/b share a cluster");
     assert.strictEqual(s3[4], s3[5], "@beta/foo/p and @beta/foo/q stay together (clamped)");
     assert.notStrictEqual(s3[0], s3[2], "db/ and utils/ are distinct at depth 3");
+  });
+
+  test("segments mode treats consecutive same-depth merges as one segment", (assert) => {
+    // Three strings all share `@acme/` at depth 6. The binary
+    // cluster tree has *two* merge nodes at depth 6 (pairwise
+    // merging `auth` with `db`, then with `utils`). Pre-fix, the
+    // segment-depth walk treated those as two distinct segment
+    // levels, so segments=2 returned 2 clusters instead of 1.
+    // With the dedupe fix, segments=2 correctly returns 1.
+    const ids = clusterByLcp(["@acme/auth", "@acme/db", "@acme/utils"], 2);
+
+    assert.strictEqual(new Set(Array.from(ids)).size, 1, "all three share the @acme/ segment");
   });
 
   test("segments=N clamps strings with fewer than N segments to their deepest depth", (assert) => {
