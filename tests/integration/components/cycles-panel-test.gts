@@ -240,15 +240,16 @@ module("Integration | cycles-panel", function (hooks) {
     await render(<template><CyclesPanel /></template>);
     await waitFor(".cycles-panel__entry");
 
-    // The single-click handler (selectNode) already queues a plain
-    // focus on the panel-driven selection — clear it so the assertion
-    // is strictly about the dblclick's zoom-in variant.
-    vis.pendingFocus = null;
-
+    // `triggerEvent("dblclick")` dispatches only the dblclick event (not
+    // a synthetic preceding click), so the click handler that selectNode
+    // is wired into doesn't fire here — only the dblclick handler's
+    // `zoomInOnNode` runs.
     await triggerEvent('.cycles-panel__entry .cycles-panel__node[title="b"]', "dblclick");
 
+    const pf = vis.pendingFocus;
+
     assert.strictEqual(viewState(this.owner).selectedId, "b", "selection followed the dblclick");
-    assert.strictEqual(vis.pendingFocus?.id, "b", "canvas focus targets the same node");
-    assert.true(vis.pendingFocus?.zoomIn, "request is the zoom-in variant, not a plain recenter");
+    assert.strictEqual(pf?.id, "b", "canvas focus targets the same node");
+    assert.true(pf?.zoomIn, "request is the zoom-in variant, not a plain recenter");
   });
 });

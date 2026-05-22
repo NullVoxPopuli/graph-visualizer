@@ -12,6 +12,7 @@ import { Camera } from "#lib/camera";
 import { communityColor } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
 import { bundleAlreadyContractedCycles, bundleRawCyclesWithGroups } from "#lib/cycle";
+import { computeSceneBounds, planFocusAnimation } from "#lib/focus-plan";
 import { convexHull, inflate, triangulateFan } from "#lib/hull";
 import { packArrows, packEdges, packNodes } from "#lib/pack";
 import { RenderProxy } from "#lib/render-proxy";
@@ -461,9 +462,10 @@ export default class Visualizer extends Component {
    * node if it's outside the current viewport. No-op when the node is
    * already visible — don't yank the user around when they didn't need it.
    *
-   * The `zoomIn` flag (set by panel node-link `dblclick`) forces the
-   * animation even when the node is already visible and tightens the zoom
-   * a step so the target sits centered at a closer level.
+   * The `zoomIn` flag (set by panel node-link `dblclick`) plans a richer
+   * move: a stable comfort-level zoom (so repeat dblclicks don't compound
+   * into infinity) and, for off-screen targets, a two-phase animation via
+   * a "context view" wide enough to show both source and destination.
    */
   private maybeHandleFocus(scene: ProcessedScene): void {
     const req = this.visualizer.pendingFocus;
@@ -484,7 +486,26 @@ export default class Visualizer extends Component {
     if (!cam) return;
 
     if (req.zoomIn) {
-      cam.animateTo(x, y, cam.zoom * 1.5);
+      const bounds = computeSceneBounds(scene.positions);
+
+      if (!bounds) return;
+
+      const plan = planFocusAnimation({
+        cx: cam.x,
+        cy: cam.y,
+        zoom: cam.zoom,
+        viewportWidth: cam.width,
+        viewportHeight: cam.height,
+        targetX: x,
+        targetY: y,
+        bounds,
+      });
+
+      if (plan.via) {
+        cam.animateVia(plan.via.cx, plan.via.cy, plan.via.zoom, plan.toCx, plan.toCy, plan.toZoom);
+      } else {
+        cam.animateTo(plan.toCx, plan.toCy, plan.toZoom);
+      }
 
       return;
     }

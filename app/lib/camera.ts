@@ -153,6 +153,70 @@ export class Camera {
     this.animFrame = requestAnimationFrame(tick);
   }
 
+  /**
+   * Two-phase animation: ease out to `(viaCx, viaCy, viaZoom)` over the
+   * first half of `durationMs`, then ease out from there to
+   * `(cx, cy, deviceZoom)` over the second half. Same log-space zoom
+   * interpolation as `animateTo` within each phase. Used when the panel
+   * focus target is off-screen — the via waypoint frames both the current
+   * camera and the target so the user can see where they're being taken,
+   * rather than a straight-line constant-zoom pan that feels like a cut.
+   */
+  animateVia(
+    viaCx: number,
+    viaCy: number,
+    viaZoom: number,
+    cx: number,
+    cy: number,
+    deviceZoom: number,
+    durationMs = 600,
+  ): void {
+    this.cancelAnim();
+
+    const fromX = this.x;
+    const fromY = this.y;
+    const fromZoomLog = Math.log(this.zoom);
+    const viaZoomLog = Math.log(viaZoom);
+    const toZoomLog = Math.log(deviceZoom);
+    const half = durationMs / 2;
+    const t0 = performance.now();
+    const tick = (): void => {
+      const elapsed = performance.now() - t0;
+
+      if (elapsed >= durationMs) {
+        this.behavior.transform(this.selection, this.transformFor(cx, cy, deviceZoom));
+        this.animFrame = null;
+
+        return;
+      }
+
+      let cxNow: number;
+      let cyNow: number;
+      let zLog: number;
+
+      if (elapsed < half) {
+        const u = elapsed / half;
+        const e = 1 - Math.pow(1 - u, 3);
+
+        cxNow = fromX + (viaCx - fromX) * e;
+        cyNow = fromY + (viaCy - fromY) * e;
+        zLog = fromZoomLog + (viaZoomLog - fromZoomLog) * e;
+      } else {
+        const u = (elapsed - half) / half;
+        const e = 1 - Math.pow(1 - u, 3);
+
+        cxNow = viaCx + (cx - viaCx) * e;
+        cyNow = viaCy + (cy - viaCy) * e;
+        zLog = viaZoomLog + (toZoomLog - viaZoomLog) * e;
+      }
+
+      this.behavior.transform(this.selection, this.transformFor(cxNow, cyNow, Math.exp(zLog)));
+      this.animFrame = requestAnimationFrame(tick);
+    };
+
+    this.animFrame = requestAnimationFrame(tick);
+  }
+
   /** True if (x, y) is inside the visible world rect, with optional margin (0..1). */
   worldPointInView(x: number, y: number, margin = 0.85): boolean {
     const halfW = (this.width / 2 / this.zoom) * margin;

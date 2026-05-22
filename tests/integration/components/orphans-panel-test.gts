@@ -118,7 +118,11 @@ module("Integration | orphans-panel", function (hooks) {
 
     await triggerEvent('.cycles-panel__node[title="alone"]', "dblclick");
 
-    assert.strictEqual(viewState(this.owner).selectedId, "alone", "selection followed the dblclick");
+    assert.strictEqual(
+      viewState(this.owner).selectedId,
+      "alone",
+      "selection followed the dblclick",
+    );
     assert.strictEqual(vis.pendingFocus?.id, "alone", "canvas focus targets the same node");
     assert.true(vis.pendingFocus?.zoomIn, "request is the zoom-in variant, not a plain recenter");
   });
