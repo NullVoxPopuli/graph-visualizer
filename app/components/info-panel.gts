@@ -2,7 +2,9 @@ import Component from "@glimmer/component";
 import { cached, tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
+import { buildWaiter } from "@ember/test-waiters";
 
+import { modifier } from "ember-modifier";
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import { toggleInSet } from "#lib/collapse-list";
@@ -24,6 +26,14 @@ import IconArrowElbowDownRight from "~icons/ph/arrow-elbow-down-right";
 import IconArrowRight from "~icons/ph/arrow-right";
 import IconCaretRight from "~icons/ph/caret-right";
 import IconX from "~icons/ph/x";
+
+/**
+ * Waits the panel's deferred-mount rAF participates in. `await render()`
+ * in integration tests blocks on every registered async unit, so the
+ * tests still see the panel rendered synchronously without us having
+ * to special-case the test environment.
+ */
+const deferWaiter = buildWaiter("graph-visualizer:info-panel-defer");
 
 import type { PanelGeometry } from "#lib/floating-panel";
 import type { LoadedGraph } from "#lib/types";
@@ -123,6 +133,69 @@ export default class InfoPanel extends Component {
   @service declare viewState: ViewStateService;
   @service declare graph: GraphService;
   @service declare visualizer: VisualizerService;
+
+  /**
+   * One-rAF-deferred mirror of `viewState.selectedId`. The `info`
+   * getter reads this slot (not the URL slot) so the panel's first
+   * mount lands the frame *after* the click — the click frame gets to
+   * repaint the canvas (cycle highlight + dim mask + halo) without
+   * fighting the panel's Glimmer revalidation for the same frame.
+   * Deselects (live → null) clear on a microtask so the close button
+   * still appears instant (pre-paint, same frame as the click), while
+   * non-null transitions wait a real rAF. Maintained by the
+   * `watchSelection` modifier on the sentinel below.
+   */
+  @tracked private deferredSelectedId: string | null = null;
+
+  /**
+   * Modifier hosted on a hidden sentinel `<span>` so it's installed the
+   * moment the panel component mounts — even when nothing is selected
+   * yet (`{{#if this.info}}` would otherwise gate every DOM-attaching
+   * modifier). Auto-tracks `viewState.selectedId`: on each change it
+   * re-runs and (a) clears the deferred slot via a microtask on
+   * deselect (still pre-paint, panel disappears in the click frame),
+   * or (b) schedules a `requestAnimationFrame` that mirrors the new id
+   * one frame later on select. The `deferWaiter` token participates
+   * in `@ember/test-waiters` so integration tests' `await render(...)`
+   * blocks on the rAF.
+   *
+   * Why both branches are async: writing to `deferredSelectedId`
+   * synchronously inside the modifier body trips Glimmer's "value
+   * already used in this computation" assertion — the `info` getter
+   * reads `deferredSelectedId` in the same revalidation, so an
+   * in-modifier write is a backtracking-rerender. Microtask / rAF
+   * both run after that computation closes, so neither hits the
+   * assertion.
+   */
+  watchSelection = modifier(() => {
+    const live = this.viewState.selectedId;
+
+    if (live === null) {
+      let cancelled = false;
+
+      queueMicrotask(() => {
+        if (cancelled) return;
+        if (this.deferredSelectedId !== null) this.deferredSelectedId = null;
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    let done = false;
+    const token = deferWaiter.beginAsync();
+    const handle = requestAnimationFrame(() => {
+      done = true;
+      if (this.deferredSelectedId !== live) this.deferredSelectedId = live;
+      deferWaiter.endAsync(token);
+    });
+
+    return () => {
+      cancelAnimationFrame(handle);
+      if (!done) deferWaiter.endAsync(token);
+    };
+  });
 
   /**
    * Cycle keys whose body (node list + occurrences table) the user has
@@ -260,14 +333,18 @@ export default class InfoPanel extends Component {
   }
 
   /**
-   * Resolve the URL-encoded selected id to a typed SelectedInfo from the
-   * loaded graph. Returns null when nothing's selected, no graph is loaded,
-   * or the id isn't in the graph (e.g., stale URL after the user dropped a
+   * Resolve the (one-rAF-deferred) selected id to a typed SelectedInfo
+   * from the loaded graph. Reads `deferredSelectedId` rather than the
+   * live `viewState.selectedId` slot, so the panel's first mount lands
+   * the frame *after* the click — `watchSelection` mirrors live →
+   * deferred on a rAF, leaving the click frame for the canvas update.
+   * Returns null when nothing's selected, no graph is loaded, or the
+   * id isn't in the graph (e.g., stale URL after the user dropped a
    * different file).
    */
   @cached
   get info(): SelectedInfo | null {
-    const id = this.viewState.selectedId;
+    const id = this.deferredSelectedId;
     const g = this.graph.current;
 
     if (id === null || !g) return null;
@@ -846,6 +923,14 @@ export default class InfoPanel extends Component {
   }
 
   <template>
+    {{! The InfoPanel JSX is always present in the parent template, but
+        the `<aside>` is conditional on `info` — which we want, since the
+        panel mounting is exactly the work we're deferring. The sentinel
+        below is an always-rendered, never-visible host for the
+        `watchSelection` modifier so the rAF defer is set up the moment
+        the component instantiates, not the first time a user selects
+        something. }}
+    <span hidden aria-hidden="true" {{this.watchSelection}}></span>
     {{#if this.info}}
       <aside class="panel info-panel" {{this.applyGeometry}}>
         <div class="panel__head" {{this.setupDrag}}>
