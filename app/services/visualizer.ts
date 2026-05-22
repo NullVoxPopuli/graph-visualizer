@@ -80,6 +80,7 @@ export default class VisualizerService extends Service {
   #lastGraph: LoadedGraph | null = null;
   #lastClustering = Number.NaN;
   #lastClusterBy: string | null = null;
+  #lastSegments: number | null = null;
   #lastAnalysisPromise: Promise<Analysis> | null = null;
 
   get analysis(): Promise<Analysis> | null {
@@ -101,11 +102,17 @@ export default class VisualizerService extends Service {
     // these custom communities" — no scattered fallbacks elsewhere.
     const rawMode = this.viewState.clusterBy;
     const clusterBy = isClusterMode(rawMode) ? rawMode : null;
+    // Target cluster count for LCP modes — `null` means "natural"
+    // (let LCP land wherever the strings diverge). Only consulted
+    // when `clusterBy` is non-null; Louvain mode ignores it and
+    // continues to use the `clustering` resolution slider.
+    const segments = clusterBy !== null ? this.viewState.segments : null;
 
     if (
       g === this.#lastGraph &&
       clustering === this.#lastClustering &&
       clusterBy === this.#lastClusterBy &&
+      segments === this.#lastSegments &&
       this.#lastAnalysisPromise !== null
     ) {
       return this.#lastAnalysisPromise;
@@ -121,14 +128,16 @@ export default class VisualizerService extends Service {
     this.#lastGraph = g;
     this.#lastClustering = clustering;
     this.#lastClusterBy = clusterBy;
+    this.#lastSegments = segments;
 
     const pipeline = this.#pipeline!;
     // Custom modes pull a string per node (from id / label / type /
     // meta-path) and dynamically cluster by longest-common-prefix.
+    // `segments` (when set) coarsens the result to that many clusters.
     // Computed here (cheap) and injected into the resident session;
-    // `null` → Louvain runs at `clustering` resolution instead.
+    // `null` mode → Louvain runs at `clustering` resolution instead.
     const customCommunities =
-      clusterBy !== null ? clusterByLcp(extractClusterStrings(g, clusterBy)) : null;
+      clusterBy !== null ? clusterByLcp(extractClusterStrings(g, clusterBy), segments) : null;
 
     this.#lastAnalysisPromise = pipeline
       .analyze({ resolution: clustering, communities: customCommunities })

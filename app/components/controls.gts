@@ -217,6 +217,25 @@ export default class Controls extends Component<Signature> {
     return this.customMetaPath;
   }
 
+  /**
+   * Input change for the `segments=` knob. Empty / zero / negative
+   * clears the param (LCP returns to its natural-clustering mode);
+   * any positive integer forces that many clusters.
+   */
+  @action
+  setSegments(ev: Event): void {
+    const raw = (ev.target as HTMLInputElement).value.trim();
+    const n = Number.parseInt(raw, 10);
+
+    this.viewState.segments = Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  get displayedSegments(): string {
+    const s = this.viewState.segments;
+
+    return s !== null ? String(s) : "";
+  }
+
   @action
   toggleCyclesOnly(): void {
     this.viewState.cyclesOnly = !this.viewState.cyclesOnly;
@@ -652,6 +671,19 @@ export default class Controls extends Component<Signature> {
                 value={{this.displayedCustomMetaPath}}
                 {{on "input" this.setCustomMetaPath}}
                 aria-label="Meta path to cluster by (dot-separated, without the `meta.` prefix)"
+              />
+            {{/if}}
+            {{#if (neq this.currentClusterMode "louvain")}}
+              <input
+                type="number"
+                class="cluster-by__segments"
+                min="1"
+                step="1"
+                placeholder="segments"
+                value={{this.displayedSegments}}
+                {{on "input" this.setSegments}}
+                title="Target number of clusters. Empty = natural LCP (wherever the strings diverge)."
+                aria-label="Target cluster count for the LCP clusterer (blank for natural)"
               />
             {{/if}}
           </label>

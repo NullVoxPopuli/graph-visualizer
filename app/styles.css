@@ -722,7 +722,8 @@ pre code {
 }
 
 .cluster-by select,
-.cluster-by .cluster-by__path {
+.cluster-by .cluster-by__path,
+.cluster-by .cluster-by__segments {
   background: var(--input-bg);
   border: 1px solid var(--input-border);
   border-radius: 4px;
@@ -735,6 +736,11 @@ pre code {
   width: 12ch;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
+}
+
+.cluster-by .cluster-by__segments {
+  width: 5ch;
+  font-variant-numeric: tabular-nums;
 }
 
 .controls__row button:hover {

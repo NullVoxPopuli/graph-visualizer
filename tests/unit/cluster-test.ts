@@ -65,6 +65,39 @@ module("Unit | lib/cluster | clusterByLcp", () => {
     assert.strictEqual(ids.length, 1);
     assert.strictEqual(ids[0], 0);
   });
+
+  test("targetK collapses the natural clusters down to K via LCP-descending merges", (assert) => {
+    // Five strings, three natural prefix groups (@acme/, @beta/, @gamma/).
+    // targetK = 2 merges the two least-similar groups (highest-LCP
+    // adjacencies merged first → low-LCP adjacency between two of the
+    // groups is the *kept* boundary).
+    const strings = ["@acme/utils", "@acme/db", "@beta/x", "@beta/y", "@gamma/z"];
+    const ids = clusterByLcp(strings, 2);
+    const distinct = new Set(Array.from(ids));
+
+    assert.strictEqual(distinct.size, 2, "exactly 2 clusters when targetK = 2");
+  });
+
+  test("targetK = 1 collapses everything into a single cluster", (assert) => {
+    const ids = clusterByLcp(["a", "b", "c", "d"], 1);
+    const distinct = new Set(Array.from(ids));
+
+    assert.strictEqual(distinct.size, 1);
+  });
+
+  test("targetK >= N keeps every string in its own cluster", (assert) => {
+    const ids = clusterByLcp(["aa", "ab", "ac"], 99);
+    const distinct = new Set(Array.from(ids));
+
+    assert.strictEqual(distinct.size, 3, "no merges happen when K >= N");
+  });
+
+  test("targetK = null preserves the natural-mode result", (assert) => {
+    const a = clusterByLcp(["@acme/utils", "@acme/db", "@beta/x"]);
+    const b = clusterByLcp(["@acme/utils", "@acme/db", "@beta/x"], null);
+
+    assert.deepEqual(Array.from(a), Array.from(b));
+  });
 });
 
 module("Unit | lib/cluster | extractClusterStrings", () => {

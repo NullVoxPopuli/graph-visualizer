@@ -585,6 +585,28 @@ export default class ViewStateService extends Service {
   }
 
   /**
+   * Target cluster count for the LCP-based `cluster=` modes. `null`
+   * (the URL param missing or non-positive) → natural mode: each
+   * cluster falls wherever the strings diverge, which on graphs with
+   * many naturally-distinct prefixes produces dozens of tiny clusters.
+   * A positive integer forces the LCP clusterer to merge into
+   * approximately that many clusters via single-linkage on LCP
+   * descending.
+   *
+   * Only consulted when `clusterBy` is set; Louvain mode keeps using
+   * the `clustering` slider (resolution), which is unrelated.
+   */
+  get segments(): number | null {
+    const v = this.#qps["segments"];
+    const n = typeof v === "string" ? Number.parseInt(v, 10) : Number.NaN;
+
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  set segments(n: number | null) {
+    this.#setParam("segments", n !== null && n > 0 ? String(n) : null);
+  }
+
+  /**
    * Whether the cycles panel is visible. **Off** by default — opening it
    * runs `findAllCycles` on the loaded graph, which is exponential in the
    * worst case and easily freezes the tab when a large file is dropped.
