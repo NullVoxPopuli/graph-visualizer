@@ -28,6 +28,12 @@ export const EXAMPLES: Example[] = [
     url: "/examples/monorepo.json",
   },
   {
+    label: "large monorepo",
+    description:
+      "100 packages · ~880 files · contain / import:value / import:type / import:dynamic / reexport · a handful of injected cross-package cycles",
+    url: "/examples/large-monorepo.json",
+  },
+  {
     label: "medium",
     description: "200 nodes · 5 clusters, generated",
     url: "/examples/medium.json",
