@@ -8,7 +8,7 @@
  *       pnpm bench:layout 200,2000   (mitata, synthetic sizes)
  *       pnpm bench:layout smoke      (one run/size, prints ms + sanity)
  *
- * Node 24 runs this `.ts` directly via `tsx` (see package.json).
+ * Node 24+ runs this `.ts` directly — no loader needed (see package.json).
  *
  * Requires the WASM backend to be built first (`pnpm build:wasm`); there
  * is no JS fallback — the simulation lives only in Rust.
@@ -19,7 +19,7 @@ import { loadAllExamples } from "./examples.ts";
 import { describeGraph, generateLayoutInit } from "./graph-gen.ts";
 import { loadWasmLayout, type WasmLayout } from "./wasm-backend.ts";
 
-import type { LayoutInit } from "#lib/layout-types";
+import type { LayoutInit } from "../app/lib/layout-types.ts";
 
 const DEFAULT_SIZES = [200, 1_000, 3_000, 6_000];
 

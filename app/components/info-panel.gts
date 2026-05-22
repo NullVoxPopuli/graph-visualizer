@@ -6,7 +6,7 @@ import { service } from "@ember/service";
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import { toggleInSet } from "#lib/collapse-list";
-import { buildContraction } from "#lib/contract";
+import { buildContraction, type Contraction } from "#lib/contract";
 import {
   bundleAlreadyContractedCycles,
   type BundledWithGroups,
@@ -418,24 +418,70 @@ export default class InfoPanel extends Component {
   }
 
   /**
+   * Cycle-driven contraction shared by `crossPackageCycles` /
+   * `internalCycles`. `@cached` so flipping selection — which only
+   * invalidates `this.info` — doesn't re-run the O(N+E) propagation
+   * here. The cycles panel keeps its own `contractionRemap` so the two
+   * panels' caches don't share invalidation churn.
+   */
+  @cached
+  private get contraction(): Contraction | null {
+    const g = this.graph.current;
+
+    if (!g) return null;
+
+    const vs = this.viewState;
+    const radii = computeRadii(g.inDegree, g.outDegree);
+
+    return buildContraction(
+      g,
+      radii,
+      vs.hiddenNodeTypes,
+      vs.collapsedIds,
+      vs.effectiveHiddenNodeIds(g),
+    );
+  }
+
+  /**
+   * Full bundled cross-package cycle list for the current graph + filter
+   * state — the unfiltered input `crossPackageCycles` slices down to the
+   * selected node. Hoisted into its own `@cached` getter so a click only
+   * runs the selection-keyed filter + entry assembly; without this,
+   * every selection change re-ran `bundleAlreadyContractedCycles`,
+   * which dominates the click path (BFSes the underlying graph per
+   * cycle to reconstruct the per-step file chain).
+   */
+  @cached
+  private get crossPackageBundle(): BundledWithGroups[] | null {
+    const g = this.graph.current;
+
+    if (!g) return null;
+
+    const vs = this.viewState;
+    const remap = this.contraction?.nodeRemap ?? null;
+    const rawPromise = this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), remap);
+
+    if (!rawPromise) return null;
+
+    const rawCycles = getPromiseState(rawPromise).resolved;
+
+    if (!rawCycles) return null;
+
+    return remap
+      ? bundleAlreadyContractedCycles(g, remap, rawCycles)
+      : bundleRawCyclesWithGroups(rawCycles, null);
+  }
+
+  /**
    * Cycles the selected node sits on. The top-level entries are the
    * bundled cycles (the same loops the renderer red-rings). Each one
    * also carries the underlying raw cycles that contract to it — handy
    * when packages are connected by lots of file-level imports and you
    * want to see which files actually closed the loop.
    *
-   * Bundled cycles are deduped by canonical node sequence so parallel
-   * raw edges (many `file → file` imports between two packages) don't
-   * produce one bundled cycle per edge.
-   *
-   * `@cached`: recomputes only when a tracked dependency it actually
-   * reads changes — `graph.current`, the selected node, and the
-   * view-state filter slots (`hiddenNodeTypes` / `hiddenEdgeTypes` /
-   * `collapsedIds` / `hiddenNodeIds` / globs, all fine-grained
-   * `trackedObject` slots) plus the resident-session raw-cycles
-   * promise. `collapsedHeaders` / `expandedRefs` are template-level
-   * toggles this body never reads, so collapsing a cycle doesn't
-   * re-run the bundling.
+   * `@cached`: only the selection-keyed filter + entry assembly run
+   * here. The bundled list lives in `crossPackageBundle` (filter-keyed,
+   * not selection-keyed) so clicking through nodes doesn't re-bundle.
    */
   @cached
   get crossPackageCycles(): CycleEntry[] {
@@ -444,42 +490,20 @@ export default class InfoPanel extends Component {
 
     if (!info || !g) return [];
 
-    const vs = this.viewState;
-    const radii = computeRadii(g.inDegree, g.outDegree);
-    const contraction = buildContraction(
-      g,
-      radii,
-      vs.hiddenNodeTypes,
-      vs.collapsedIds,
-      vs.effectiveHiddenNodeIds(g),
-    );
-    const remap = contraction?.nodeRemap ?? null;
+    const remap = this.contraction?.nodeRemap ?? null;
 
     // Selected node is hidden — no bundled cycle goes through *this*
     // node (its loops are absorbed into the owner).
     if (remap !== null && remap[info.index]! !== info.index) return [];
 
-    // Polynomial shortest-cycle-per-node enumeration; see the matching
-    // call site in `cycles-panel.gts` for the trade-off note.
-    const rawPromise = this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), remap);
+    const bundle = this.crossPackageBundle;
 
-    if (!rawPromise) return [];
+    if (!bundle) return [];
 
-    const rawCycles = getPromiseState(rawPromise).resolved;
-
-    if (!rawCycles) return [];
-
-    // `bundleAlreadyContractedCycles` handles dedup + per-step file
-    // chain reconstruction for the contracted-CSR path; the legacy
-    // path keeps its own bundle+dedup pass. Both arrive sorted shortest
-    // first, so the info-panel ordering matches the cycles panel.
-    const bundledCycles = (
-      remap
-        ? bundleAlreadyContractedCycles(g, remap, rawCycles)
-        : bundleRawCyclesWithGroups(rawCycles, null)
-    ).filter((c) => c.bundled.includes(info.index));
-
-    return this.#assembleCycleEntries(g, bundledCycles);
+    return this.#assembleCycleEntries(
+      g,
+      bundle.filter((c) => c.bundled.includes(info.index)),
+    );
   }
 
   /**
@@ -503,16 +527,7 @@ export default class InfoPanel extends Component {
 
     if (!info || !g) return [];
 
-    const vs = this.viewState;
-    const radii = computeRadii(g.inDegree, g.outDegree);
-    const contraction = buildContraction(
-      g,
-      radii,
-      vs.hiddenNodeTypes,
-      vs.collapsedIds,
-      vs.effectiveHiddenNodeIds(g),
-    );
-    const remap = contraction?.nodeRemap ?? null;
+    const remap = this.contraction?.nodeRemap ?? null;
 
     // No contraction → no "internal vs external" distinction; the
     // normal list already covers every cycle through this node.
@@ -526,7 +541,10 @@ export default class InfoPanel extends Component {
     // surface. Cached separately from the contracted path — the
     // visualizer's cycle cache keys on the remap, so the two promises
     // coexist without invalidating each other.
-    const rawPromise = this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), null);
+    const rawPromise = this.visualizer.cycleShortest(
+      Int32Array.from(this.viewState.hiddenEdgeTypes),
+      null,
+    );
 
     if (!rawPromise) return [];
 
