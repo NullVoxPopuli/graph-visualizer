@@ -143,9 +143,97 @@ export default class Controls extends Component<Signature> {
     this.viewState.showArrows = !this.viewState.showArrows;
   }
 
+  /**
+   * `<select>` change for the clustering mode. Empty option → Louvain
+   * (clears `viewState.clusterBy`). For the "custom path" option the
+   * select stores a sentinel string the UI inspects; the actual mode
+   * comes from `customMetaPath` below.
+   */
   @action
-  toggleClusterByLabel(): void {
-    this.viewState.clusterByLabel = !this.viewState.clusterByLabel;
+  setClusterMode(ev: Event): void {
+    const v = (ev.target as HTMLSelectElement).value;
+
+    if (v === "" || v === "louvain") {
+      this.viewState.clusterBy = null;
+
+      return;
+    }
+
+    if (v === "custom") {
+      // The text input ships a real `meta.x.y` value on input; flipping
+      // the select to `custom` with an empty path stays in custom mode
+      // visually but doesn't activate it until the user types.
+      const path = this.customMetaPath;
+
+      this.viewState.clusterBy = path.length > 0 ? `meta.${path}` : null;
+
+      return;
+    }
+
+    this.viewState.clusterBy = v;
+  }
+
+  /**
+   * Live-edited meta path (the part after `meta.`). Stored locally so
+   * the user can type freely; only commits to `viewState.clusterBy`
+   * once it's non-empty.
+   */
+  @tracked customMetaPath = "";
+
+  @action
+  setCustomMetaPath(ev: Event): void {
+    const v = (ev.target as HTMLInputElement).value;
+
+    this.customMetaPath = v;
+    this.viewState.clusterBy = v.length > 0 ? `meta.${v}` : null;
+  }
+
+  /**
+   * Which `<option>` is currently selected — drives the `selected`
+   * attribute on the template. Maps the URL value back to the four
+   * fixed modes; any `meta.*` value is "custom".
+   */
+  get currentClusterMode(): "louvain" | "id" | "label" | "type" | "custom" {
+    const v = this.viewState.clusterBy;
+
+    if (v === null) return "louvain";
+    if (v === "id" || v === "label" || v === "type") return v;
+    if (v.startsWith("meta.")) return "custom";
+
+    return "louvain";
+  }
+
+  /**
+   * Value displayed in the meta-path text input. When the mode is
+   * `custom`, mirror the path back out of `viewState.clusterBy` so
+   * URL-driven changes show up; otherwise show the locally-edited
+   * draft so an in-progress path doesn't vanish on every keystroke.
+   */
+  get displayedCustomMetaPath(): string {
+    const v = this.viewState.clusterBy;
+
+    if (v !== null && v.startsWith("meta.")) return v.slice("meta.".length);
+
+    return this.customMetaPath;
+  }
+
+  /**
+   * Input change for the `segments=` knob. Empty / zero / negative
+   * clears the param (LCP returns to its natural-clustering mode);
+   * any positive integer forces that many clusters.
+   */
+  @action
+  setSegments(ev: Event): void {
+    const raw = (ev.target as HTMLInputElement).value.trim();
+    const n = Number.parseInt(raw, 10);
+
+    this.viewState.segments = Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  get displayedSegments(): string {
+    const s = this.viewState.segments;
+
+    return s !== null ? String(s) : "";
   }
 
   @action
@@ -560,16 +648,6 @@ export default class Controls extends Component<Signature> {
             cluster hulls
           </label>
           <label
-            title="Group nodes by the longest common prefix of their labels (split on `/` or `.`). Useful when the graph is organized by file path or package."
-          >
-            <input
-              type="checkbox"
-              checked={{this.viewState.clusterByLabel}}
-              {{on "change" this.toggleClusterByLabel}}
-            />
-            cluster by label
-          </label>
-          <label
             title="Hide every visible node that doesn't sit on at least one cycle. Lets you focus on the cyclic backbone of the graph without manually grooming filters."
           >
             <input
@@ -745,6 +823,46 @@ export default class Controls extends Component<Signature> {
           <summary class="controls__section-label"><IconCaretRight
               class="summary-caret"
             />layout</summary>
+          <label
+            class="cluster-by"
+            title="Cluster nodes by the longest common prefix of their id, label, type, or a custom meta path. Louvain falls back to topology-based community detection."
+          >
+            <span class="cluster-by__name">cluster by</span>
+            <select class="cluster-by__mode" {{on "change" this.setClusterMode}}>
+              <option value="louvain" selected={{eq this.currentClusterMode "louvain"}}>
+                Louvain (default)
+              </option>
+              <option value="id" selected={{eq this.currentClusterMode "id"}}>id</option>
+              <option value="label" selected={{eq this.currentClusterMode "label"}}>label</option>
+              <option value="type" selected={{eq this.currentClusterMode "type"}}>type</option>
+              <option value="custom" selected={{eq this.currentClusterMode "custom"}}>
+                meta path…
+              </option>
+            </select>
+            {{#if (eq this.currentClusterMode "custom")}}
+              <input
+                type="text"
+                class="cluster-by__path"
+                placeholder="e.g. team or layer.tier"
+                value={{this.displayedCustomMetaPath}}
+                {{on "input" this.setCustomMetaPath}}
+                aria-label="Meta path to cluster by (dot-separated, without the `meta.` prefix)"
+              />
+            {{/if}}
+            {{#if (neq this.currentClusterMode "louvain")}}
+              <input
+                type="number"
+                class="cluster-by__segments"
+                min="1"
+                step="1"
+                placeholder="depth"
+                value={{this.displayedSegments}}
+                {{on "input" this.setSegments}}
+                title="Segment depth — N-th dynamically-discovered prefix segment from the root. Empty = natural (deepest segment available per string)."
+                aria-label="Segment depth for the LCP clusterer (blank for natural)"
+              />
+            {{/if}}
+          </label>
           <label class="controls__slider">
             <span class="controls__slider-name">node distance</span>
             <input

@@ -721,6 +721,62 @@ pre code {
   cursor: pointer;
 }
 
+/* Match the slider row's 3-column grid (label | control | trailing
+ * value) so the cluster-by row's label lines up with `node distance`
+ * etc. one section below. Trailing column is 64px (slightly past the
+ * slider's 36px) so the `depth` placeholder + a couple digits don't
+ * truncate to `dep`. When a meta-path input is active it lands on a
+ * second grid row spanning columns 2–3, below the mode select. Every
+ * input gets a fixed `grid-row` so the segments box doesn't wrap to
+ * row 3 when the path comes into existence on row 2. */
+.cluster-by {
+  display: grid;
+  grid-template-columns: 78px 1fr 64px;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  cursor: default;
+  font-size: 12px;
+}
+
+.cluster-by .cluster-by__name {
+  grid-column: 1;
+  grid-row: 1;
+  color: var(--fg);
+}
+
+.cluster-by .cluster-by__mode,
+.cluster-by .cluster-by__path,
+.cluster-by .cluster-by__segments {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.cluster-by .cluster-by__mode {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.cluster-by .cluster-by__segments {
+  grid-column: 3;
+  grid-row: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cluster-by .cluster-by__path {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .controls__row button:hover {
   border-color: #3e4a5e;
 }
