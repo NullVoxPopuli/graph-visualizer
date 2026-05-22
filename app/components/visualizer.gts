@@ -165,17 +165,6 @@ export default class Visualizer extends Component {
   #allCycles: number[][] | null = null;
   #allCyclesGraph: ProcessedScene["graph"] | null = null;
   #allCyclesRemap: Int32Array | null = null;
-  /**
-   * Per-rep CSR over `#allCycles`: for visible rep `v`, the cycle indices
-   * touching it live at `#allCyclesByRepEdges[i]` for `i` in
-   * `[#allCyclesByRepIdx[v], #allCyclesByRepIdx[v+1])`. Built lazily when
-   * the bundled list is rebuilt; lets `repackCycle` look up the cycles
-   * through the selected node in O(degree-in-cycles) instead of scanning
-   * every bundled cycle's full node list on every click. `null` while no
-   * bundled list exists yet.
-   */
-  #allCyclesByRepIdx: Int32Array | null = null;
-  #allCyclesByRepEdges: Int32Array | null = null;
 
   // Per-scene edge incidence (CSR by raw node index): `#incEdges` lists
   // every edge index touching node v in `[#incIdx[v], #incIdx[v+1])`.
@@ -575,10 +564,6 @@ export default class Visualizer extends Component {
       ).map((b) => b.bundled);
       this.#allCyclesGraph = scene.graph;
       this.#allCyclesRemap = this.nodeRemap;
-      // Rebuild the per-rep cycle CSR. The pack pass after this point and
-      // every future click both read it; do the O(total cycle length)
-      // work once here rather than per click.
-      this.#rebuildCyclesByRep(N);
       // The "is this node in any cycle" mask is derived from the same
       // bundled list, so invalidate it whenever the list changes. The
       // packing helpers read it via `effectiveHideMask` /
@@ -612,7 +597,7 @@ export default class Visualizer extends Component {
       return;
     }
 
-    const cycles = this.#cyclesThrough(selected);
+    const cycles = this.#allCycles.filter((c) => c.includes(selected));
     let cycleMask: Uint8Array | null = null;
 
     if (cycles.length > 0) {
@@ -723,84 +708,6 @@ export default class Visualizer extends Component {
     }
 
     this.dimMask = dim;
-  }
-
-  /**
-   * (Re)build the per-rep cycle CSR over `#allCycles`. After this returns,
-   * `#cyclesThrough(rep)` is O(num cycles touching rep) instead of the
-   * O(num bundled cycles × avg cycle length) `.filter(c => c.includes(rep))`
-   * scan it replaces — selecting a node that sits on hundreds of cycles
-   * no longer pays for every other cycle in the graph too.
-   */
-  #rebuildCyclesByRep(N: number): void {
-    const cycles = this.#allCycles;
-
-    if (cycles === null) {
-      this.#allCyclesByRepIdx = null;
-      this.#allCyclesByRepEdges = null;
-
-      return;
-    }
-
-    const idx = new Int32Array(N + 1);
-
-    for (const c of cycles) {
-      for (const v of c) {
-        // Cycles are deduped by visual key, not by node — a long cycle
-        // can mention the same rep twice. Charge each occurrence so the
-        // edges array is sized correctly; the lookup dedupes the
-        // resulting cycle-index list below.
-        idx[v + 1]!++;
-      }
-    }
-
-    for (let i = 0; i < N; i++) idx[i + 1]! += idx[i]!;
-
-    const edges = new Int32Array(idx[N]!);
-    const cursor = new Int32Array(N);
-
-    for (let ci = 0; ci < cycles.length; ci++) {
-      for (const v of cycles[ci]!) {
-        edges[idx[v]! + cursor[v]!] = ci;
-        cursor[v]!++;
-      }
-    }
-
-    this.#allCyclesByRepIdx = idx;
-    this.#allCyclesByRepEdges = edges;
-  }
-
-  /**
-   * Cycles in `#allCycles` that contain rep `v`. Reads through the CSR
-   * built in `#rebuildCyclesByRep`; falls back to an empty array when
-   * the bundled list isn't ready. Dedupes against a long cycle that
-   * lists the same rep twice (uncommon but possible).
-   */
-  #cyclesThrough(v: number): number[][] {
-    const all = this.#allCycles;
-    const idx = this.#allCyclesByRepIdx;
-    const edges = this.#allCyclesByRepEdges;
-
-    if (all === null || idx === null || edges === null) return [];
-    if (v < 0 || v + 1 >= idx.length) return [];
-
-    const from = idx[v]!;
-    const to = idx[v + 1]!;
-
-    if (from === to) return [];
-
-    const seen = new Set<number>();
-    const out: number[][] = [];
-
-    for (let i = from; i < to; i++) {
-      const ci = edges[i]!;
-
-      if (seen.has(ci)) continue;
-      seen.add(ci);
-      out.push(all[ci]!);
-    }
-
-    return out;
   }
 
   private rebuildHideNodeMask(scene: ProcessedScene): void {

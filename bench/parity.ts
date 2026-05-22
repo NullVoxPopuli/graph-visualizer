@@ -27,16 +27,16 @@
  *     community count + reported modularity. No JS Louvain left to
  *     cross-check (graphology removed); determinism is the invariant.
  *
- * Node runs this `.ts` directly via `tsx` (see package.json). The
- * `--target nodejs` WASM build initializes synchronously on `require`.
+ * Node 24+ runs this `.ts` directly — no loader needed (see package.json).
+ * The `--target nodejs` WASM build initializes synchronously on `require`.
  */
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { EXAMPLES } from "#lib/examples";
-import { computeRadii } from "#lib/pack";
-import { parseGraphJson } from "#lib/parser";
+import { EXAMPLES } from "../app/lib/examples.ts";
+import { computeRadii } from "../app/lib/pack.ts";
+import { parseGraphJson } from "../app/lib/parser.ts";
 
 const EMPTY = new Int32Array(0);
 

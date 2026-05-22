@@ -444,24 +444,15 @@ export default class InfoPanel extends Component {
 
   /**
    * Full bundled cross-package cycle list for the current graph + filter
-   * state — i.e. what `crossPackageCycles` used to compute *before*
-   * filtering down to the selected node. Hoisted into its own `@cached`
-   * getter so a click only filters the cached list; without this, every
-   * selection change re-ran `bundleAlreadyContractedCycles` (which
-   * dominated the click path because it BFSes the underlying graph per
+   * state — the unfiltered input `crossPackageCycles` slices down to the
+   * selected node. Hoisted into its own `@cached` getter so a click only
+   * runs the selection-keyed filter + entry assembly; without this,
+   * every selection change re-ran `bundleAlreadyContractedCycles`,
+   * which dominates the click path (BFSes the underlying graph per
    * cycle to reconstruct the per-step file chain).
-   *
-   * The `byRepIdx`/`byRepEdges` CSR makes "cycles touching rep v" an
-   * O(degree-in-cycles) lookup instead of `bundledCycles.filter(c =>
-   * c.bundled.includes(v))` — the linear scan over every cycle's full
-   * node list that was the main per-click cost on hub nodes.
    */
   @cached
-  private get crossPackageBundle(): {
-    cycles: BundledWithGroups[];
-    byRepIdx: Int32Array;
-    byRepEdges: Int32Array;
-  } | null {
+  private get crossPackageBundle(): BundledWithGroups[] | null {
     const g = this.graph.current;
 
     if (!g) return null;
@@ -476,29 +467,9 @@ export default class InfoPanel extends Component {
 
     if (!rawCycles) return null;
 
-    const cycles = remap
+    return remap
       ? bundleAlreadyContractedCycles(g, remap, rawCycles)
       : bundleRawCyclesWithGroups(rawCycles, null);
-    const N = g.ids.length;
-    const byRepIdx = new Int32Array(N + 1);
-
-    for (const c of cycles) {
-      for (const v of c.bundled) byRepIdx[v + 1]!++;
-    }
-
-    for (let i = 0; i < N; i++) byRepIdx[i + 1]! += byRepIdx[i]!;
-
-    const byRepEdges = new Int32Array(byRepIdx[N]!);
-    const cursor = new Int32Array(N);
-
-    for (let ci = 0; ci < cycles.length; ci++) {
-      for (const v of cycles[ci]!.bundled) {
-        byRepEdges[byRepIdx[v]! + cursor[v]!] = ci;
-        cursor[v]!++;
-      }
-    }
-
-    return { cycles, byRepIdx, byRepEdges };
   }
 
   /**
@@ -508,11 +479,9 @@ export default class InfoPanel extends Component {
    * when packages are connected by lots of file-level imports and you
    * want to see which files actually closed the loop.
    *
-   * `@cached`: only the selection-dependent filter + entry assembly
-   * run here. The bundled list lives in `crossPackageBundle` (filter-
-   * keyed, not selection-keyed), so clicking through nodes only re-runs
-   * an O(degree-in-cycles) lookup and the post-pass for the few cycles
-   * that survive.
+   * `@cached`: only the selection-keyed filter + entry assembly run
+   * here. The bundled list lives in `crossPackageBundle` (filter-keyed,
+   * not selection-keyed) so clicking through nodes doesn't re-bundle.
    */
   @cached
   get crossPackageCycles(): CycleEntry[] {
@@ -531,27 +500,10 @@ export default class InfoPanel extends Component {
 
     if (!bundle) return [];
 
-    const v = info.index;
-    const from = bundle.byRepIdx[v]!;
-    const to = bundle.byRepIdx[v + 1]!;
-
-    if (from === to) return [];
-
-    // A long cycle can mention the same rep twice (the byRepEdges CSR
-    // charges every occurrence so the array sizes correctly); dedupe
-    // here so `#assembleCycleEntries` sees each cycle once.
-    const seen = new Set<number>();
-    const filtered: BundledWithGroups[] = [];
-
-    for (let i = from; i < to; i++) {
-      const ci = bundle.byRepEdges[i]!;
-
-      if (seen.has(ci)) continue;
-      seen.add(ci);
-      filtered.push(bundle.cycles[ci]!);
-    }
-
-    return this.#assembleCycleEntries(g, filtered);
+    return this.#assembleCycleEntries(
+      g,
+      bundle.filter((c) => c.bundled.includes(info.index)),
+    );
   }
 
   /**

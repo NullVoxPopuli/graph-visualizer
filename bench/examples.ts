@@ -16,11 +16,10 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { EXAMPLES } from "#lib/examples";
-
+import { EXAMPLES } from "../app/lib/examples.ts";
 import { DEFAULT_LAYOUT_PARAMS } from "./graph-gen.ts";
 
-import type { LayoutInit } from "#lib/layout-types";
+import type { LayoutInit } from "../app/lib/layout-types.ts";
 
 interface GraphSessionCtor {
   load(json: string): {
