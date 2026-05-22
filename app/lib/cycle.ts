@@ -251,13 +251,23 @@ export function bundleAlreadyContractedCycles(
   const seen = new Set<string>();
   const out: BundledWithGroups[] = [];
 
+  // Build the outgoing CSR once and share it across every per-cycle BFS.
+  // Reconstruction also reuses two scratch arrays (visited + parent), so
+  // a graph with hundreds of cycles doesn't re-allocate or re-CSR for
+  // each — that allocation bill alone dominated `bundleAlreadyContracted`
+  // before this hoist on selection-driven panel rebuilds.
+  const N = nodeRemap.length;
+  const csr = buildOutCsr(graph, N);
+  const visited = new Uint8Array(N);
+  const parent = new Int32Array(N);
+
   for (const c of contractedCycles) {
     const key = visualCycleKey(c);
 
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const groups = reconstructGroupsForBundledCycle(graph, nodeRemap, c);
+    const groups = reconstructGroupsForBundledCycle(nodeRemap, c, csr, visited, parent);
 
     out.push({ bundled: c, groups: groups ?? c.map((idx) => [idx]) });
   }
@@ -267,17 +277,21 @@ export function bundleAlreadyContractedCycles(
   return out;
 }
 
-export function reconstructGroupsForBundledCycle(
-  graph: LoadedGraph,
-  nodeRemap: Int32Array,
-  bundled: number[],
-): number[][] | null {
+interface OutCsr {
+  outIdx: Int32Array;
+  outAdj: Int32Array;
+}
+
+/**
+ * Build the outgoing-edge CSR (`outIdx` row-starts plus `outAdj` targets)
+ * once and let every BFS share it. `reconstructGroupsForBundledCycle` used
+ * to build this per call, which dominated `bundleAlreadyContractedCycles`
+ * on graphs with many cycles — repeated `O(N+E)` allocations and writes
+ * just to run a BFS that only touches one package's territory.
+ */
+function buildOutCsr(graph: LoadedGraph, N: number): OutCsr {
   const { edgesFlat } = graph;
-  const N = nodeRemap.length;
   const E = edgesFlat.length / 2;
-  // Rebuild outgoing CSR per call; it's O(E) once, then every BFS is
-  // O(packageSize) which dominates the unique work. The graph's other
-  // consumers don't need a CSR, so we don't cache it on the graph.
   const outIdx = new Int32Array(N + 1);
 
   for (let i = 0; i < E; i++) outIdx[edgesFlat[2 * i]! + 1]!++;
@@ -294,13 +308,24 @@ export function reconstructGroupsForBundledCycle(
     cursor[a]!++;
   }
 
-  const groups: number[][] = [];
+  return { outIdx, outAdj };
+}
 
-  // Scratch arrays reused across steps — every BFS only touches at most
-  // the source package's territory, so a per-step reset of `visited`
-  // and `parent` along the queue is cheaper than re-allocating.
-  const visited = new Uint8Array(N);
-  const parent = new Int32Array(N);
+function reconstructGroupsForBundledCycle(
+  nodeRemap: Int32Array,
+  bundled: number[],
+  csr: OutCsr,
+  visited: Uint8Array,
+  parent: Int32Array,
+): number[][] | null {
+  const { outIdx, outAdj } = csr;
+  const N = nodeRemap.length;
+  const groups: number[][] = [];
+  // Reuse the same backing array across steps with a head index so the
+  // BFS dequeue is O(1). `Array.prototype.shift()` is O(queueLength),
+  // which made BFS quadratic on packages with thousands of files — the
+  // same nodes a hub package has lots of cycles through.
+  const queue = new Int32Array(N);
 
   for (let i = 0; i < bundled.length; i++) {
     const startRep = bundled[i]!;
@@ -310,11 +335,14 @@ export function reconstructGroupsForBundledCycle(
     parent.fill(-1);
     visited[startRep] = 1;
 
-    const queue: number[] = [startRep];
+    queue[0] = startRep;
+
+    let head = 0;
+    let tail = 1;
     let found = -1;
 
-    bfs: while (queue.length > 0) {
-      const u = queue.shift()!;
+    bfs: while (head < tail) {
+      const u = queue[head++]!;
       const from = outIdx[u]!;
       const to = outIdx[u + 1]!;
 
@@ -333,7 +361,7 @@ export function reconstructGroupsForBundledCycle(
         if (nodeRemap[v] === startRep) {
           visited[v] = 1;
           parent[v] = u;
-          queue.push(v);
+          queue[tail++] = v;
         }
       }
     }
