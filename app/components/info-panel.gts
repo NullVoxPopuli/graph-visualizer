@@ -403,6 +403,25 @@ export default class InfoPanel extends Component {
   }
 
   /**
+   * Cheap count of cycles in the active mode — reads the bundled
+   * list's length without paying the `#assembleCycleEntries` cost
+   * (ids, segments, raw-file chips, sorting). Used by the `<summary>`
+   * badge and the `cyclesOpen` auto-open latch so selecting a hub
+   * node doesn't run the full assembly purely to size the section.
+   */
+  get cyclesCount(): number {
+    return this.showingInternalCycles
+      ? this.internalBundledCycles.length
+      : this.crossPackageBundledCycles.length;
+  }
+
+  /** Same idea as `cyclesCount`: cheap length read for the "N internal
+   *  cycle(s) (hidden)" toggle in the cycles-section header. */
+  get internalCyclesCount(): number {
+    return this.internalBundledCycles.length;
+  }
+
+  /**
    * Contraction node-remap for the *currently visible* graph view —
    * shared between `crossPackageCycles` and `internalCycles`. Hoisted
    * into its own `@cached` getter so a selection change (which only
@@ -431,6 +450,51 @@ export default class InfoPanel extends Component {
   }
 
   /**
+   * Bundled cycles passing through the selected node, before display
+   * assembly (ids/segments/raw-file chips). Split out from
+   * `crossPackageCycles` so the panel can read the *count* (for the
+   * `<summary>` badge and the auto-open threshold) without paying the
+   * O(C·E) assembly + ID + segment pass on every selection change.
+   *
+   * Filters raw cycles by `c.includes(info.index)` *before* bundling:
+   * `bundleAlreadyContractedCycles` BFSes hidden-node chains per step
+   * (O(E + packageSize) per cycle), so doing it on every raw cycle and
+   * then filtering wastes that work on cycles the panel will never
+   * show. With contraction active the raw cycles already use visible-
+   * rep indices; without it, rep == idx, so the same membership test
+   * works either way.
+   */
+  @cached
+  private get crossPackageBundledCycles(): BundledWithGroups[] {
+    const info = this.info;
+    const g = this.graph.current;
+
+    if (!info || !g) return [];
+
+    const vs = this.viewState;
+    const remap = this.contractionRemap;
+
+    // Selected node is hidden — no bundled cycle goes through *this*
+    // node (its loops are absorbed into the owner).
+    if (remap !== null && remap[info.index]! !== info.index) return [];
+
+    const rawPromise = this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), remap);
+
+    if (!rawPromise) return [];
+
+    const rawCycles = getPromiseState(rawPromise).resolved;
+
+    if (!rawCycles) return [];
+
+    const selected = info.index;
+    const cyclesThroughNode = rawCycles.filter((c) => c.includes(selected));
+
+    return remap
+      ? bundleAlreadyContractedCycles(g, remap, cyclesThroughNode)
+      : bundleRawCyclesWithGroups(cyclesThroughNode, null);
+  }
+
+  /**
    * Cycles the selected node sits on. The top-level entries are the
    * bundled cycles (the same loops the renderer red-rings). Each one
    * also carries the underlying raw cycles that contract to it — handy
@@ -452,57 +516,19 @@ export default class InfoPanel extends Component {
    */
   @cached
   get crossPackageCycles(): CycleEntry[] {
-    const info = this.info;
     const g = this.graph.current;
 
-    if (!info || !g) return [];
+    if (!g) return [];
 
-    const vs = this.viewState;
-    const remap = this.contractionRemap;
-
-    // Selected node is hidden — no bundled cycle goes through *this*
-    // node (its loops are absorbed into the owner).
-    if (remap !== null && remap[info.index]! !== info.index) return [];
-
-    // Polynomial shortest-cycle-per-node enumeration; see the matching
-    // call site in `cycles-panel.gts` for the trade-off note.
-    const rawPromise = this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), remap);
-
-    if (!rawPromise) return [];
-
-    const rawCycles = getPromiseState(rawPromise).resolved;
-
-    if (!rawCycles) return [];
-
-    // `bundleAlreadyContractedCycles` handles dedup + per-step file
-    // chain reconstruction for the contracted-CSR path; the legacy
-    // path keeps its own bundle+dedup pass. Both arrive sorted shortest
-    // first, so the info-panel ordering matches the cycles panel.
-    const bundledCycles = (
-      remap
-        ? bundleAlreadyContractedCycles(g, remap, rawCycles)
-        : bundleRawCyclesWithGroups(rawCycles, null)
-    ).filter((c) => c.bundled.includes(info.index));
-
-    return this.#assembleCycleEntries(g, bundledCycles);
+    return this.#assembleCycleEntries(g, this.crossPackageBundledCycles);
   }
 
   /**
-   * File-level cycles whose nodes are entirely within the selected
-   * node's territory (i.e., every node maps to the selected one
-   * through the active contraction). Only populated when contraction
-   * is active AND the selected node is itself visible — in any other
-   * configuration the notion of "internal" doesn't apply and the
-   * getter short-circuits to `[]`.
-   *
-   * These cycles never appear in the default list because the file-
-   * type contraction collapses each one to a single-package row that
-   * gets dropped as a degenerate self-loop. Surfacing them via the
-   * toggle gives the user a way to look at intra-package coupling
-   * without having to re-enable the whole file type globally.
+   * Internal-cycle bundled list, split out so the count is cheap. See
+   * `crossPackageBundledCycles` for the rationale.
    */
   @cached
-  get internalCycles(): CycleEntry[] {
+  private get internalBundledCycles(): BundledWithGroups[] {
     const info = this.info;
     const g = this.graph.current;
 
@@ -535,11 +561,33 @@ export default class InfoPanel extends Component {
     const internal = rawCycles.filter(
       (c) => c.length > 0 && c.every((idx) => remap[idx]! === selectedIdx),
     );
+
     // No further contraction — display each raw cycle's nodes verbatim
     // so the user can see the actual files that close each loop.
-    const bundled = bundleRawCyclesWithGroups(internal, null);
+    return bundleRawCyclesWithGroups(internal, null);
+  }
 
-    return this.#assembleCycleEntries(g, bundled);
+  /**
+   * File-level cycles whose nodes are entirely within the selected
+   * node's territory (i.e., every node maps to the selected one
+   * through the active contraction). Only populated when contraction
+   * is active AND the selected node is itself visible — in any other
+   * configuration the notion of "internal" doesn't apply and the
+   * getter short-circuits to `[]`.
+   *
+   * These cycles never appear in the default list because the file-
+   * type contraction collapses each one to a single-package row that
+   * gets dropped as a degenerate self-loop. Surfacing them via the
+   * toggle gives the user a way to look at intra-package coupling
+   * without having to re-enable the whole file type globally.
+   */
+  @cached
+  get internalCycles(): CycleEntry[] {
+    const g = this.graph.current;
+
+    if (!g) return [];
+
+    return this.#assembleCycleEntries(g, this.internalBundledCycles);
   }
 
   /**
@@ -643,14 +691,25 @@ export default class InfoPanel extends Component {
   private latchedOpen(
     key: "in" | "out" | "cycles",
     override: boolean | null,
-    auto: () => boolean,
+    auto: () => boolean | undefined,
   ): boolean {
     if (override !== null) return override;
 
     let latched = this.#autoOpenLatch[key];
 
     if (latched === undefined) {
-      latched = auto();
+      const computed = auto();
+
+      // `undefined` from `auto` means "the data needed to decide hasn't
+      // landed yet" — typically the shortest-cycle enumeration is still
+      // in flight, so `cyclesCount` is 0 only because the list hasn't
+      // arrived. Latching to `true` on that 0 would auto-open the
+      // section, and the moment cycles resolve we'd render hundreds of
+      // entries. Return `false` (closed) without latching so the *next*
+      // call, after data arrives, can latch the real auto value.
+      if (computed === undefined) return false;
+
+      latched = computed;
       this.#autoOpenLatch[key] = latched;
     }
 
@@ -674,11 +733,42 @@ export default class InfoPanel extends Component {
   }
 
   get cyclesOpen(): boolean {
-    return this.latchedOpen(
-      "cycles",
-      this.viewState.infoCyclesOpenOverride,
-      () => this.cycles.length <= InfoPanel.AUTO_OPEN_THRESHOLD,
-    );
+    return this.latchedOpen("cycles", this.viewState.infoCyclesOpenOverride, () => {
+      // While the shortest-cycle enumeration is in flight,
+      // `cyclesCount` is 0 only because the list hasn't arrived —
+      // not because the node has no cycles. Latching on that 0 would
+      // auto-open the section, and the moment the cycles resolve
+      // we'd render hundreds of entries (and burn the click budget
+      // on Glimmer + DOM construction). Returning `undefined`
+      // signals the latch to stay closed for now and try again next
+      // call.
+      if (!this.cyclesPromiseResolved) return undefined;
+
+      return this.cyclesCount <= InfoPanel.AUTO_OPEN_THRESHOLD;
+    });
+  }
+
+  /**
+   * `true` once the shortest-cycle promise feeding the active mode
+   * (cross-package or internal) has resolved. Lets `cyclesOpen` defer
+   * its auto-open decision until the real count is known instead of
+   * latching on the in-flight 0.
+   */
+  get cyclesPromiseResolved(): boolean {
+    const info = this.info;
+    const g = this.graph.current;
+
+    if (!info || !g) return false;
+
+    const vs = this.viewState;
+    const remap = this.contractionRemap;
+    const promise = this.showingInternalCycles
+      ? this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), null)
+      : this.visualizer.cycleShortest(Int32Array.from(vs.hiddenEdgeTypes), remap);
+
+    if (!promise) return false;
+
+    return getPromiseState(promise).resolved !== undefined;
   }
 
   /**
@@ -905,9 +995,9 @@ export default class InfoPanel extends Component {
               <IconCaretRight class="summary-caret" />
               <span>
                 {{if this.showingInternalCycles "internal cycles" "cycles"}}
-                ({{this.cycles.length}})
+                ({{this.cyclesCount}})
               </span>
-              {{#if (or this.showingInternalCycles this.internalCycles.length)}}
+              {{#if (or this.showingInternalCycles this.internalCyclesCount)}}
                 <button
                   type="button"
                   class="panel__subhead-action"
@@ -917,14 +1007,19 @@ export default class InfoPanel extends Component {
                   {{#if this.showingInternalCycles}}
                     show cross-package
                   {{else}}
-                    {{this.internalCycles.length}}
+                    {{this.internalCyclesCount}}
                     internal
-                    {{if (neq this.internalCycles.length 1) "cycles" "cycle"}}
+                    {{if (neq this.internalCyclesCount 1) "cycles" "cycle"}}
                     (hidden)
                   {{/if}}
                 </button>
               {{/if}}
-              {{#if this.cycles.length}}
+              {{! "Collapse all" only makes sense when the body is visible.
+                  Gating on `cyclesOpen` keeps the closed section from
+                  reading `allCyclesCollapsed` — which itself walks the
+                  full assembled cycles list — purely to label a button
+                  the user can't see anyway. }}
+              {{#if (and this.cyclesOpen this.cyclesCount)}}
                 <button
                   type="button"
                   class="panel__subhead-action"
@@ -933,34 +1028,173 @@ export default class InfoPanel extends Component {
                 >{{if this.allCyclesCollapsed "Expand all" "Collapse all"}}</button>
               {{/if}}
             </summary>
-            {{#if this.topReferencedCycles.length}}
-              <div class="panel__top-cycles">
-                <div class="panel__top-cycles-label">most referenced</div>
+            {{! The cycles list + most-referenced summary are the heavy
+                DOM in this panel — for a node sitting on hundreds of
+                cycles each render builds thousands of nodes. The
+                surrounding `<details open=...>` only hides them
+                visually, so without an explicit `{{#if this.cyclesOpen}}`
+            Glimmer still constructs them on every selection change. Gate the whole body so
+            collapsed sections cost nothing to render. }}
+            {{#if this.cyclesOpen}}
+              {{#if this.topReferencedCycles.length}}
+                <div class="panel__top-cycles">
+                  <div class="panel__top-cycles-label">most referenced</div>
+                  <ol class="panel__cycles">
+                    {{#each this.topReferencedCycles key="entry.id" as |ref|}}
+                      <li class="panel__cycle">
+                        <button
+                          type="button"
+                          class="panel__cycle-head
+                            {{if (isExpanded this.expandedTopHeaders ref.entry.id) 'is-expanded'}}"
+                          {{on "click" (fn this.toggleTopHeader ref.entry.id)}}
+                          aria-expanded={{if
+                            (isExpanded this.expandedTopHeaders ref.entry.id)
+                            "true"
+                            "false"
+                          }}
+                          title="Referenced by {{ref.count}} other cycle{{if
+                            (neq ref.count 1)
+                            's'
+                          }}"
+                        >
+                          <span class="panel__cycle-head-text">referenced by
+                            {{ref.count}}{{if (neq ref.count 1) " cycles" " cycle"}}
+                            ·
+                            {{ref.entry.nodes.length}}
+                            nodes</span>
+                          <code class="cycle-id">{{ref.entry.id}}</code>
+                        </button>
+                        {{#if (isExpanded this.expandedTopHeaders ref.entry.id)}}
+                          <ol class="panel__neighbors panel__neighbors--ordered">
+                            {{#each ref.entry.segments key="key" as |seg|}}
+                              {{#unless seg.cycleId}}
+                                {{#each seg.nodes key="index" as |entry|}}
+                                  <li>
+                                    <span class="panel__neighbor-index">{{entry.index}}.</span>
+                                    <button
+                                      type="button"
+                                      class="panel__neighbor"
+                                      title={{entry.node.id}}
+                                      {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                      {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
+                                      {{on "mouseleave" this.unhoverNeighbor}}
+                                    >
+                                      <span
+                                        class="panel__neighbor-label"
+                                      >{{entry.node.label}}</span>
+                                      {{#if (neq entry.node.id entry.node.label)}}
+                                        <code class="panel__neighbor-id">{{entry.node.id}}</code>
+                                      {{/if}}
+                                      {{#if entry.node.rawFiles.length}}
+                                        <span class="panel__neighbor-raw">
+                                          {{#each entry.node.rawFiles key="id" as |file index|}}
+                                            {{#if index}}<IconArrowRight
+                                              />{{else}}<IconArrowElbowDownRight />{{/if}}
+                                            {{file.label}}
+                                          {{/each}}
+                                        </span>
+                                      {{/if}}
+                                    </button>
+                                  </li>
+                                {{/each}}
+                              {{/unless}}
+                              {{#if seg.cycleId}}
+                                <li>
+                                  <button
+                                    type="button"
+                                    class="cycle-ref"
+                                    {{on "click" (fn this.toggleCycleRef seg.key)}}
+                                    aria-expanded={{if
+                                      (isExpanded this.expandedRefs seg.key)
+                                      "true"
+                                      "false"
+                                    }}
+                                    title="Toggle which nodes here belong to cycle {{seg.cycleId}}"
+                                  >
+                                    <span class="cycle-ref__label">
+                                      … ({{seg.nodes.length}}) — click to expand …
+                                    </span>
+                                    <code class="cycle-id">{{seg.cycleId}}</code>
+                                  </button>
+                                  {{#if (isExpanded this.expandedRefs seg.key)}}
+                                    <ol
+                                      class="panel__neighbors panel__neighbors--ordered panel__neighbors--nested"
+                                    >
+                                      {{#each seg.nodes key="index" as |entry|}}
+                                        <li>
+                                          <span
+                                            class="panel__neighbor-index"
+                                          >{{entry.index}}.</span>
+                                          <button
+                                            type="button"
+                                            class="panel__neighbor"
+                                            title={{entry.node.id}}
+                                            {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                            {{on
+                                              "mouseenter"
+                                              (fn this.hoverNeighbor entry.node.id)
+                                            }}
+                                            {{on "mouseleave" this.unhoverNeighbor}}
+                                          >
+                                            <span
+                                              class="panel__neighbor-label"
+                                            >{{entry.node.label}}</span>
+                                            {{#if (neq entry.node.id entry.node.label)}}
+                                              <code
+                                                class="panel__neighbor-id"
+                                              >{{entry.node.id}}</code>
+                                            {{/if}}
+                                            {{#if entry.node.rawFiles.length}}
+                                              <span class="panel__neighbor-raw">
+                                                {{#each
+                                                  entry.node.rawFiles key="id"
+                                                  as |file index|
+                                                }}
+                                                  {{#if index}}<IconArrowRight
+                                                    />{{else}}<IconArrowElbowDownRight />{{/if}}
+                                                  {{file.label}}
+                                                {{/each}}
+                                              </span>
+                                            {{/if}}
+                                          </button>
+                                        </li>
+                                      {{/each}}
+                                    </ol>
+                                  {{/if}}
+                                </li>
+                              {{/if}}
+                            {{/each}}
+                          </ol>
+                        {{/if}}
+                      </li>
+                    {{/each}}
+                  </ol>
+                </div>
+              {{/if}}
+              {{#if this.cycles.length}}
                 <ol class="panel__cycles">
-                  {{#each this.topReferencedCycles key="entry.id" as |ref|}}
+                  {{#each this.cycles key="key" as |cycle|}}
                     <li class="panel__cycle">
                       <button
                         type="button"
                         class="panel__cycle-head
-                          {{if (isExpanded this.expandedTopHeaders ref.entry.id) 'is-expanded'}}"
-                        {{on "click" (fn this.toggleTopHeader ref.entry.id)}}
-                        aria-expanded={{if
-                          (isExpanded this.expandedTopHeaders ref.entry.id)
+                          {{unless (isExpanded this.collapsedHeaders cycle.key) 'is-expanded'}}"
+                        {{on "click" (fn this.toggleCycleHeader cycle.key)}}
+                        aria-expanded={{unless
+                          (isExpanded this.collapsedHeaders cycle.key)
                           "true"
                           "false"
                         }}
-                        title="Referenced by {{ref.count}} other cycle{{if (neq ref.count 1) 's'}}"
                       >
-                        <span class="panel__cycle-head-text">referenced by
-                          {{ref.count}}{{if (neq ref.count 1) " cycles" " cycle"}}
-                          ·
-                          {{ref.entry.nodes.length}}
-                          nodes</span>
-                        <code class="cycle-id">{{ref.entry.id}}</code>
+                        <span class="panel__cycle-head-text">{{cycle.nodes.length}}
+                          nodes{{#if cycle.containedLabel}}
+                            · contains
+                            {{cycle.containedLabel}}{{/if}}</span>
+                        <code class="cycle-id">{{cycle.id}}</code>
                       </button>
-                      {{#if (isExpanded this.expandedTopHeaders ref.entry.id)}}
+                      {{#unless (isExpanded this.collapsedHeaders cycle.key)}}
                         <ol class="panel__neighbors panel__neighbors--ordered">
-                          {{#each ref.entry.segments key="key" as |seg|}}
+                          {{#each cycle.segments key="key" as |seg|}}
                             {{#unless seg.cycleId}}
                               {{#each seg.nodes key="index" as |entry|}}
                                 <li>
@@ -1049,128 +1283,13 @@ export default class InfoPanel extends Component {
                             {{/if}}
                           {{/each}}
                         </ol>
-                      {{/if}}
+                      {{/unless}}
                     </li>
                   {{/each}}
                 </ol>
-              </div>
-            {{/if}}
-            {{#if this.cycles.length}}
-              <ol class="panel__cycles">
-                {{#each this.cycles key="key" as |cycle|}}
-                  <li class="panel__cycle">
-                    <button
-                      type="button"
-                      class="panel__cycle-head
-                        {{unless (isExpanded this.collapsedHeaders cycle.key) 'is-expanded'}}"
-                      {{on "click" (fn this.toggleCycleHeader cycle.key)}}
-                      aria-expanded={{unless
-                        (isExpanded this.collapsedHeaders cycle.key)
-                        "true"
-                        "false"
-                      }}
-                    >
-                      <span class="panel__cycle-head-text">{{cycle.nodes.length}}
-                        nodes{{#if cycle.containedLabel}}
-                          · contains
-                          {{cycle.containedLabel}}{{/if}}</span>
-                      <code class="cycle-id">{{cycle.id}}</code>
-                    </button>
-                    {{#unless (isExpanded this.collapsedHeaders cycle.key)}}
-                      <ol class="panel__neighbors panel__neighbors--ordered">
-                        {{#each cycle.segments key="key" as |seg|}}
-                          {{#unless seg.cycleId}}
-                            {{#each seg.nodes key="index" as |entry|}}
-                              <li>
-                                <span class="panel__neighbor-index">{{entry.index}}.</span>
-                                <button
-                                  type="button"
-                                  class="panel__neighbor"
-                                  title={{entry.node.id}}
-                                  {{on "click" (fn this.selectNeighbor entry.node.id)}}
-                                  {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
-                                  {{on "mouseleave" this.unhoverNeighbor}}
-                                >
-                                  <span class="panel__neighbor-label">{{entry.node.label}}</span>
-                                  {{#if (neq entry.node.id entry.node.label)}}
-                                    <code class="panel__neighbor-id">{{entry.node.id}}</code>
-                                  {{/if}}
-                                  {{#if entry.node.rawFiles.length}}
-                                    <span class="panel__neighbor-raw">
-                                      {{#each entry.node.rawFiles key="id" as |file index|}}
-                                        {{#if index}}<IconArrowRight
-                                          />{{else}}<IconArrowElbowDownRight />{{/if}}
-                                        {{file.label}}
-                                      {{/each}}
-                                    </span>
-                                  {{/if}}
-                                </button>
-                              </li>
-                            {{/each}}
-                          {{/unless}}
-                          {{#if seg.cycleId}}
-                            <li>
-                              <button
-                                type="button"
-                                class="cycle-ref"
-                                {{on "click" (fn this.toggleCycleRef seg.key)}}
-                                aria-expanded={{if
-                                  (isExpanded this.expandedRefs seg.key)
-                                  "true"
-                                  "false"
-                                }}
-                                title="Toggle which nodes here belong to cycle {{seg.cycleId}}"
-                              >
-                                <span class="cycle-ref__label">
-                                  … ({{seg.nodes.length}}) — click to expand …
-                                </span>
-                                <code class="cycle-id">{{seg.cycleId}}</code>
-                              </button>
-                              {{#if (isExpanded this.expandedRefs seg.key)}}
-                                <ol
-                                  class="panel__neighbors panel__neighbors--ordered panel__neighbors--nested"
-                                >
-                                  {{#each seg.nodes key="index" as |entry|}}
-                                    <li>
-                                      <span class="panel__neighbor-index">{{entry.index}}.</span>
-                                      <button
-                                        type="button"
-                                        class="panel__neighbor"
-                                        title={{entry.node.id}}
-                                        {{on "click" (fn this.selectNeighbor entry.node.id)}}
-                                        {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
-                                        {{on "mouseleave" this.unhoverNeighbor}}
-                                      >
-                                        <span
-                                          class="panel__neighbor-label"
-                                        >{{entry.node.label}}</span>
-                                        {{#if (neq entry.node.id entry.node.label)}}
-                                          <code class="panel__neighbor-id">{{entry.node.id}}</code>
-                                        {{/if}}
-                                        {{#if entry.node.rawFiles.length}}
-                                          <span class="panel__neighbor-raw">
-                                            {{#each entry.node.rawFiles key="id" as |file index|}}
-                                              {{#if index}}<IconArrowRight
-                                                />{{else}}<IconArrowElbowDownRight />{{/if}}
-                                              {{file.label}}
-                                            {{/each}}
-                                          </span>
-                                        {{/if}}
-                                      </button>
-                                    </li>
-                                  {{/each}}
-                                </ol>
-                              {{/if}}
-                            </li>
-                          {{/if}}
-                        {{/each}}
-                      </ol>
-                    {{/unless}}
-                  </li>
-                {{/each}}
-              </ol>
-            {{else}}
-              <p class="panel__empty">Not part of a cycle.</p>
+              {{else}}
+                <p class="panel__empty">Not part of a cycle.</p>
+              {{/if}}
             {{/if}}
           </details>
 
