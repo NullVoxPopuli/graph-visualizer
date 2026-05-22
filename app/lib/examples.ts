@@ -30,7 +30,7 @@ export const EXAMPLES: Example[] = [
   {
     label: "large monorepo",
     description:
-      "100 packages · sizes from 5 to 1000 files · contain / import:value / import:type / import:dynamic / reexport · injected cross-package cycles",
+      "100 packages · ~10k nodes / ~21k edges · sizes 5 to 1000 files · DAG-shaped imports across contain / import:value / import:type / import:dynamic / reexport · injected cross-package cycles",
     url: "/examples/large-monorepo.json",
   },
   {

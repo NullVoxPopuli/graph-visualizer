@@ -59,12 +59,18 @@ function makeRng(seed) {
 const rng = makeRng(SEED);
 const randInt = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
 
-// Scope / domain / subdomain pool — keeps names structured so the LCP
-// clusterer sees natural branching points. Combinations are bounded
-// (5 × 14 × 8 = 560 distinct templates) — far more than the 100
-// packages we need, so collisions don't matter.
+// 5 scopes — round-robin so every scope is well represented in the
+// 100-package fixture and the LCP clusterer has a clean top-level
+// segment.
 const SCOPES = ["@acme", "@beta", "@gamma", "@core", "@infra"];
-const DOMAINS = [
+
+// Word pool for the part after the scope. Two or three words picked
+// at random produce package names that read like real ones —
+// `@acme/api-client`, `@beta/cache-worker-shared` — without the
+// numeric suffix that made the old names feel formulaic. With 75
+// words we get tens of thousands of unique combinations, so the
+// 100-package uniqueness check below almost never has to retry.
+const PKG_WORDS = [
   "api",
   "ui",
   "db",
@@ -79,29 +85,113 @@ const DOMAINS = [
   "platform",
   "edge",
   "tools",
+  "client",
+  "server",
+  "shared",
+  "util",
+  "model",
+  "view",
+  "service",
+  "router",
+  "store",
+  "schema",
+  "types",
+  "errors",
+  "logger",
+  "helpers",
+  "constants",
+  "guards",
+  "filters",
+  "selectors",
+  "reducer",
+  "context",
+  "session",
+  "user",
+  "token",
+  "cache",
+  "worker",
+  "stream",
+  "buffer",
+  "encoder",
+  "decoder",
+  "parser",
+  "lexer",
+  "ast",
+  "ir",
+  "gateway",
+  "registry",
+  "scheduler",
+  "dispatcher",
+  "manager",
+  "monitor",
+  "agent",
+  "broker",
+  "proxy",
+  "adapter",
+  "controller",
+  "handler",
+  "processor",
+  "transformer",
+  "validator",
+  "formatter",
+  "generator",
+  "builder",
+  "factory",
+  "repository",
+  "mapper",
+  "codec",
+  "ingester",
+  "exporter",
+  "importer",
+  "indexer",
+  "crawler",
+  "fetcher",
 ];
-const SUBS = ["client", "server", "shared", "util", "model", "view", "service", "router"];
+
+// Set of already-used names so the random word combos stay unique
+// across the 100-package run.
+const seenPackageNames = new Set();
 
 function packageName(i) {
-  // Round-robin through scopes / domains / subs so we get an even
-  // spread of prefixes. The trailing 3-digit index keeps names
-  // unique even when scope+domain+sub collide.
   const scope = SCOPES[i % SCOPES.length];
-  const domain = DOMAINS[Math.floor(i / SCOPES.length) % DOMAINS.length];
-  const sub = SUBS[Math.floor(i / (SCOPES.length * DOMAINS.length)) % SUBS.length];
 
-  return `${scope}/${domain}-${sub}-${String(i).padStart(3, "0")}`;
+  // ~40% three-word names, ~60% two-word. Realistic shape.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const wordCount = rng() < 0.4 ? 3 : 2;
+    const words = [];
+
+    while (words.length < wordCount) {
+      const w = PKG_WORDS[Math.floor(rng() * PKG_WORDS.length)];
+
+      if (!words.includes(w)) words.push(w);
+    }
+
+    const name = `${scope}/${words.join("-")}`;
+
+    if (!seenPackageNames.has(name)) {
+      seenPackageNames.add(name);
+
+      return name;
+    }
+  }
+
+  // Astronomically unlikely with 75 words × 2-3 word combos and only
+  // 100 packages, but a defensive throw beats silently emitting a
+  // duplicate id (which the JSON parser would then reject).
+  throw new Error(`gen-large-monorepo: could not find unique package name for index ${i}`);
 }
 
 // Size buckets, spanning **5 to 1000 files** so the layout, cluster,
-// and cycle paths all see a realistic long-tail distribution:
+// and cycle paths all see a realistic long-tail distribution.
+// Tuned so the total file count lands near 9900 — combined with the
+// 100 package nodes that's the ~10k-node target.
 //
 //   1 mega       1000     files
-//   1 huge       500–800
-//   2 very-large 200–500
-//  10 large      80–200
-//  30 medium     20–60
-//  56 small      5–15
+//   1 huge       800–1000
+//   2 very-large 500–800
+//  10 large      200–400
+//  30 medium     60–130
+//  56 small      5–30
 //
 // The first few indices have pinned buckets (instead of randomly
 // sampling from one wide range) so the 500-and-up region stays
@@ -110,12 +200,12 @@ function packageName(i) {
 // "foundation libs that everyone depends on" in the layered DAG.
 function packageSize(i) {
   if (i === 0) return 1000;
-  if (i === 1) return randInt(500, 800);
-  if (i < 4) return randInt(200, 500);
-  if (i < 14) return randInt(80, 200);
-  if (i < 44) return randInt(20, 60);
+  if (i === 1) return randInt(800, 1000);
+  if (i < 4) return randInt(500, 800);
+  if (i < 14) return randInt(200, 400);
+  if (i < 44) return randInt(60, 130);
 
-  return randInt(5, 15);
+  return randInt(5, 30);
 }
 
 // 4 layers, ~25 packages each (so the mega/huge packages at indices
@@ -303,9 +393,11 @@ for (let pkgIdx = 0; pkgIdx < packages.length; pkgIdx++) {
     const file = myFiles[fi];
     const seen = new Set();
 
-    // Intra-package: deeper tiers only.
+    // Intra-package: deeper tiers only. Tuned with the cross-package
+    // degree below so contain + file→file imports land near the
+    // 20k-edge target.
     const intraCandidates = myFiles.filter((f) => f.tier > file.tier);
-    const intraWant = Math.min(randInt(0, 4), intraCandidates.length);
+    const intraWant = Math.min(randInt(1, 4), intraCandidates.length);
 
     for (let k = 0; k < intraWant; k++) {
       const pickIdx = Math.floor(rng() * intraCandidates.length);
@@ -319,7 +411,7 @@ for (let pkgIdx = 0; pkgIdx < packages.length; pkgIdx++) {
     // Cross-package: only the public surface (tier ≤ 2) of this
     // package reaches into the public surface of depended packages.
     if (file.tier <= 2 && myDeps.length > 0) {
-      const crossWant = randInt(1, 3);
+      const crossWant = randInt(2, 4);
 
       for (let k = 0; k < crossWant; k++) {
         const depPkgIdx = myDeps[Math.floor(rng() * myDeps.length)];
