@@ -787,6 +787,17 @@ export default class InfoPanel extends Component {
   }
 
   /**
+   * Double-click on a neighbor row: select the node and ask the canvas to
+   * recenter + nudge in. Single-click already selects; the dblclick adds
+   * the camera move on top.
+   */
+  @action
+  zoomInOnNeighbor(id: string): void {
+    this.viewState.selectedId = id;
+    this.visualizer.zoomInOnId(id);
+  }
+
+  /**
    * Mirror the row's hover state into the visualizer service so the
    * Visualizer's rAF loop can grow the corresponding node on the canvas
    * (same flag the on-canvas mouse hover sets).
@@ -859,6 +870,7 @@ export default class InfoPanel extends Component {
                         class="panel__neighbor"
                         title={{entry.id}}
                         {{on "click" (fn this.selectNeighbor entry.id)}}
+                        {{on "dblclick" (fn this.zoomInOnNeighbor entry.id)}}
                         {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
                         {{on "mouseleave" this.unhoverNeighbor}}
                       >
@@ -888,6 +900,7 @@ export default class InfoPanel extends Component {
                         class="panel__neighbor"
                         title={{entry.id}}
                         {{on "click" (fn this.selectNeighbor entry.id)}}
+                        {{on "dblclick" (fn this.zoomInOnNeighbor entry.id)}}
                         {{on "mouseenter" (fn this.hoverNeighbor entry.id)}}
                         {{on "mouseleave" this.unhoverNeighbor}}
                       >
@@ -973,6 +986,7 @@ export default class InfoPanel extends Component {
                                     class="panel__neighbor"
                                     title={{entry.node.id}}
                                     {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                    {{on "dblclick" (fn this.zoomInOnNeighbor entry.node.id)}}
                                     {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
                                     {{on "mouseleave" this.unhoverNeighbor}}
                                   >
@@ -1023,6 +1037,7 @@ export default class InfoPanel extends Component {
                                           class="panel__neighbor"
                                           title={{entry.node.id}}
                                           {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                          {{on "dblclick" (fn this.zoomInOnNeighbor entry.node.id)}}
                                           {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
                                           {{on "mouseleave" this.unhoverNeighbor}}
                                         >
@@ -1091,6 +1106,7 @@ export default class InfoPanel extends Component {
                                   class="panel__neighbor"
                                   title={{entry.node.id}}
                                   {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                  {{on "dblclick" (fn this.zoomInOnNeighbor entry.node.id)}}
                                   {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
                                   {{on "mouseleave" this.unhoverNeighbor}}
                                 >
@@ -1141,6 +1157,7 @@ export default class InfoPanel extends Component {
                                         class="panel__neighbor"
                                         title={{entry.node.id}}
                                         {{on "click" (fn this.selectNeighbor entry.node.id)}}
+                                        {{on "dblclick" (fn this.zoomInOnNeighbor entry.node.id)}}
                                         {{on "mouseenter" (fn this.hoverNeighbor entry.node.id)}}
                                         {{on "mouseleave" this.unhoverNeighbor}}
                                       >

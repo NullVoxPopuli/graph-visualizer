@@ -1,9 +1,11 @@
-import { click, render, waitFor } from "@ember/test-helpers";
+import { click, render, triggerEvent, waitFor } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
 import CyclesPanel from "#components/cycles-panel";
 import { loadGraph, stubRouterTransitions, viewState } from "#test-helpers/render";
+
+import type VisualizerService from "#services/visualizer";
 
 module("Integration | cycles-panel", function (hooks) {
   setupRenderingTest(hooks);
@@ -221,5 +223,33 @@ module("Integration | cycles-panel", function (hooks) {
       .dom(headerOf(0))
       .hasAttribute("aria-expanded", "false", "collapsed cycle stays collapsed");
     assert.dom(headerOf(1)).hasAttribute("aria-expanded", "true", "other cycle stays as it was");
+  });
+
+  test("double-clicking a cycle node selects the node and asks the canvas to zoom in", async function (assert) {
+    loadGraph(this.owner, {
+      nodes: [
+        { id: "a", edges: ["b"] },
+        { id: "b", edges: ["c"] },
+        { id: "c", edges: ["a"] },
+      ],
+    });
+    viewState(this.owner).cyclesPanelOpen = true;
+
+    const vis = this.owner.lookup("service:visualizer") as VisualizerService;
+
+    await render(<template><CyclesPanel /></template>);
+    await waitFor(".cycles-panel__entry");
+
+    // `triggerEvent("dblclick")` dispatches only the dblclick event (not
+    // a synthetic preceding click), so the click handler that selectNode
+    // is wired into doesn't fire here — only the dblclick handler's
+    // `zoomInOnNode` runs.
+    await triggerEvent('.cycles-panel__entry .cycles-panel__node[title="b"]', "dblclick");
+
+    const pf = vis.pendingFocus;
+
+    assert.strictEqual(viewState(this.owner).selectedId, "b", "selection followed the dblclick");
+    assert.strictEqual(pf?.id, "b", "canvas focus targets the same node");
+    assert.true(pf?.zoomIn, "request is the zoom-in variant, not a plain recenter");
   });
 });

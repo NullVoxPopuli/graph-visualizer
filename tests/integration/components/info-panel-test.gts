@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
-import { click, findAll, render } from "@ember/test-helpers";
+import { click, findAll, render, triggerEvent } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
 import InfoPanel from "#components/info-panel";
 import { loadGraph, stubRouterTransitions, viewState } from "#test-helpers/render";
+
+import type VisualizerService from "#services/visualizer";
 
 module("Integration | info-panel", function (hooks) {
   setupRenderingTest(hooks);
@@ -206,5 +208,28 @@ module("Integration | info-panel", function (hooks) {
     // `cycles` section back open — the panel jumped. Both must hold.
     assert.false(isOpen("in"), "in section stays collapsed after navigating");
     assert.false(isOpen("cycles"), "explicitly-closed cycles section stays closed");
+  });
+
+  test("double-clicking a neighbor row selects the node and asks the canvas to zoom in", async function (assert) {
+    loadGraph(this.owner, {
+      nodes: [
+        { id: "src", label: "Src", edges: ["target"] },
+        { id: "target", label: "Target", edges: ["sink"] },
+        { id: "sink", label: "Sink" },
+      ],
+    });
+    viewState(this.owner).selectedId = "target";
+
+    const vis = this.owner.lookup("service:visualizer") as VisualizerService;
+
+    await render(<template><InfoPanel /></template>);
+
+    assert.strictEqual(vis.pendingFocus, null, "no focus request pending before interaction");
+
+    await triggerEvent('.panel__neighbor[title="sink"]', "dblclick");
+
+    assert.strictEqual(viewState(this.owner).selectedId, "sink", "selection followed the dblclick");
+    assert.strictEqual(vis.pendingFocus?.id, "sink", "canvas focus targets the same node");
+    assert.true(vis.pendingFocus?.zoomIn, "request is the zoom-in variant, not a plain recenter");
   });
 });
