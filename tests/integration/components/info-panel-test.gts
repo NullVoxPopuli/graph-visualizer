@@ -49,7 +49,15 @@ module("Integration | info-panel", function (hooks) {
         { id: "sink", label: "Sink" },
       ],
     });
-    viewState(this.owner).selectedId = "target";
+
+    const vs = viewState(this.owner);
+
+    vs.selectedId = "target";
+    // in/out sections always start collapsed by default; the override
+    // URL slot is how the user's explicit "open this section" choice
+    // is persisted, so set it directly here to materialize the lists.
+    vs.infoInOpenOverride = true;
+    vs.infoOutOpenOverride = true;
 
     await render(<template><InfoPanel /></template>);
 
@@ -218,7 +226,13 @@ module("Integration | info-panel", function (hooks) {
         { id: "sink", label: "Sink" },
       ],
     });
-    viewState(this.owner).selectedId = "target";
+
+    const vs = viewState(this.owner);
+
+    vs.selectedId = "target";
+    // The neighbor list only renders when the section is open; in/out
+    // default to collapsed now, so force it open via the override slot.
+    vs.infoOutOpenOverride = true;
 
     const vis = this.owner.lookup("service:visualizer") as VisualizerService;
 

@@ -638,13 +638,13 @@ export default class InfoPanel extends Component {
   }
 
   /**
-   * Default to open when the section is short enough to scan at a glance;
-   * collapse otherwise so a node with hundreds of incoming edges doesn't
-   * push the rest of the panel off-screen. Once the user manually
-   * toggles a section their explicit choice is persisted in the URL
-   * (see `viewState.infoInOpenOverride` etc.) and wins over the
-   * auto-default; toggling back to the natural state clears the URL key
-   * so the auto-default takes over again.
+   * Auto-open threshold for the *cycles* section only — in/out always
+   * default to collapsed (regardless of count) so clicking a node
+   * never pays to render its neighbor list on first reveal. The cycles
+   * section still defaults to open when the list is short enough to
+   * scan; long lists collapse to avoid pushing the rest of the panel
+   * off-screen. User toggles persist in the URL via
+   * `viewState.info{In,Out,Cycles}OpenOverride` and always win.
    */
   static readonly AUTO_OPEN_THRESHOLD = 20;
 
@@ -679,19 +679,17 @@ export default class InfoPanel extends Component {
   }
 
   get inOpen(): boolean {
-    return this.latchedOpen(
-      "in",
-      this.viewState.infoInOpenOverride,
-      () => this.inNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD,
-    );
+    // Always collapse by default — the user explicitly asked the
+    // neighbor lists not to materialize until they open the section,
+    // so even a single-edge node still requires a click to see who
+    // depends on it. The latch's `auto()` returning false skips the
+    // `inNeighbors` materialization + sort entirely until the user
+    // toggles the section.
+    return this.latchedOpen("in", this.viewState.infoInOpenOverride, () => false);
   }
 
   get outOpen(): boolean {
-    return this.latchedOpen(
-      "out",
-      this.viewState.infoOutOpenOverride,
-      () => this.outNeighborCount <= InfoPanel.AUTO_OPEN_THRESHOLD,
-    );
+    return this.latchedOpen("out", this.viewState.infoOutOpenOverride, () => false);
   }
 
   get cyclesOpen(): boolean {
