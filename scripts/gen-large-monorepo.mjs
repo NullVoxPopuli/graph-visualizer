@@ -83,14 +83,28 @@ function packageName(i) {
   return `${scope}/${domain}-${sub}-${String(i).padStart(3, "0")}`;
 }
 
-// Size buckets: 5 hubs (30–70 files), 15 medium (10–25), 80 small
-// (2–8). Hubs land first in the package list so the deterministic
-// rng draws are stable across re-runs.
+// Size buckets, spanning **5 to 1000 files** so the layout, cluster,
+// and cycle paths all see a realistic long-tail distribution:
+//
+//   1 mega       1000     files
+//   1 huge       500–800
+//   2 very-large 200–500
+//  10 large      80–200
+//  30 medium     20–60
+//  56 small      5–15
+//
+// Total works out to ~5–6k files. The first few indices have pinned
+// buckets (instead of randomly sampling from one wide range) so the
+// 500-and-up region stays populated even when the rng's first few
+// draws happen to land low.
 function packageSize(i) {
-  if (i < 5) return randInt(30, 70);
-  if (i < 20) return randInt(10, 25);
+  if (i === 0) return 1000;
+  if (i === 1) return randInt(500, 800);
+  if (i < 4) return randInt(200, 500);
+  if (i < 14) return randInt(80, 200);
+  if (i < 44) return randInt(20, 60);
 
-  return randInt(2, 8);
+  return randInt(5, 15);
 }
 
 // Per-package, generate `count` file names with realistic-ish nested
