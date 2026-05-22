@@ -519,7 +519,7 @@ export default class VisualizerService extends Service {
    * cleared by the Visualizer component's rAF loop. Not tracked — the
    * polling is imperative, and we don't want every read to subscribe.
    */
-  pendingFocus: { id: string; ts: number } | null = null;
+  pendingFocus: { id: string; ts: number; zoomIn?: boolean } | null = null;
 
   /**
    * Node id currently hovered from outside the canvas (info-panel rows,
@@ -536,6 +536,15 @@ export default class VisualizerService extends Service {
    */
   focusOnId(id: string): void {
     this.pendingFocus = { id, ts: Date.now() };
+  }
+
+  /**
+   * Like `focusOnId`, but also nudges the camera in a step closer so the
+   * node sits centered in the viewport at a slightly tighter zoom. Used by
+   * the panel node-link buttons' `dblclick` handler.
+   */
+  zoomInOnId(id: string): void {
+    this.pendingFocus = { id, ts: Date.now(), zoomIn: true };
   }
 }
 

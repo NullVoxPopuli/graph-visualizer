@@ -130,6 +130,12 @@ export default class OrphansPanel extends Component {
   }
 
   @action
+  zoomInOnNode(id: string): void {
+    this.viewState.selectedId = id;
+    this.visualizer.zoomInOnId(id);
+  }
+
+  @action
   hoverNode(id: string): void {
     this.visualizer.externalHoverId = id;
   }
@@ -237,6 +243,7 @@ export default class OrphansPanel extends Component {
                   class="cycles-panel__node {{if (eq entry.id this.selectedId) 'is-selected'}}"
                   title={{entry.id}}
                   {{on "click" (fn this.selectNode entry.id)}}
+                  {{on "dblclick" (fn this.zoomInOnNode entry.id)}}
                   {{on "mouseenter" (fn this.hoverNode entry.id)}}
                   {{on "mouseleave" this.unhoverNode}}
                 >

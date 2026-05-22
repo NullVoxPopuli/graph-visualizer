@@ -460,6 +460,10 @@ export default class Visualizer extends Component {
    * service (set by the search component) and animate the camera to the
    * node if it's outside the current viewport. No-op when the node is
    * already visible — don't yank the user around when they didn't need it.
+   *
+   * The `zoomIn` flag (set by panel node-link `dblclick`) forces the
+   * animation even when the node is already visible and tightens the zoom
+   * a step so the target sits centered at a closer level.
    */
   private maybeHandleFocus(scene: ProcessedScene): void {
     const req = this.visualizer.pendingFocus;
@@ -477,7 +481,15 @@ export default class Visualizer extends Component {
     const y = scene.positions[2 * idx + 1]!;
     const cam = this.camera;
 
-    if (!cam || cam.worldPointInView(x, y)) return;
+    if (!cam) return;
+
+    if (req.zoomIn) {
+      cam.animateTo(x, y, cam.zoom * 1.5);
+
+      return;
+    }
+
+    if (cam.worldPointInView(x, y)) return;
     cam.animateTo(x, y, cam.zoom);
   }
 

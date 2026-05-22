@@ -429,6 +429,12 @@ export default class CyclesPanel extends Component {
   }
 
   @action
+  zoomInOnNode(id: string): void {
+    this.viewState.selectedId = id;
+    this.visualizer.zoomInOnId(id);
+  }
+
+  @action
   hoverNode(id: string): void {
     this.visualizer.externalHoverId = id;
   }
@@ -574,6 +580,7 @@ export default class CyclesPanel extends Component {
                               {{if (eq node.id this.selectedId) 'is-selected'}}"
                             title={{node.id}}
                             {{on "click" (fn this.selectNode node.id)}}
+                            {{on "dblclick" (fn this.zoomInOnNode node.id)}}
                             {{on "mouseenter" (fn this.hoverNode node.id)}}
                             {{on "mouseleave" this.unhoverNode}}
                           >
@@ -621,6 +628,7 @@ export default class CyclesPanel extends Component {
                                     {{if (eq node.id this.selectedId) 'is-selected'}}"
                                   title={{node.id}}
                                   {{on "click" (fn this.selectNode node.id)}}
+                                  {{on "dblclick" (fn this.zoomInOnNode node.id)}}
                                   {{on "mouseenter" (fn this.hoverNode node.id)}}
                                   {{on "mouseleave" this.unhoverNode}}
                                 >

@@ -1,9 +1,11 @@
-import { click, render, waitFor } from "@ember/test-helpers";
+import { click, render, triggerEvent, waitFor } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import { setupRenderingTest } from "ember-qunit";
 
 import CyclesPanel from "#components/cycles-panel";
 import { loadGraph, stubRouterTransitions, viewState } from "#test-helpers/render";
+
+import type VisualizerService from "#services/visualizer";
 
 module("Integration | cycles-panel", function (hooks) {
   setupRenderingTest(hooks);
@@ -221,5 +223,32 @@ module("Integration | cycles-panel", function (hooks) {
       .dom(headerOf(0))
       .hasAttribute("aria-expanded", "false", "collapsed cycle stays collapsed");
     assert.dom(headerOf(1)).hasAttribute("aria-expanded", "true", "other cycle stays as it was");
+  });
+
+  test("double-clicking a cycle node selects the node and asks the canvas to zoom in", async function (assert) {
+    loadGraph(this.owner, {
+      nodes: [
+        { id: "a", edges: ["b"] },
+        { id: "b", edges: ["c"] },
+        { id: "c", edges: ["a"] },
+      ],
+    });
+    viewState(this.owner).cyclesPanelOpen = true;
+
+    const vis = this.owner.lookup("service:visualizer") as VisualizerService;
+
+    await render(<template><CyclesPanel /></template>);
+    await waitFor(".cycles-panel__entry");
+
+    // The single-click handler (selectNode) already queues a plain
+    // focus on the panel-driven selection — clear it so the assertion
+    // is strictly about the dblclick's zoom-in variant.
+    vis.pendingFocus = null;
+
+    await triggerEvent('.cycles-panel__entry .cycles-panel__node[title="b"]', "dblclick");
+
+    assert.strictEqual(viewState(this.owner).selectedId, "b", "selection followed the dblclick");
+    assert.strictEqual(vis.pendingFocus?.id, "b", "canvas focus targets the same node");
+    assert.true(vis.pendingFocus?.zoomIn, "request is the zoom-in variant, not a plain recenter");
   });
 });
