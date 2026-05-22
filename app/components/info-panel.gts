@@ -171,16 +171,11 @@ export default class InfoPanel extends Component {
     const live = this.viewState.selectedId;
 
     if (live === null) {
-      let cancelled = false;
-
       queueMicrotask(() => {
-        if (cancelled) return;
         if (this.deferredSelectedId !== null) this.deferredSelectedId = null;
       });
 
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
 
     let done = false;
