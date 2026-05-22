@@ -87,14 +87,7 @@ interface ScenarioOptions {
  * the per-cycle BFS to walk the hub's territory.
  */
 function makeScenario(opts: ScenarioOptions): Scenario {
-  const {
-    packageCount,
-    hubFiles,
-    filesPerPackage,
-    hubCycles,
-    cycleLen,
-    seed = 0xa1b2c3d4,
-  } = opts;
+  const { packageCount, hubFiles, filesPerPackage, hubCycles, cycleLen, seed = 0xa1b2c3d4 } = opts;
   const rand = mulberry32(seed);
 
   // Layout: indices 0..packageCount-1 are the visible reps (packages).
@@ -354,10 +347,7 @@ function reconstructGroupsBaseline(
 
 // ---------- "cycles through rep" lookup variants -------------
 
-function buildPerRepCsr(
-  N: number,
-  allCycles: number[][],
-): { idx: Int32Array; edges: Int32Array } {
+function buildPerRepCsr(N: number, allCycles: number[][]): { idx: Int32Array; edges: Int32Array } {
   const idx = new Int32Array(N + 1);
 
   for (const c of allCycles) for (const v of c) idx[v + 1]!++;
@@ -456,13 +446,7 @@ function makeSparseScenario(opts: {
   cycleLen: number;
   seed?: number;
 }): Scenario {
-  const {
-    packageCount,
-    cyclesTotal,
-    cyclesTouchingTarget,
-    cycleLen,
-    seed = 0xabad1dea,
-  } = opts;
+  const { packageCount, cyclesTotal, cyclesTouchingTarget, cycleLen, seed = 0xabad1dea } = opts;
   const rand = mulberry32(seed);
   const N = packageCount;
   const nodeRemap = new Int32Array(N);
@@ -483,9 +467,7 @@ function makeSparseScenario(opts: {
     const cycle: number[] = [];
     const seen = new Set<number>();
     const touchesTarget = c < cyclesTouchingTarget;
-    const targetPos = touchesTarget
-      ? 1 + Math.floor(rand() * (cycleLen - 1))
-      : -1;
+    const targetPos = touchesTarget ? 1 + Math.floor(rand() * (cycleLen - 1)) : -1;
 
     while (cycle.length < cycleLen) {
       if (cycle.length === targetPos) {
@@ -585,16 +567,12 @@ function smoke(cases: Scenario[]): void {
       sc.nodeRemap,
       sc.rawCycles,
     ).map((b) => b.bundled);
-    const allCyclesNew = bundleAlreadyContractedCycles(
-      sc.graph,
-      sc.nodeRemap,
-      sc.rawCycles,
-    ).map((b) => b.bundled);
+    const allCyclesNew = bundleAlreadyContractedCycles(sc.graph, sc.nodeRemap, sc.rawCycles).map(
+      (b) => b.bundled,
+    );
 
     if (allCyclesNew.length !== allCyclesBaseline.length) {
-      throw new Error(
-        `parity: new=${allCyclesNew.length} baseline=${allCyclesBaseline.length}`,
-      );
+      throw new Error(`parity: new=${allCyclesNew.length} baseline=${allCyclesBaseline.length}`);
     }
 
     const t0 = performance.now();
@@ -627,7 +605,9 @@ function smoke(cases: Scenario[]): void {
     console.info(`  bundle new           ${newMs.toFixed(2).padStart(8)} ms`);
     console.info(`  cyclesThrough filter ${filterMs.toFixed(3).padStart(8)} ms/op`);
     console.info(`  cyclesThrough csr    ${csrMs.toFixed(3).padStart(8)} ms/op`);
-    console.info(`  cycles built: ${allCyclesNew.length}, hubRep cycles: ${cyclesThroughCsr(sc.hubRep, allCyclesNew, csr).length}`);
+    console.info(
+      `  cycles built: ${allCyclesNew.length}, hubRep cycles: ${cyclesThroughCsr(sc.hubRep, allCyclesNew, csr).length}`,
+    );
   }
 }
 
@@ -642,11 +622,9 @@ async function main(): Promise<void> {
   }
 
   for (const sc of cases) {
-    const allCyclesNew = bundleAlreadyContractedCycles(
-      sc.graph,
-      sc.nodeRemap,
-      sc.rawCycles,
-    ).map((b) => b.bundled);
+    const allCyclesNew = bundleAlreadyContractedCycles(sc.graph, sc.nodeRemap, sc.rawCycles).map(
+      (b) => b.bundled,
+    );
     const csr = buildPerRepCsr(sc.nodeRemap.length, allCyclesNew);
 
     group(sc.label, () => {
