@@ -4,6 +4,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 
 import { modifier } from "ember-modifier";
+import { IncrementalEach } from "ember-primitives";
 
 import type GraphService from "#services/graph";
 import type ViewStateService from "#services/view-state";
@@ -179,7 +180,7 @@ export default class Search extends Component {
       {{#if this.isOpen}}
         {{#if this.matches.length}}
           <ul class="search__results" role="listbox">
-            {{#each this.matches as |m|}}
+            <IncrementalEach @items={{this.matches}} as |m|>
               <li
                 class="search__result {{if m.focused 'is-focused'}}"
                 role="option"
@@ -188,7 +189,7 @@ export default class Search extends Component {
                 <span class="search__result-label">{{m.label}}</span>
                 <code class="search__result-id">{{m.id}}</code>
               </li>
-            {{/each}}
+            </IncrementalEach>
           </ul>
         {{else if this.hint}}
           <p class="search__hint">{{this.hint}}</p>

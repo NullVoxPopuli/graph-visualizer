@@ -3,6 +3,7 @@ import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 
+import { IncrementalEach } from "ember-primitives";
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import IconCaretLeft from "~icons/ph/caret-left";
@@ -662,7 +663,7 @@ export default class Controls extends Component<Signature> {
           <div class="controls__section">
             <div class="controls__section-label">node types</div>
             <div class="controls__types">
-              {{#each this.nodeTypes as |t|}}
+              <IncrementalEach @items={{this.nodeTypes}} as |t|>
                 <label class="controls__type">
                   <input
                     type="checkbox"
@@ -672,7 +673,7 @@ export default class Controls extends Component<Signature> {
                   <span class="controls__type-name">{{t.name}}</span>
                   <span class="controls__type-count">{{t.count}}</span>
                 </label>
-              {{/each}}
+              </IncrementalEach>
             </div>
           </div>
         {{/if}}
@@ -684,7 +685,7 @@ export default class Controls extends Component<Signature> {
             <div class="controls__filter-group">
               <div class="controls__filter-label">edge types</div>
               <div class="controls__types">
-                {{#each this.edgeTypes as |t|}}
+                <IncrementalEach @items={{this.edgeTypes}} as |t|>
                   <label class="controls__type">
                     <input
                       type="checkbox"
@@ -694,7 +695,7 @@ export default class Controls extends Component<Signature> {
                     <span class="controls__type-name">{{t.name}}</span>
                     <span class="controls__type-count">{{t.count}}</span>
                   </label>
-                {{/each}}
+                </IncrementalEach>
               </div>
             </div>
           {{/if}}
@@ -715,7 +716,7 @@ export default class Controls extends Component<Signature> {
             </form>
             {{#if this.includeGlobs.length}}
               <ul class="controls__glob-list">
-                {{#each this.includeGlobs as |pattern|}}
+                <IncrementalEach @items={{this.includeGlobs}} as |pattern|>
                   <li class="controls__glob">
                     <code class="controls__glob-pattern">{{pattern}}</code>
                     <button
@@ -725,7 +726,7 @@ export default class Controls extends Component<Signature> {
                       {{on "click" (fn this.removeIncludeGlob pattern)}}
                     ><IconX /></button>
                   </li>
-                {{/each}}
+                </IncrementalEach>
               </ul>
             {{/if}}
           </div>
@@ -746,7 +747,7 @@ export default class Controls extends Component<Signature> {
             </form>
             {{#if this.excludeGlobs.length}}
               <ul class="controls__glob-list">
-                {{#each this.excludeGlobs as |pattern|}}
+                <IncrementalEach @items={{this.excludeGlobs}} as |pattern|>
                   <li class="controls__glob">
                     <code class="controls__glob-pattern">{{pattern}}</code>
                     <button
@@ -756,7 +757,7 @@ export default class Controls extends Component<Signature> {
                       {{on "click" (fn this.removeExcludeGlob pattern)}}
                     ><IconX /></button>
                   </li>
-                {{/each}}
+                </IncrementalEach>
               </ul>
             {{/if}}
           </div>
@@ -774,7 +775,7 @@ export default class Controls extends Component<Signature> {
               >show all</button>
             </summary>
             <ul class="controls__hidden-list">
-              {{#each this.hiddenNodes as |h|}}
+              <IncrementalEach @items={{this.hiddenNodes}} as |h|>
                 <li class="controls__hidden">
                   <button
                     type="button"
@@ -786,7 +787,7 @@ export default class Controls extends Component<Signature> {
                     <code class="controls__hidden-id">{{h.id}}</code>
                   </button>
                 </li>
-              {{/each}}
+              </IncrementalEach>
             </ul>
           </details>
         {{/if}}
@@ -803,7 +804,7 @@ export default class Controls extends Component<Signature> {
               >clear</button>
             </summary>
             <ul class="controls__hidden-list">
-              {{#each this.roots as |r|}}
+              <IncrementalEach @items={{this.roots}} as |r|>
                 <li class="controls__hidden">
                   <button
                     type="button"
@@ -815,7 +816,7 @@ export default class Controls extends Component<Signature> {
                     <code class="controls__hidden-id">{{r.id}}</code>
                   </button>
                 </li>
-              {{/each}}
+              </IncrementalEach>
             </ul>
           </details>
         {{/if}}
