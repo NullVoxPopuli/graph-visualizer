@@ -2,6 +2,7 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 
+import { IncrementalEach } from "ember-primitives";
 import { getPromiseState } from "reactiveweb/get-promise-state";
 
 import { type Example, EXAMPLES } from "#lib/examples";
@@ -62,7 +63,7 @@ export default class ExampleLinks extends Component<Signature> {
   <template>
     <p class="examples" ...attributes>
       {{#if @prefix}}<span class="examples__prefix">{{@prefix}}</span>{{/if}}
-      {{#each this.examples as |ex i|}}
+      <IncrementalEach @items={{this.examples}} as |ex i|>
         {{#if i}}<span class="examples__sep">·</span>{{/if}}
         <a
           href={{ex.url}}
@@ -70,7 +71,7 @@ export default class ExampleLinks extends Component<Signature> {
           title={{ex.description}}
           {{on "click" (fn this.load ex)}}
         >{{ex.label}}</a>
-      {{/each}}
+      </IncrementalEach>
       {{#if this.state.isLoading}}
         <span class="examples__status">loading…</span>
       {{/if}}
