@@ -993,9 +993,9 @@ export default class InfoPanel extends Component {
                       </button>
                       {{#if (isExpanded this.expandedTopHeaders ref.entry.id)}}
                         <ol class="panel__neighbors panel__neighbors--ordered">
-                          <IncrementalEach @items={{ref.entry.segments}} as |seg|>
+                          {{#each ref.entry.segments key="key" as |seg|}}
                             {{#unless seg.cycleId}}
-                              <IncrementalEach @items={{seg.nodes}} as |entry|>
+                              {{#each seg.nodes key="index" as |entry|}}
                                 <li>
                                   <span class="panel__neighbor-index">{{entry.index}}.</span>
                                   <button
@@ -1013,19 +1013,16 @@ export default class InfoPanel extends Component {
                                     {{/if}}
                                     {{#if entry.node.rawFiles.length}}
                                       <span class="panel__neighbor-raw">
-                                        <IncrementalEach
-                                          @items={{entry.node.rawFiles}}
-                                          as |file index|
-                                        >
+                                        {{#each entry.node.rawFiles key="id" as |file index|}}
                                           {{#if index}}<IconArrowRight
                                             />{{else}}<IconArrowElbowDownRight />{{/if}}
                                           {{file.label}}
-                                        </IncrementalEach>
+                                        {{/each}}
                                       </span>
                                     {{/if}}
                                   </button>
                                 </li>
-                              </IncrementalEach>
+                              {{/each}}
                             {{/unless}}
                             {{#if seg.cycleId}}
                               <li>
@@ -1049,7 +1046,7 @@ export default class InfoPanel extends Component {
                                   <ol
                                     class="panel__neighbors panel__neighbors--ordered panel__neighbors--nested"
                                   >
-                                    <IncrementalEach @items={{seg.nodes}} as |entry|>
+                                    {{#each seg.nodes key="index" as |entry|}}
                                       <li>
                                         <span class="panel__neighbor-index">{{entry.index}}.</span>
                                         <button
@@ -1071,24 +1068,21 @@ export default class InfoPanel extends Component {
                                           {{/if}}
                                           {{#if entry.node.rawFiles.length}}
                                             <span class="panel__neighbor-raw">
-                                              <IncrementalEach
-                                                @items={{entry.node.rawFiles}}
-                                                as |file index|
-                                              >
+                                              {{#each entry.node.rawFiles key="id" as |file index|}}
                                                 {{#if index}}<IconArrowRight
                                                   />{{else}}<IconArrowElbowDownRight />{{/if}}
                                                 {{file.label}}
-                                              </IncrementalEach>
+                                              {{/each}}
                                             </span>
                                           {{/if}}
                                         </button>
                                       </li>
-                                    </IncrementalEach>
+                                    {{/each}}
                                   </ol>
                                 {{/if}}
                               </li>
                             {{/if}}
-                          </IncrementalEach>
+                          {{/each}}
                         </ol>
                       {{/if}}
                     </li>
@@ -1119,9 +1113,9 @@ export default class InfoPanel extends Component {
                     </button>
                     {{#unless (isExpanded this.collapsedHeaders cycle.key)}}
                       <ol class="panel__neighbors panel__neighbors--ordered">
-                        <IncrementalEach @items={{cycle.segments}} as |seg|>
+                        {{#each cycle.segments key="key" as |seg|}}
                           {{#unless seg.cycleId}}
-                            <IncrementalEach @items={{seg.nodes}} as |entry|>
+                            {{#each seg.nodes key="index" as |entry|}}
                               <li>
                                 <span class="panel__neighbor-index">{{entry.index}}.</span>
                                 <button
@@ -1139,19 +1133,16 @@ export default class InfoPanel extends Component {
                                   {{/if}}
                                   {{#if entry.node.rawFiles.length}}
                                     <span class="panel__neighbor-raw">
-                                      <IncrementalEach
-                                        @items={{entry.node.rawFiles}}
-                                        as |file index|
-                                      >
+                                      {{#each entry.node.rawFiles key="id" as |file index|}}
                                         {{#if index}}<IconArrowRight
                                           />{{else}}<IconArrowElbowDownRight />{{/if}}
                                         {{file.label}}
-                                      </IncrementalEach>
+                                      {{/each}}
                                     </span>
                                   {{/if}}
                                 </button>
                               </li>
-                            </IncrementalEach>
+                            {{/each}}
                           {{/unless}}
                           {{#if seg.cycleId}}
                             <li>
@@ -1175,7 +1166,7 @@ export default class InfoPanel extends Component {
                                 <ol
                                   class="panel__neighbors panel__neighbors--ordered panel__neighbors--nested"
                                 >
-                                  <IncrementalEach @items={{seg.nodes}} as |entry|>
+                                  {{#each seg.nodes key="index" as |entry|}}
                                     <li>
                                       <span class="panel__neighbor-index">{{entry.index}}.</span>
                                       <button
@@ -1195,24 +1186,21 @@ export default class InfoPanel extends Component {
                                         {{/if}}
                                         {{#if entry.node.rawFiles.length}}
                                           <span class="panel__neighbor-raw">
-                                            <IncrementalEach
-                                              @items={{entry.node.rawFiles}}
-                                              as |file index|
-                                            >
+                                            {{#each entry.node.rawFiles key="id" as |file index|}}
                                               {{#if index}}<IconArrowRight
                                                 />{{else}}<IconArrowElbowDownRight />{{/if}}
                                               {{file.label}}
-                                            </IncrementalEach>
+                                            {{/each}}
                                           </span>
                                         {{/if}}
                                       </button>
                                     </li>
-                                  </IncrementalEach>
+                                  {{/each}}
                                 </ol>
                               {{/if}}
                             </li>
                           {{/if}}
-                        </IncrementalEach>
+                        {{/each}}
                       </ol>
                     {{/unless}}
                   </li>
