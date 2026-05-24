@@ -63,7 +63,7 @@ export default class ExampleLinks extends Component<Signature> {
   <template>
     <p class="examples" ...attributes>
       {{#if @prefix}}<span class="examples__prefix">{{@prefix}}</span>{{/if}}
-      <IncrementalEach @items={{this.examples}} as |ex i|>
+      <IncrementalEach @items={{this.examples}} @batchSize={{20}} as |ex i|>
         {{#if i}}<span class="examples__sep">·</span>{{/if}}
         <a
           href={{ex.url}}
