@@ -663,7 +663,7 @@ export default class Controls extends Component<Signature> {
           <div class="controls__section">
             <div class="controls__section-label">node types</div>
             <div class="controls__types">
-              <IncrementalEach @items={{this.nodeTypes}} as |t|>
+              <IncrementalEach @items={{this.nodeTypes}} @batchSize={{20}} as |t|>
                 <label class="controls__type">
                   <input
                     type="checkbox"
@@ -685,7 +685,7 @@ export default class Controls extends Component<Signature> {
             <div class="controls__filter-group">
               <div class="controls__filter-label">edge types</div>
               <div class="controls__types">
-                <IncrementalEach @items={{this.edgeTypes}} as |t|>
+                <IncrementalEach @items={{this.edgeTypes}} @batchSize={{20}} as |t|>
                   <label class="controls__type">
                     <input
                       type="checkbox"
@@ -716,7 +716,7 @@ export default class Controls extends Component<Signature> {
             </form>
             {{#if this.includeGlobs.length}}
               <ul class="controls__glob-list">
-                <IncrementalEach @items={{this.includeGlobs}} as |pattern|>
+                <IncrementalEach @items={{this.includeGlobs}} @batchSize={{20}} as |pattern|>
                   <li class="controls__glob">
                     <code class="controls__glob-pattern">{{pattern}}</code>
                     <button
@@ -747,7 +747,7 @@ export default class Controls extends Component<Signature> {
             </form>
             {{#if this.excludeGlobs.length}}
               <ul class="controls__glob-list">
-                <IncrementalEach @items={{this.excludeGlobs}} as |pattern|>
+                <IncrementalEach @items={{this.excludeGlobs}} @batchSize={{20}} as |pattern|>
                   <li class="controls__glob">
                     <code class="controls__glob-pattern">{{pattern}}</code>
                     <button
@@ -775,7 +775,7 @@ export default class Controls extends Component<Signature> {
               >show all</button>
             </summary>
             <ul class="controls__hidden-list">
-              <IncrementalEach @items={{this.hiddenNodes}} as |h|>
+              <IncrementalEach @items={{this.hiddenNodes}} @batchSize={{20}} as |h|>
                 <li class="controls__hidden">
                   <button
                     type="button"
@@ -804,7 +804,7 @@ export default class Controls extends Component<Signature> {
               >clear</button>
             </summary>
             <ul class="controls__hidden-list">
-              <IncrementalEach @items={{this.roots}} as |r|>
+              <IncrementalEach @items={{this.roots}} @batchSize={{20}} as |r|>
                 <li class="controls__hidden">
                   <button
                     type="button"

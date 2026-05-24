@@ -180,7 +180,7 @@ export default class Search extends Component {
       {{#if this.isOpen}}
         {{#if this.matches.length}}
           <ul class="search__results" role="listbox">
-            <IncrementalEach @items={{this.matches}} as |m|>
+            <IncrementalEach @items={{this.matches}} @batchSize={{20}} as |m|>
               <li
                 class="search__result {{if m.focused 'is-focused'}}"
                 role="option"

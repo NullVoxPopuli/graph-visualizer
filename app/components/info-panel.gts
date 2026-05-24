@@ -880,7 +880,7 @@ export default class InfoPanel extends Component {
             {{#if this.inNeighborCount}}
               {{#if this.inOpen}}
                 <ul class="panel__neighbors">
-                  <IncrementalEach @items={{this.inNeighbors}} as |entry|>
+                  <IncrementalEach @items={{this.inNeighbors}} @batchSize={{20}} as |entry|>
                     <li>
                       <button
                         type="button"
@@ -910,7 +910,7 @@ export default class InfoPanel extends Component {
             {{#if this.outNeighborCount}}
               {{#if this.outOpen}}
                 <ul class="panel__neighbors">
-                  <IncrementalEach @items={{this.outNeighbors}} as |entry|>
+                  <IncrementalEach @items={{this.outNeighbors}} @batchSize={{20}} as |entry|>
                     <li>
                       <button
                         type="button"
@@ -970,7 +970,7 @@ export default class InfoPanel extends Component {
               <div class="panel__top-cycles">
                 <div class="panel__top-cycles-label">most referenced</div>
                 <ol class="panel__cycles">
-                  <IncrementalEach @items={{this.topReferencedCycles}} as |ref|>
+                  <IncrementalEach @items={{this.topReferencedCycles}} @batchSize={{20}} as |ref|>
                     <li class="panel__cycle">
                       <button
                         type="button"
@@ -1092,7 +1092,7 @@ export default class InfoPanel extends Component {
             {{/if}}
             {{#if this.cycles.length}}
               <ol class="panel__cycles">
-                <IncrementalEach @items={{this.cycles}} as |cycle|>
+                <IncrementalEach @items={{this.cycles}} @batchSize={{20}} as |cycle|>
                   <li class="panel__cycle">
                     <button
                       type="button"
@@ -1214,7 +1214,7 @@ export default class InfoPanel extends Component {
           {{#if this.metaEntries.length}}
             <h3 class="panel__subhead">meta</h3>
             <dl class="panel__meta">
-              <IncrementalEach @items={{this.metaEntries}} as |entry|>
+              <IncrementalEach @items={{this.metaEntries}} @batchSize={{20}} as |entry|>
                 <dt>{{entry.key}}</dt><dd>{{entry.value}}</dd>
               </IncrementalEach>
             </dl>
