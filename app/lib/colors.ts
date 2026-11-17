@@ -6,6 +6,7 @@
 const GOLDEN = 137.508;
 
 let cache = new Float32Array(0);
+let bytes = new Uint32Array(0);
 let computed = new Uint8Array(0);
 
 function ensureCapacity(commId: number): void {
@@ -15,11 +16,14 @@ function ensureCapacity(commId: number): void {
 
   const grown = Math.max(need, computed.length * 2 || 64);
   const newCache = new Float32Array(grown * 3);
+  const newBytes = new Uint32Array(grown);
   const newComputed = new Uint8Array(grown);
 
   if (cache.length) newCache.set(cache);
+  if (bytes.length) newBytes.set(bytes);
   if (computed.length) newComputed.set(computed);
   cache = newCache;
+  bytes = newBytes;
   computed = newComputed;
 }
 
@@ -33,6 +37,7 @@ function compute(commId: number): void {
   cache[off] = r;
   cache[off + 1] = g;
   cache[off + 2] = b;
+  bytes[commId] = Math.round(r * 255) | (Math.round(g * 255) << 8) | (Math.round(b * 255) << 16);
   computed[commId] = 1;
 }
 
@@ -45,6 +50,24 @@ export function communityColorInto(commId: number, out: [number, number, number]
   out[0] = cache[off]!;
   out[1] = cache[off + 1]!;
   out[2] = cache[off + 2]!;
+}
+
+/**
+ * The community color as three bytes in one number: `r | g << 8 | b << 16`.
+ *
+ * Written through a `Uint32Array`, the bytes land in memory as r, g, b,
+ * and the top byte is free for an alpha.
+ */
+export function communityColorBytes(commId: number): number {
+  ensureCapacity(commId);
+  if (!computed[commId]) compute(commId);
+
+  return bytes[commId]!;
+}
+
+/** `rgb` from `communityColorBytes` with an alpha in 0..1 as the top byte. */
+export function withAlpha(rgb: number, alpha: number): number {
+  return (rgb | (Math.round(alpha * 255) << 24)) >>> 0;
 }
 
 export function communityColor(commId: number): [number, number, number] {

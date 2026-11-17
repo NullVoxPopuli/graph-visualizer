@@ -10,19 +10,20 @@
  */
 
 /**
- * Floats per item for each uploadable buffer kind. The proxy slices the
- * caller's scratch array to `count * STRIDE[kind]` before transferring;
- * `pack.ts` packs to exactly this layout; `renderer.ts`'s GL vertex
- * strides are these ×4 bytes (its `vertexAttribPointer` offsets are the
- * interleaved attribute layout *within* that stride). Single source so
- * all three can't disagree.
+ * 32-bit slots per item for each uploadable buffer kind. `pack.ts` packs
+ * to exactly this layout; `renderer.ts`'s GL vertex strides are these
+ * ×4 bytes (its `vertexAttribPointer` offsets are the interleaved
+ * attribute layout *within* that stride). Single source so all three
+ * can't disagree.
+ *
+ * A slot is a float, except `rgba`: four color bytes in one slot.
  */
 export const STRIDE = {
   nodes: 8, // (x,y,r, r,g,b,a, flags) per instance
-  lines: 6, // (x,y, r,g,b,a) per vertex
-  cycle: 6, // same layout as lines
-  hulls: 6, // same layout as lines
-  arrows: 9, // (sx,sy,tx,ty, r,g,b,a, srcRadius) per instance
+  lines: 3, // (x,y, rgba) per vertex
+  cycle: 3, // same layout as lines
+  hulls: 3, // same layout as lines
+  arrows: 6, // (sx,sy,tx,ty, srcRadius, rgba) per instance
 } as const;
 
 export type UploadKind = keyof typeof STRIDE;
@@ -37,7 +38,7 @@ export type RenderInMsg =
   | { t: "camera"; x: number; y: number; zoom: number }
   | { t: "edgeLod"; worldLen: number }
   | { t: "show"; hulls: boolean; arrows: boolean }
-  | { t: "selected"; v: boolean }
+  | { t: "highlight"; selected: number; hovered: number }
   | { t: "upload"; kind: UploadKind; buffer: ArrayBuffer; count: number }
   | { t: "dirty" }
   // Cadence pulse from the main thread's rAF (vsync-aligned — fires at

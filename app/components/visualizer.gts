@@ -8,8 +8,8 @@ import * as Comlink from "comlink";
 import { modifier } from "ember-modifier";
 import Flatbush from "flatbush";
 
-import { Camera } from "#lib/camera";
-import { communityColor } from "#lib/colors";
+import { Camera, renderDpr } from "#lib/camera";
+import { communityColorBytes, withAlpha } from "#lib/colors";
 import { buildContraction } from "#lib/contract";
 import { bundleAlreadyContractedCycles, bundleRawCyclesWithGroups } from "#lib/cycle";
 import { computeSceneBounds, planFocusAnimation } from "#lib/focus-plan";
@@ -52,16 +52,12 @@ export default class Visualizer extends Component {
   // matches the old in-process `Renderer` so `repack*` is unchanged.
   private renderer: RenderProxy | null = null;
   #renderWorker: Worker | null = null;
-  #workerSelected = false;
+  #canvas: HTMLCanvasElement | null = null;
   // Camera owns d3-zoom on the DOM canvas (main-thread input). Its
   // transform is pushed into the renderer via `setCamera` so the
   // renderer itself stays input-/DOM-free (worker-ready).
   private camera: Camera | null = null;
 
-  private nodeInstanceBuf: Float32Array = new Float32Array(0);
-  private edgeBuf: Float32Array = new Float32Array(0);
-  private arrowBuf: Float32Array = new Float32Array(0);
-  private cycleBuf: Float32Array = new Float32Array(0);
   /** Per-node 1/0 mask: 1 = node is on the highlighted cycle. */
   private cycleMask: Uint8Array | null = null;
   /**
@@ -71,22 +67,32 @@ export default class Visualizer extends Component {
    * `null` while nothing is selected.
    */
   private dimMask: Uint8Array | null = null;
-  private hullBuf: Float32Array = new Float32Array(0);
-  private hullVerts = 0;
 
   private picker: Flatbush | null = null;
   private pickerDirty = true;
 
   /**
-   * Effective hover state used by `repackNodes`. Resolved each frame from
-   * `canvasHoveredIdx` (mouse over the canvas) and `externalHoverId` on
-   * the visualizer service (info-panel row hover, etc.) — external wins
-   * when set so panel-row hover takes precedence over a stale canvas
-   * hover sitting underneath the panel.
+   * Effective hover state sent to the renderer.
+   *
+   * Resolved each frame from two sources:
+   *
+   * - `canvasHoveredIdx`: mouse over the canvas
+   * - `externalHoverId` on the visualizer service: info-panel row hover, etc.
+   *
+   * External wins when set, so panel-row hover takes precedence
+   * over a stale canvas hover sitting underneath the panel.
    */
   private hoveredIdx = -1;
   private canvasHoveredIdx = -1;
-  private lastExternalHoverId: string | null = null;
+  /** The selection that the renderer has. `null` forces a new send. */
+  #sentSelectedIdx: number | null = null;
+  /**
+   * Last pointer position over the canvas (client px).
+   * The hit test runs one time per frame, not per pointer event.
+   */
+  #pointerX = 0;
+  #pointerY = 0;
+  #pointerMoved = false;
   private dirty = true;
   private rafHandle: number | null = null;
   private resizeHandler = (): void => this.handleResize();
@@ -268,9 +274,10 @@ export default class Visualizer extends Component {
       type: "module",
     });
     const off = canvas.transferControlToOffscreen();
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = renderDpr();
 
     this.#renderWorker = worker;
+    this.#canvas = canvas;
     this.renderer = new RenderProxy(worker);
     this.renderer.init(off, window.innerWidth, window.innerHeight, dpr);
     // Camera stays on the main thread (d3-zoom needs the DOM canvas);
@@ -638,36 +645,24 @@ export default class Visualizer extends Component {
 
       // Total edge segments across every highlighted cycle. Each cycle of
       // length L contributes L edges (L-1 in-order + 1 closing), and each
-      // edge is 2 vertices × 6 floats.
+      // edge is 2 vertices × (x, y, rgba).
       let totalEdges = 0;
 
       for (const cycle of cycles) totalEdges += cycle.length;
 
-      const need = totalEdges * 12;
-
-      if (this.cycleBuf.length < need) this.cycleBuf = new Float32Array(need);
-
-      const buf = this.cycleBuf;
+      const buf = new Float32Array(totalEdges * 6);
+      const bytes = new Uint32Array(buf.buffer);
       // Bright red so it pops over the dim community-colored edges.
-      const R = 1.0;
-      const G = 0.25;
-      const B = 0.3;
-      const A = 0.95;
+      const red = withAlpha(255 | (64 << 8) | (77 << 16), 0.95);
       let k = 0;
 
       const emit = (a: number, b: number): void => {
         buf[k++] = scene.positions[2 * a]!;
         buf[k++] = scene.positions[2 * a + 1]!;
-        buf[k++] = R;
-        buf[k++] = G;
-        buf[k++] = B;
-        buf[k++] = A;
+        bytes[k++] = red;
         buf[k++] = scene.positions[2 * b]!;
         buf[k++] = scene.positions[2 * b + 1]!;
-        buf[k++] = R;
-        buf[k++] = G;
-        buf[k++] = B;
-        buf[k++] = A;
+        bytes[k++] = red;
       };
 
       // Dedupe edges across cycles — overlapping segments are drawn once
@@ -767,18 +762,17 @@ export default class Visualizer extends Component {
 
   private repackNodes(scene: ProcessedScene): void {
     if (!this.renderer) return;
-    this.nodeInstanceBuf = packNodes(
+
+    const data = packNodes(
       scene.positions,
       this.effectiveRadii ?? scene.radii,
       scene.communities,
-      this.selectedIdx,
-      this.hoveredIdx,
       this.dimMask,
       this.effectiveHideMask(scene.communities.length),
       this.cycleMask,
-      this.nodeInstanceBuf,
     );
-    this.renderer.uploadNodeInstances(this.nodeInstanceBuf, scene.communities.length);
+
+    this.renderer.uploadNodeInstances(data, scene.communities.length);
   }
 
   /**
@@ -867,10 +861,7 @@ export default class Visualizer extends Component {
       void this.#packEngine.packEdges(hidden, restrict).then((res) => {
         if (seq !== this.#packEdgeSeq || !this.renderer) return;
 
-        const f = new Float32Array(res.buffer);
-
-        this.edgeBuf = f;
-        this.renderer.uploadLines(f, res.vertexCount);
+        this.renderer.uploadLines(new Float32Array(res.buffer), res.vertexCount);
         this.dirty = true;
       });
 
@@ -881,7 +872,6 @@ export default class Visualizer extends Component {
       scene.graph.edgesFlat,
       scene.positions,
       scene.communities,
-      this.edgeBuf,
       scene.graph.edgeTypeIds,
       this.viewState.hiddenEdgeTypes,
       effRemap,
@@ -889,8 +879,7 @@ export default class Visualizer extends Component {
       restrict >= 0 && effRemap === null ? this.incidentEdges(scene, restrict) : null,
     );
 
-    this.edgeBuf = buffer;
-    this.renderer.uploadLines(this.edgeBuf, vertexCount);
+    this.renderer.uploadLines(buffer, vertexCount);
   }
 
   private repackArrows(scene: ProcessedScene): void {
@@ -924,10 +913,7 @@ export default class Visualizer extends Component {
       void this.#packEngine.packArrows(hidden, restrict).then((res) => {
         if (seq !== this.#packArrowSeq || !this.renderer) return;
 
-        const f = new Float32Array(res.buffer);
-
-        this.arrowBuf = f;
-        this.renderer.uploadArrows(f, res.count);
+        this.renderer.uploadArrows(new Float32Array(res.buffer), res.count);
         this.dirty = true;
       });
 
@@ -939,7 +925,6 @@ export default class Visualizer extends Component {
       scene.positions,
       this.effectiveRadii ?? scene.radii,
       scene.communities,
-      this.arrowBuf,
       scene.graph.edgeTypeIds,
       this.viewState.hiddenEdgeTypes,
       effRemap,
@@ -947,8 +932,7 @@ export default class Visualizer extends Component {
       restrict >= 0 && effRemap === null ? this.incidentEdges(scene, restrict) : null,
     );
 
-    this.arrowBuf = buffer;
-    this.renderer.uploadArrows(this.arrowBuf, count);
+    this.renderer.uploadArrows(buffer, count);
   }
 
   private repackHulls(scene: ProcessedScene): void {
@@ -980,18 +964,15 @@ export default class Visualizer extends Component {
 
       if (tris.length === 0) continue;
 
-      const [r, g, b] = communityColor(c);
-      const a = 0.06;
+      const color = withAlpha(communityColorBytes(c), 0.06);
       const verts = tris.length / 2;
-      const out = new Float32Array(verts * 6);
+      const out = new Float32Array(verts * 3);
+      const bytes = new Uint32Array(out.buffer);
 
       for (let i = 0; i < verts; i++) {
-        out[i * 6] = tris[i * 2]!;
-        out[i * 6 + 1] = tris[i * 2 + 1]!;
-        out[i * 6 + 2] = r;
-        out[i * 6 + 3] = g;
-        out[i * 6 + 4] = b;
-        out[i * 6 + 5] = a;
+        out[i * 3] = tris[i * 2]!;
+        out[i * 3 + 1] = tris[i * 2 + 1]!;
+        bytes[i * 3 + 2] = color;
       }
 
       chunks.push(out);
@@ -999,16 +980,14 @@ export default class Visualizer extends Component {
     }
 
     let offset = 0;
-    const combined = new Float32Array(total * 6);
+    const combined = new Float32Array(total * 3);
 
     for (const c of chunks) {
       combined.set(c, offset);
       offset += c.length;
     }
 
-    this.hullBuf = combined;
-    this.hullVerts = total;
-    this.renderer.uploadHulls(this.hullBuf, this.hullVerts);
+    this.renderer.uploadHulls(combined, total);
   }
 
   private fitInitialView(scene: ProcessedScene): void {
@@ -1068,7 +1047,7 @@ export default class Visualizer extends Component {
     if (this.pickerDirty) this.rebuildPicker(scene);
     if (!this.picker) return -1;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = renderDpr();
     const [wx, wy] = this.camera.screenToWorld(sx * dpr, sy * dpr);
     // Hit radius in world coords corresponds to the rendered screen-px floor
     // (max(4, r*zoom)). At low zoom, the world-space hit area grows so tiny
@@ -1110,38 +1089,39 @@ export default class Visualizer extends Component {
   }
 
   onPointerMove = (ev: PointerEvent): void => {
-    const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-    const sx = ev.clientX - rect.left;
-    const sy = ev.clientY - rect.top;
-    const idx = this.pickAt(sx, sy);
-
-    if (idx !== this.canvasHoveredIdx) {
-      this.canvasHoveredIdx = idx;
-      // Don't repack here; let `maybeReactToHover` in the rAF loop
-      // merge canvas + external hover sources and decide.
-      this.dirty = true;
-    }
+    this.#pointerX = ev.clientX;
+    this.#pointerY = ev.clientY;
+    this.#pointerMoved = true;
   };
 
   /**
    * Per-frame: combine canvas hover and external (panel) hover into the
-   * single `hoveredIdx` the renderer uses, repacking nodes if it changed.
+   * single `hoveredIdx`, and send it with the selection to the renderer
+   * if one of them changed.
    */
-  private maybeReactToHover(scene: ProcessedScene): void {
+  private syncHighlight(scene: ProcessedScene): void {
+    if (this.#pointerMoved && this.#canvas) {
+      const rect = this.#canvas.getBoundingClientRect();
+
+      this.#pointerMoved = false;
+      this.canvasHoveredIdx = this.pickAt(this.#pointerX - rect.left, this.#pointerY - rect.top);
+    }
+
     const externalId = this.visualizer.externalHoverId;
-    let resolved = this.canvasHoveredIdx;
+    let hovered = this.canvasHoveredIdx;
 
     if (externalId !== null) {
       const idx = scene.graph.idToIndex.get(externalId);
 
-      if (idx !== undefined) resolved = idx;
+      if (idx !== undefined) hovered = idx;
     }
 
-    if (resolved === this.hoveredIdx && externalId === this.lastExternalHoverId) return;
-    this.hoveredIdx = resolved;
-    this.lastExternalHoverId = externalId;
-    this.repackNodes(scene);
-    this.dirty = true;
+    const selected = this.selectedIdx;
+
+    if (hovered === this.hoveredIdx && selected === this.#sentSelectedIdx) return;
+    this.hoveredIdx = hovered;
+    this.#sentSelectedIdx = selected;
+    this.renderer?.setHighlight(selected, hovered);
   }
 
   onPointerDown = (ev: PointerEvent): void => {
@@ -1196,7 +1176,7 @@ export default class Visualizer extends Component {
   private handleResize(): void {
     if (!this.renderer) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = renderDpr();
 
     this.renderer.resize(window.innerWidth, window.innerHeight, dpr);
     // Renderer no longer owns the camera, so resize it here and push the
@@ -1251,24 +1231,15 @@ export default class Visualizer extends Component {
       this.repackEdges(scene);
       this.repackArrows(scene);
       if (this.viewState.showHulls) this.repackHulls(scene);
+      this.#sentSelectedIdx = null;
       this.fitInitialView(scene);
       this.dirty = true;
     }
 
     if (scene) {
       this.reactToScene(scene);
-      this.maybeReactToHover(scene);
+      this.syncHighlight(scene);
       this.maybeHandleFocus(scene);
-
-      // The render worker owns the draw loop and animates the selection
-      // halo itself (off `performance.now()`); just tell it whether a
-      // node is selected so it keeps drawing every frame for the halo.
-      const selNow = this.viewState.selectedId !== null;
-
-      if (selNow !== this.#workerSelected) {
-        this.#workerSelected = selNow;
-        this.renderer?.setSelected(selNow);
-      }
 
       if (this.dirty && this.renderer) {
         this.renderer.markDirty();
@@ -1329,6 +1300,7 @@ export default class Visualizer extends Component {
     this.camera?.destroy();
     this.camera = null;
     this.renderer = null;
+    this.#canvas = null;
     this.#renderWorker?.terminate();
     this.#renderWorker = null;
   }

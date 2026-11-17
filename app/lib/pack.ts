@@ -1,4 +1,5 @@
-import { communityColorInto } from "./colors.ts";
+import { communityColorBytes, communityColorInto, withAlpha } from "./colors.ts";
+import { STRIDE } from "./render-protocol.ts";
 
 /**
  * Pack a node-instance Float32Array (8 floats / 32 bytes per node) directly
@@ -7,37 +8,29 @@ import { communityColorInto } from "./colors.ts";
  *
  * `flags` is a small bitmask consumed by the vertex/fragment shader so
  * states compose freely:
- *   bit 0 (1) = selected     → animated dashed halo
- *   bit 1 (2) = hovered      → body grows
  *   bit 2 (4) = cycle member → red outline
  *   bit 3 (8) = dimmed       → vertex shader fades alpha further at low zoom
- * (selected and hovered are still mutually exclusive at pack time —
- * selection wins — but selected + cycle and/or dimmed can compose freely.)
+ *
+ * Selection and hover are not node data. The renderer draws them as
+ * overlays, see `Renderer.setHighlight`.
  *
  * `dimMask` is encoded as a flag rather than a baked alpha so the shader
  * can scale the dim with the current zoom level (overlapping nodes hide
  * dimming when zoomed all the way out, so we drop the alpha further when
  * the camera is zoomed out).
  *
- * Reuses `out` if it's large enough; otherwise allocates a new one. Returns
- * the (possibly reallocated) buffer.
+ * Returns a new buffer each time, because the upload transfers it.
  */
 export function packNodes(
   positions: Float32Array,
   radii: Float32Array,
   communities: Int32Array,
-  selected: number,
-  hovered: number,
   dimMask: Uint8Array | null,
   hideMask: Uint8Array | null,
   cycleMask: Uint8Array | null,
-  out: Float32Array,
 ): Float32Array {
   const N = communities.length;
-  const need = N * 8;
-
-  if (out.length < need) out = new Float32Array(need);
-
+  const out = new Float32Array(N * STRIDE.nodes);
   const color: [number, number, number] = [0, 0, 0];
 
   for (let i = 0; i < N; i++) {
@@ -61,8 +54,6 @@ export function packNodes(
 
     let flags = 0;
 
-    if (i === selected) flags |= 1;
-    else if (i === hovered) flags |= 2;
     if (cycleMask !== null && cycleMask[i] === 1) flags |= 4;
     if (dimMask !== null && dimMask[i] === 1) flags |= 8;
     out[base + 7] = flags;
@@ -72,8 +63,9 @@ export function packNodes(
 }
 
 /**
- * Pack edge line vertices (6 floats per vertex, 2 vertices per edge):
- *   (x, y, r, g, b, a)
+ * Pack edge line vertices (3 slots per vertex, 2 vertices per edge):
+ *   (x, y, rgba)
+ * `rgba` is four color bytes in one slot.
  * Per-edge alpha is community-cross-aware: edges crossing community
  * boundaries render slightly brighter (they're the topologically interesting
  * ones).
@@ -91,12 +83,14 @@ export function packNodes(
  * Surviving edges are deduped by `(from, to)` so a swarm of file→file
  * imports between two packages collapses to a single package→package
  * line.
+ *
+ * Returns a new buffer each time, because the upload transfers it.
+ * The buffer can be longer than `vertexCount` vertices.
  */
 export function packEdges(
   edgesFlat: Int32Array,
   positions: Float32Array,
   communities: Int32Array,
-  out: Float32Array,
   edgeTypeIds: Int32Array | null = null,
   hiddenTypes: Set<number> | null = null,
   nodeRemap: Int32Array | null = null,
@@ -112,15 +106,13 @@ export function packEdges(
   const E = edgesFlat.length / 2;
   const useList = restrictEdges !== null && nodeRemap === null;
   const iterN = useList ? restrictEdges.length : E;
-  const need = iterN * 12;
-
-  if (out.length < need) out = new Float32Array(need);
+  const out = new Float32Array(iterN * 2 * STRIDE.lines);
+  const bytes = new Uint32Array(out.buffer);
 
   const filter = edgeTypeIds !== null && hiddenTypes !== null && hiddenTypes.size > 0;
   const restrict = restrictToNode >= 0;
   const N = communities.length;
   const seen = nodeRemap === null ? null : new Set<number>();
-  const color: [number, number, number] = [0, 0, 0];
   let k = 0;
   let drawn = 0;
 
@@ -150,23 +142,14 @@ export function packEdges(
     const cb = communities[b]!;
     const cross = ca !== cb;
 
-    communityColorInto(ca, color);
-
     const alpha = cross ? 0.22 : 0.12;
 
     out[k++] = positions[2 * a]!;
     out[k++] = positions[2 * a + 1]!;
-    out[k++] = color[0];
-    out[k++] = color[1];
-    out[k++] = color[2];
-    out[k++] = alpha;
-    communityColorInto(cb, color);
+    bytes[k++] = withAlpha(communityColorBytes(ca), alpha);
     out[k++] = positions[2 * b]!;
     out[k++] = positions[2 * b + 1]!;
-    out[k++] = color[0];
-    out[k++] = color[1];
-    out[k++] = color[2];
-    out[k++] = alpha;
+    bytes[k++] = withAlpha(communityColorBytes(cb), alpha);
     drawn++;
   }
 
@@ -176,21 +159,24 @@ export function packEdges(
 /**
  * Pack per-arrow instance data for the directional arrowhead pass.
  *
- * Layout per instance (9 floats / 36 bytes):
- *   (srcX, srcY, tgtX, tgtY, r, g, b, a, srcRadiusWorld)
+ * Layout per instance (6 slots / 24 bytes):
+ *   (srcX, srcY, tgtX, tgtY, srcRadiusWorld, rgba)
+ * `rgba` is four color bytes in one slot.
  *
  * The arrowhead sits at the source end (`edgesFlat[2k]`) — that's the node
  * that listed the edge in its outgoing list, i.e. the importer. Skip
  * filters mirror `packEdges` so arrowheads track the visible edges
  * exactly. With `nodeRemap`, both endpoints route through the contracted
  * graph and duplicates collapse — one arrow per visible (from, to) pair.
+ *
+ * Returns a new buffer each time, because the upload transfers it.
+ * The buffer can be longer than `count` instances.
  */
 export function packArrows(
   edgesFlat: Int32Array,
   positions: Float32Array,
   radii: Float32Array,
   communities: Int32Array,
-  out: Float32Array,
   edgeTypeIds: Int32Array | null = null,
   hiddenTypes: Set<number> | null = null,
   nodeRemap: Int32Array | null = null,
@@ -201,15 +187,13 @@ export function packArrows(
   const E = edgesFlat.length / 2;
   const useList = restrictEdges !== null && nodeRemap === null;
   const iterN = useList ? restrictEdges.length : E;
-  const need = iterN * 9;
-
-  if (out.length < need) out = new Float32Array(need);
+  const out = new Float32Array(iterN * STRIDE.arrows);
+  const bytes = new Uint32Array(out.buffer);
 
   const filter = edgeTypeIds !== null && hiddenTypes !== null && hiddenTypes.size > 0;
   const restrict = restrictToNode >= 0;
   const N = communities.length;
   const seen = nodeRemap === null ? null : new Set<number>();
-  const color: [number, number, number] = [0, 0, 0];
   let count = 0;
 
   for (let t = 0; t < iterN; t++) {
@@ -238,22 +222,17 @@ export function packArrows(
     const cb = communities[b]!;
     const cross = ca !== cb;
 
-    communityColorInto(ca, color);
-
     // Arrowheads are roughly 3× the line's alpha so direction reads even
     // when the lines themselves are dim. Cross-community arrows pop more.
     const alpha = cross ? 0.7 : 0.55;
-    const base = count * 9;
+    const base = count * STRIDE.arrows;
 
     out[base] = positions[2 * a]!;
     out[base + 1] = positions[2 * a + 1]!;
     out[base + 2] = positions[2 * b]!;
     out[base + 3] = positions[2 * b + 1]!;
-    out[base + 4] = color[0];
-    out[base + 5] = color[1];
-    out[base + 6] = color[2];
-    out[base + 7] = alpha;
-    out[base + 8] = radii[a]!;
+    out[base + 4] = radii[a]!;
+    bytes[base + 5] = withAlpha(communityColorBytes(ca), alpha);
     count++;
   }
 

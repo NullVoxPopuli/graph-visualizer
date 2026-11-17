@@ -27,10 +27,6 @@ interface Scene {
 }
 
 let scene: Scene | null = null;
-// Match `packEdges`/`packArrows`'s return (the buffer may be reallocated
-// internally, so its generic is the looser `ArrayBufferLike`).
-let edgeBuf: Float32Array<ArrayBufferLike> = new Float32Array(0);
-let arrowBuf: Float32Array<ArrayBufferLike> = new Float32Array(0);
 
 function buildIncidence(
   edgesFlat: Int32Array,
@@ -101,7 +97,6 @@ const engine = {
       scene.edgesFlat,
       scene.positions,
       scene.communities,
-      edgeBuf,
       scene.edgeTypeIds,
       hidden,
       null,
@@ -109,13 +104,10 @@ const engine = {
       restrictEdges,
     );
 
-    edgeBuf = buffer;
+    // Hand the vertex data to the main thread zero-copy.
+    const raw = buffer.buffer as ArrayBuffer;
 
-    // Hand the vertex data to the main thread zero-copy; keep our own
-    // scratch buffer for the next pack.
-    const copy = buffer.slice(0, Math.max(0, vertexCount) * 6);
-
-    return Comlink.transfer({ buffer: copy.buffer, vertexCount }, [copy.buffer]);
+    return Comlink.transfer({ buffer: raw, vertexCount }, [raw]);
   },
 
   packArrows(
@@ -134,7 +126,6 @@ const engine = {
       scene.positions,
       scene.radii,
       scene.communities,
-      arrowBuf,
       scene.edgeTypeIds,
       hidden,
       null,
@@ -142,11 +133,9 @@ const engine = {
       restrictEdges,
     );
 
-    arrowBuf = buffer;
+    const raw = buffer.buffer as ArrayBuffer;
 
-    const copy = buffer.slice(0, Math.max(0, count) * 9);
-
-    return Comlink.transfer({ buffer: copy.buffer, count }, [copy.buffer]);
+    return Comlink.transfer({ buffer: raw, count }, [raw]);
   },
 };
 
