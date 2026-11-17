@@ -17,20 +17,18 @@ import type { RenderInMsg, RenderOutMsg, UploadKind } from "#lib/render-protocol
 
 let renderer: Renderer | null = null;
 let dirty = true;
-// Keep redrawing while a node is selected — the halo animates off
-// `performance.now()` in the node shader and would otherwise freeze.
-let selected = false;
 
 // Draw at most once per main-thread rAF tick, and only when something
-// changed (or a node is selected, for the animated halo). Each real
-// draw posts a `frame` back so the main thread can show the true
-// rendered-frames-per-second.
+// changed, or while a node is selected. The selection halo animates off
+// `performance.now()` in the node shader and would otherwise freeze.
+// Each real draw posts a `frame` back so the main thread can
+// show the true rendered-frames-per-second.
 function onTick(): void {
   if (!renderer) return;
 
-  if (dirty || selected) {
+  if (dirty || renderer.animating) {
     renderer.draw();
-    if (!selected) dirty = false;
+    dirty = false;
 
     const frame: RenderOutMsg = { t: "frame" };
 
@@ -100,8 +98,8 @@ self.onmessage = (e: MessageEvent<RenderInMsg>): void => {
       dirty = true;
 
       break;
-    case "selected":
-      selected = m.v;
+    case "highlight":
+      renderer?.setHighlight(m.selected, m.hovered);
       dirty = true;
 
       break;

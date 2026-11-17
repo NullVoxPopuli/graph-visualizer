@@ -20,6 +20,16 @@ import {
   type ZoomTransform,
 } from "d3-zoom";
 
+/**
+ * Device px per CSS px of the drawing buffer.
+ *
+ * Capped, because the fill cost grows with the pixel count and a higher
+ * density adds little to lines and dots.
+ */
+export function renderDpr(): number {
+  return Math.min(window.devicePixelRatio || 1, 2);
+}
+
 export class Camera {
   x = 0;
   y = 0;
@@ -240,7 +250,7 @@ export class Camera {
   }
 
   private dpr(): number {
-    return window.devicePixelRatio || 1;
+    return renderDpr();
   }
 
   private currentTransform(): ZoomTransform {

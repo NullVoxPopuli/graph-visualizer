@@ -5,12 +5,10 @@
  * loop). Keeping the method shape identical means the component's
  * `repack*` code calls `this.renderer.uploadLines(...)` etc. unchanged.
  *
- * Vertex buffers are sliced to the used length and transferred (zero-
- * copy) — the slice is a fresh buffer, so the caller's scratch array is
- * never detached.
+ * An upload transfers the buffer to the worker (zero-copy).
+ * The caller's array is detached after the call, so pack into a new
+ * array for each upload.
  */
-import { STRIDE } from "#lib/render-protocol";
-
 import type { RenderInMsg, RenderOutMsg, UploadKind } from "#lib/render-protocol";
 
 export class RenderProxy {
@@ -49,10 +47,11 @@ export class RenderProxy {
   }
 
   #upload(kind: UploadKind, data: Float32Array, count: number): void {
-    const used = Math.max(0, count) * STRIDE[kind];
-    const slice = data.subarray(0, used).slice(); // fresh, transferable
+    /** The worker reads from the start of the buffer. */
+    const whole = data.byteOffset === 0 ? data : data.slice();
+    const buffer = whole.buffer as ArrayBuffer;
 
-    this.#post({ t: "upload", kind, buffer: slice.buffer, count }, [slice.buffer]);
+    this.#post({ t: "upload", kind, buffer, count }, [buffer]);
   }
 
   uploadNodeInstances(data: Float32Array, count: number): void {
@@ -97,8 +96,11 @@ export class RenderProxy {
     this.#post({ t: "dirty" });
   }
 
-  /** Keep the worker animating the selection halo (or not). */
-  setSelected(v: boolean): void {
-    this.#post({ t: "selected", v });
+  /**
+   * Node indices of the selected node and the hovered node, or -1.
+   * The worker animates the selection halo while a node is selected.
+   */
+  setHighlight(selected: number, hovered: number): void {
+    this.#post({ t: "highlight", selected, hovered });
   }
 }
